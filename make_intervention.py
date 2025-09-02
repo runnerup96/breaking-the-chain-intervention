@@ -1,8 +1,8 @@
 
 import argparse
 import llm_model
-from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
-from datasets_for_intervention import ricechem_intervention, ricechem_dataset
+# from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
+from datasets_for_intervention import ricechem_intervention, ricechem_dataset, entailment_intervention, entailment_dataset
 import os
 from tqdm import tqdm
 from datetime import datetime
@@ -30,15 +30,21 @@ if __name__ == "__main__":
 
     dataset = None
     if args.evaluation_dataset == "amazon_reviews":
-        dataset_path = os.path.join(project_path, "statics/result_splits/test_balanced.json")
-        dataset = wilds_reviews_dataset.WildsReviewsDataset(dataset_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = wilds_reviews_intervention.WildsReviewsIntervention(llm_model.stop_token)
+        raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset")
+        # dataset_path = os.path.join(project_path, "statics/result_splits/test_balanced.json")
+        # dataset = wilds_reviews_dataset.WildsReviewsDataset(dataset_path)
+        # dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
+        # intervention_logic = wilds_reviews_intervention.WildsReviewsIntervention(llm_model.stop_token)
     elif args.evaluation_dataset == "ricechem":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model.stop_token)
+    elif args.evaluation_dataset == "entailment":
+        dataset_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/dev.jsonl")
+        dataset = entailment_dataset.EntailmentDataset(dataset_path)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
+        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model.stop_token)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [amazon_reviews, ricechem]")
@@ -55,7 +61,6 @@ if __name__ == "__main__":
         # DO_X -- if we have ground truth, we wont need to fill it by the model
         # TODO: Add a possiblity to run ground truth generation
         batched_model_outputs = llm_model.generate(prompted_batch, max_new_tokens=1024,
-                                                   include_origin_prompt=True,
                                                    include_chat_template=True,
                                                    skip_special_tokens=False)
         for idx, (sample_idx, model_output) in enumerate(zip(batch_idx_list, batched_model_outputs)):
@@ -70,7 +75,6 @@ if __name__ == "__main__":
                     # reconstruct the prompt & prepare for completion
                     prompt_list = intervention_logic.reconstruct_interventions_to_prompt(model_output, intervened_batch_for_completion)
                     intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
-                                                                       include_origin_prompt=False,
                                                                        include_chat_template=False,
                                                                        skip_special_tokens=True)
                     # keep the original as 0
