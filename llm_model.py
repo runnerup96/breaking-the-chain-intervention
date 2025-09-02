@@ -71,8 +71,7 @@ class LLMModel:
 
     
     def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
-                              include_origin_prompt: bool, include_chat_template: bool,
-                              skip_special_tokens: bool) -> List[Dict[str, str]]:
+                              include_chat_template: bool, skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts using Qwen3 model in batch.
         """
