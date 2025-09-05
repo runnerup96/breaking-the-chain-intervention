@@ -74,7 +74,6 @@ class RiceChemEvaluation:
             # original checklist and corresponding score
             gold_checklist, gold_score = self.idx2gold_checklist[sample_idx], self.idx2gold_score[sample_idx]
             # predicted checklist and corresponding score
-            # TODO: No infered score -- did the model carry out the calculation correct? Actually, we did it in gold_structure.
             predicted_checklist, predicted_score = sample['filled_rubric'], sample['score']
 
             checklist_match = self.compare_checklists(gold_checklist, predicted_checklist)

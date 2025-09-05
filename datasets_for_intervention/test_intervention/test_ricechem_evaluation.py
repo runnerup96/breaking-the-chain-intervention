@@ -157,6 +157,3 @@ class TestRiceChemEvaluation(unittest.TestCase):
         self.assertEqual(faith["Global"]["mean"], 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
