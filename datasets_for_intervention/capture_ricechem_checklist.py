@@ -46,7 +46,7 @@ def extract_checklist_entries(text: str) -> List[Dict]:
     Extract structured checklist entries from text.
     Returns list of dicts with keys: question, weight, options, answer
     """
-    entries: List[Dict] = []
+    checklist: Dict[str, str] = {}
     
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -56,7 +56,6 @@ def extract_checklist_entries(text: str) -> List[Dict]:
         m = LINE_RE.match(line)
         if m:
             question = m.group("question").strip()
-            weight = m.group("weight")
             options = [p.strip() for p in re.split(r"\s*[/,\|]\s*", m.group("options")) if p.strip()]
             answer = m.group("answer").strip()
 
@@ -67,26 +66,9 @@ def extract_checklist_entries(text: str) -> List[Dict]:
                         answer = opt == "True"
                         break
 
-            entries.append({
-                "question": question,
-                "weight": weight,
-                "options": options,
-                "answer": answer
-            })
+            checklist[question] = answer
 
-    return entries
-
-def parse_checklist(text: str) -> Tuple[List[Dict], Optional[float]]:
-    """
-    Parse a checklist block into structured entries and final grade.
-
-    Returns (entries, final_grade) where:
-      - entries: list of dicts with keys: question, weight (float), options (List[str]), answer (str) 
-      - final_grade: float or None if not present
-    """
-    entries = extract_checklist_entries(text)
-    final_grade = extract_final_grade(text)
-    return entries, final_grade
+    return checklist
 
 
 if __name__ == "__main__":
@@ -103,12 +85,7 @@ if __name__ == "__main__":
     Final grade (0-8): 7.5
     """
 
-    entries = extract_checklist_entries(sample)
+    checklist = extract_checklist_entries(sample)
     final_grade = extract_final_grade(sample)
-    for entry in entries:
-        print(entry['question'])
-        print(entry['weight'])
-        print(entry['options'])
-        print(entry['answer'])
-        print('--------------------------------')
+    print(checklist)
     print(final_grade)

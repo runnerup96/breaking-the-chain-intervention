@@ -2,12 +2,13 @@
 import argparse
 import llm_model
 from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
-from datasets_for_intervention import ricechem_intervention, ricechem_dataset
+from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 import os
 from tqdm import tqdm
 from datetime import datetime
 import json
 from torch.utils.data import DataLoader
+from copy import deepcopy
 
 
 model_name2simple_model_name = {
@@ -34,11 +35,13 @@ if __name__ == "__main__":
         dataset = wilds_reviews_dataset.WildsReviewsDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = wilds_reviews_intervention.WildsReviewsIntervention(llm_model.stop_token)
+        evaluator = None
     elif args.evaluation_dataset == "ricechem":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model.stop_token)
+        intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model.tokenizer)
+        evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [amazon_reviews, ricechem]")
@@ -48,48 +51,34 @@ if __name__ == "__main__":
     if args.try_one_batch:
         dataloader = [next(iter(dataloader))]
 
-    intervention_dict = {"interventions": dict(), "fails": []}
+    processed_samples_list = []
     for batch in tqdm(dataloader, desc="Running inference", total=len(dataloader)):
-        batch_idx_list = [sample["idx"] for sample in batch]
-        prompted_batch = [intervention_logic.make_prompt(sample) for sample in batch]
+        
+        # batch_idx_list = [sample["idx"] for sample in batch]
+        prompted_batch_with_structure_prediction = [intervention_logic.make_prompt(sample, include_gold_structure=False) for sample in batch]
+        promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
+        all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
+        completion_type_list = ["structure_prediction"] * len(prompted_batch_with_structure_prediction) + ["gold_structure"] * len(promted_batch_with_gold_structure)
         # DO_X -- if we have ground truth, we wont need to fill it by the model
-        # TODO: Add a possiblity to run ground truth generation
-        batched_model_outputs = llm_model.generate(prompted_batch, max_new_tokens=1024,
-                                                   include_origin_prompt=True,
-                                                   include_chat_template=True,
+        batched_model_outputs = llm_model.generate(all_batch, max_new_tokens=1024,# X2 from batch
                                                    skip_special_tokens=False)
-        for idx, (sample_idx, model_output) in enumerate(zip(batch_idx_list, batched_model_outputs)):
+        # here we have just generation, we do the intervention independent from the gold/predicted structure
+        doubled_batch = batch + [deepcopy(s) for s in batch]
+        for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
+            sample['completion_type'] = completion_type
             # Mediator(DO_X)
-            intervened_batch_for_completion = intervention_logic.make_intervention(model_output)
-            # i may have multiple interventions per one sample -- so i check all of them for correctness
-            if intervened_batch_for_completion:
-                # we do that validation only on the completion
-                # TODO: check on size of the intervention
-                intervention_check = intervention_logic.validate_all_interventions(model_output, intervened_batch_for_completion)
-                if intervention_check:
-                    # reconstruct the prompt & prepare for completion
-                    prompt_list = intervention_logic.reconstruct_interventions_to_prompt(model_output, intervened_batch_for_completion)
-                    intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
-                                                                       include_origin_prompt=False,
-                                                                       include_chat_template=False,
-                                                                       skip_special_tokens=True)
-                    # keep the original as 0
-                    do_prediction = intervention_logic.extract_target_from_prompt(model_output)
-                    mediator_prediction = [intervention_logic.infer_completion(output) for output in intervened_completion_outputs]
-                    # additionaly check that we get clean results
-                    if do_prediction is not None or None not in mediator_prediction:
-                        # TODO: Collect all dataset specific generations here and save to separate field for fast eval
-                        intervention_dict["interventions"][sample_idx] = {"predictions": [do_prediction] + mediator_prediction,# what we have extracted
-                                                                                 "original_generation": model_output,
-                                                                                 "intervened_generations": intervened_completion_outputs}# what we need for analysis
-                    else:
-                        intervention_dict['fails'].append(sample_idx)
-                        continue
-                else:
-                    intervention_dict['fails'].append(sample_idx)#just add index of failed sample for intervention
-            else:
-                intervention_dict['fails'].append(sample_idx)  # just add index of failed sample for intervention
+            sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
+            prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
+            intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
+                                                            skip_special_tokens=True)
+            # parse completions to final structure
+            final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)
+            processed_samples_list.append(final_sample)
 
+    evaluation_metrics = evaluator.evaluate(processed_samples_list)
+
+    final_dataset_dict = {"metrics": evaluation_metrics, "result": processed_samples_list}
+    
     dataset_name = args.evaluation_dataset
     path2save = os.path.join(project_path, "intervention_analysis", "intervention_predictions", dataset_name)
     os.makedirs(path2save, exist_ok=True)
@@ -101,8 +90,63 @@ if __name__ == "__main__":
     path2save = os.path.join(path2save, file_name)
 
     with open(path2save, "w") as f:
-        json.dump(intervention_dict, f, ensure_ascii=False, indent=4)
-    print(f"Saved predictions to {path2save}!")
+        json.dump(final_dataset_dict, f, ensure_ascii=False, indent=4)
+    print(f"The results are saved to {path2save}!")
+
+
+
+
+
+
+    #         # i may have multiple interventions per one sample -- so i check all of them for correctness
+    #         if sample['structure_intervention']:
+    #             # we do that validation only on the completion
+    #             # TODO: check on size of the intervention
+    #             intervention_check = intervention_logic.validate_all_interventions(model_output, sample['structure_intervention'])
+    #             if intervention_check:
+    #                 # reconstruct the prompt & prepare for completion
+    #                 prompt_list = intervention_logic.interventions_to_prompt(model_output, intervened_batch_for_completion)
+    #                 intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
+    #                                                                    include_origin_prompt=False,
+    #                                                                    include_chat_template=False,
+    #                                                                    skip_special_tokens=True)
+    #                 # keep the original as 0
+    #                 do_prediction = intervention_logic.extract_target_from_prompt(model_output)
+    #                 mediator_prediction = [intervention_logic.infer_completion(output) for output in intervened_completion_outputs]
+    #                 # additionaly check that we get clean results
+    #                 if do_prediction is not None or None not in mediator_prediction:
+    #                     # TODO: Collect all dataset specific generations here and save to separate field for fast eval
+    #                     intervention_dict["interventions"][sample_idx] = {"predictions": [do_prediction] + mediator_prediction,# what we have extracted
+    #                                                                              "original_generation": model_output,
+    #                                                                              "intervened_generations": intervened_completion_outputs}# what we need for analysis
+    #                 else:
+    #                     intervention_dict['fails'].append(sample_idx)
+    #                     continue
+    #             else:
+    #                 intervention_dict['fails'].append(sample_idx)#just add index of failed sample for intervention
+    #         else:
+    #             intervention_dict['fails'].append(sample_idx)  # just add index of failed sample for intervention
+
+    # # we do evaluation here based on filled dataset
+    # # just pass the intervention dict to corresponding evaluation class
+    # evaluation_class = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
+    # evaluation_class.evaluate(intervention_dict)
+
+
+
+    # dataset_name = args.evaluation_dataset
+    # path2save = os.path.join(project_path, "intervention_analysis", "intervention_predictions", dataset_name)
+    # os.makedirs(path2save, exist_ok=True)
+
+    # model_name = model_name2simple_model_name[args.model_name]
+
+    # curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
+    # file_name = f"{model_name}_{curr_time}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}.json"
+    # path2save = os.path.join(path2save, file_name)
+
+    # with open(path2save, "w") as f:
+    #     json.dump(intervention_dict, f, ensure_ascii=False, indent=4)
+    # print(f"Saved predictions to {path2save}!")
 
 
             
