@@ -90,7 +90,7 @@ class RiceChemEvaluation:
 
             hsvt_intervention = structure_intervention['HSVT'][0]
             expected_hsvt_edit_score = hsvt_intervention['score']
-            hsvt_result_after_intervention = hsvt_intervention['result_after_intervention']
+            hsvt_result_after_intervention = hsvt_intervention['score_after_intervention']
             hsvt_intervention_score = self.compare_scores(expected_hsvt_edit_score, hsvt_result_after_intervention)
 
             if completion_type == "gold_structure":
@@ -102,7 +102,7 @@ class RiceChemEvaluation:
             local_edits_intervention = structure_intervention['Local Edits']
             for intervention_idx, local_edit_intervention in enumerate(local_edits_intervention):
                 expected_local_edit_score = local_edit_intervention['score']
-                local_edit_result_after_intervention = local_edit_intervention['result_after_intervention']
+                local_edit_result_after_intervention = local_edit_intervention['score_after_intervention']
 
                 local_edit_intervention_match = self.compare_scores(expected_local_edit_score,
                                                                     local_edit_result_after_intervention)
@@ -124,7 +124,7 @@ class RiceChemEvaluation:
             # Global intervention
             global_intervention = structure_intervention['Global'][0]
             expected_global_edit_score = global_intervention['score']
-            global_result_after_intervention = global_intervention['result_after_intervention']
+            global_result_after_intervention = global_intervention['score_after_intervention']
             global_intervention_match = self.compare_scores(expected_global_edit_score, global_result_after_intervention)
 
             if completion_type == "gold_structure":
