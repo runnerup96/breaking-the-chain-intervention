@@ -12,11 +12,12 @@ class EntailmentDataset:
     
         for entry in raw_data:
             example = {
-                "idx": entry["id"],
-                "step_proof": entry["meta"]["step_proof"] if "meta" in entry and "step_proof" in entry["meta"] else entry["step_proof"],
+                "id": entry["id"],
+                "proof": entry["meta"]["step_proof"] if "meta" in entry and "step_proof" in entry["meta"] else entry["step_proof"],
                 "question": entry["meta"]["question_text"],
                 "answer": entry["meta"]["answer_text"],
-                "triples": entry["meta"]["triples"],
+                "context": entry["meta"]["triples"],
+                "hypothesis": entry["hypothesis"],
                 "intermediate_conclusions": entry["meta"]["intermediate_conclusions"],
                 "hypothesis_id": entry["meta"]["hypothesis_id"],
                 "distractors": entry["meta"]["distractors"],
@@ -32,7 +33,7 @@ class EntailmentDataset:
 
 
 if __name__ == "__main__":
-    path = "entailment_trees_emnlp2021_data_v3/dataset/task_2/train.jsonl"
+    path = "entailment_trees_emnlp2021_data_v3/dataset/task_1/train.jsonl"
     dataset = EntailmentDataset(file_path=path)
     for i in range(3):
         print(json.dumps(dataset[i], indent=2))

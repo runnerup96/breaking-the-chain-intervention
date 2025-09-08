@@ -280,7 +280,7 @@ def intervene_step_proof(step_proof: str,
 
 
 class EntailmentIntervention:
-    def __init__(self, dataset, llm_stop_token: str):
+    def __init__(self, dataset, llm_stop_token: str, few_shot_examples: List[Dict]):
         """
         Initialize the intervention class with dataset and stop token.
         
@@ -290,19 +290,42 @@ class EntailmentIntervention:
         """
         self.dataset = dataset
         self.llm_stop_token = llm_stop_token
+        self.few_shot_examples = few_shot_examples
 
         self.modes = ["delete", "replace", "rewire", "global"]
 
         self.question_verbalizer = "## Question"
-        self.question_separator = ": "
+        self.question_separator = "\n"
         self.context_verbalizer = "## Context"
-        self.context_separator = ": "
+        self.context_separator = "\n"
         self.hypothesis_verbalizer = "## Hypothesis"
-        self.hypothesis_separator = ": "
+        self.hypothesis_separator = "\n"
         self.proof_verbalizer = "## Proof"
-        self.proof_separator = ": "
-        self.answer_verbalizer = "## Conclusion"
-        self.answer_separator = ": "
+        self.proof_separator = "\n"
+        self.conclusion_verbalizer = "## Conclusion"
+        self.conclusion_separator = "\n"
+
+        self.check_verbalizer = "## Check"
+        self.check_separator = "\n"
+    
+    def format_example_without_proof(self, example: Dict) -> str:
+        """
+        Format an example into a prompt.
+        """
+        return f"""{self.question_verbalizer}{self.question_separator}{example["question"]}
+{self.context_verbalizer}{self.context_separator}{example["context"]}
+{self.hypothesis_verbalizer}{self.hypothesis_separator}{example["hypothesis"]}
+"""
+
+    def format_example_with_proof(self, example: Dict) -> str:
+        """
+        Format an example into a prompt.
+        """
+        return self.format_example_without_proof(example) + f"""{self.proof_verbalizer}{self.proof_separator}{example["proof"]}
+
+{self.check_verbalizer}{self.check_separator}Is the hypothesis supported by the proof? Yes
+"""
+
 
     def make_prompt(self, sample: dict) -> str:
         """
@@ -314,28 +337,12 @@ class EntailmentIntervention:
         Returns:
             str: Formatted prompt for the LLM
         """
-        
 
-        prompt = f"""You are a Proof-Checker. You are given a question, context, hypothesis, proof, and conclusion. Your task is to check whether the proof supports the conclusion.
-
-{self.question_verbalizer}{self.question_separator}{sample["question"]}
-
-{self.context_verbalizer}{self.context_separator}{sample["context"]}
-
-{self.hypothesis_verbalizer}{self.hypothesis_separator}{sample["hypothesis"]}
-
-{self.proof_verbalizer}{self.proof_separator}{sample["proof"]}
-
-{self.answer_verbalizer}{self.answer_separator}{sample["answer"]}
-
-If the proof supports the conclusion, return "Yes".
-If the proof does not support the conclusion, return "No".
-
-Only return "Yes" or "No".
-"""
+        prompt = "\n\n".join(f"# Example {i}\n{self.format_example_with_proof(example)}" for i, example in enumerate(self.few_shot_examples))
+        prompt += "\n\n" + self.format_example_without_proof(sample)
         return prompt
     
-    def make_intervention(self, generated_output, mode: str):
+    def make_intervention(self, generated_output, mode: str = "delete"):
         """
         Create interventions by flipping reasoning steps in the generated output.
         
@@ -349,17 +356,23 @@ Only return "Yes" or "No".
         prompt = generated_output['prompt']
         completion = generated_output['completion']
 
-        step_proof = prompt.split(self.proof_verbalizer + self.proof_separator)[1]\
-            .split(self.answer_verbalizer + self.answer_separator)[0]
+        if (self.proof_verbalizer + self.proof_separator) not in completion:
+            return None
+        if (self.conclusion_verbalizer + self.conclusion_separator) not in completion:
+            return None
+
+        step_proof = completion.split(self.proof_verbalizer + self.proof_separator)[1]\
+            .split(self.conclusion_verbalizer + self.conclusion_separator)[0]
 
         intervened_prompts = []
         for i in range(5):
             # NOTE: Ideally I need access to the full dataset sample, to get the distractors, hypothesis_id, etc.
-            # new_step_proof = intervene_step_proof(step_proof=step_proof, mode=mode)
-            # new_prompt = prompt.replace(step_proof, new_step_proof)
-            
-            new_output = {'prompt': "INTERVENTION " + str(i) + ": " + prompt}
-            intervened_prompts.append(new_output)
+            new_step_proof = intervene_step_proof(step_proof=step_proof, mode=mode)
+            partial_completion = completion.split(self.check_verbalizer + self.check_separator)[0]
+            partial_completion = partial_completion.replace(step_proof, new_step_proof)
+
+            # new_output = {'prompt': "INTERVENTION " + str(i) + ": " + prompt}
+            intervened_prompts.append(partial_completion)
 
         return intervened_prompts
 
@@ -428,7 +441,7 @@ Only return "Yes" or "No".
         Returns:
             The inferred result (type depends on dataset)
         """
-        return completion_output.split(self.answer_verbalizer + self.answer_separator)[1]
+        return completion_output["prompt"].split(self.conclusion_verbalizer + self.conclusion_separator)[1]
 
 
 
