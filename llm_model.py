@@ -48,7 +48,7 @@ class LLMModel:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
     
     def generate(self, prompts:  List[str], max_new_tokens: int,
-                 include_origin_prompt: bool, include_chat_template: bool, skip_special_tokens: bool) -> List[Dict[str, str]]:
+                 include_chat_template: bool, skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
         Generate text using the model.
         
@@ -62,7 +62,7 @@ class LLMModel:
         """
         if self.model_family == QWEN3_MODEL_FAMILY:
             return self._generate_qwen3_batch(prompts, max_new_tokens,
-                                              include_origin_prompt, include_chat_template, skip_special_tokens)
+                                              include_chat_template, skip_special_tokens)
         else:
             # For now, return error for non-Qwen3 models
             # TODO: Add other model generation functions
