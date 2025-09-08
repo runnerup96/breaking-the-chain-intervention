@@ -41,10 +41,15 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model.stop_token)
     elif args.evaluation_dataset == "entailment":
+        train_dataset_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/train.jsonl")
+        train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
+        few_shot_examples = train_dataset[::128][:5]
+        assert len(few_shot_examples) == 5
+
         dataset_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/dev.jsonl")
         dataset = entailment_dataset.EntailmentDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model.stop_token)
+        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model.stop_token, few_shot_examples=few_shot_examples)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [amazon_reviews, ricechem]")
