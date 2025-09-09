@@ -51,7 +51,7 @@ if __name__ == "__main__":
     if args.try_one_batch:
         dataloader = [next(iter(dataloader))]
 
-    processed_samples_list = []
+    processed_samples_list, fails_list = [], []
     for batch in tqdm(dataloader, desc="Running inference", total=len(dataloader)):
         
         # batch_idx_list = [sample["idx"] for sample in batch]
@@ -67,18 +67,25 @@ if __name__ == "__main__":
         for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
             sample['completion_type'] = completion_type
             # Mediator(DO_X)
-            sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
-            prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
-            intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
-                                                            skip_special_tokens=True)
-            # parse completions to final structure
-            final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)
-            processed_samples_list.append(final_sample)
+            try:
+                sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
+                prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
+                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
+                                                                skip_special_tokens=True)
+                # parse completions to final structure
+                final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)
+                processed_samples_list.append(final_sample)
+            except Exception as e:
+                error_type, error_message = type(e).__name__, str(e)
+                error_string = f"{error_type}: {error_message}"
+                fails_list.append([sample, error_string])
+
 
     evaluation_metrics = evaluator.evaluate(processed_samples_list)
 
-    final_dataset_dict = {"metrics": evaluation_metrics, "result": processed_samples_list}
-    
+    final_dataset_dict = {"metrics": evaluation_metrics, "result": processed_samples_list, "fails": fails_list}
+    print('Processed: ', len(processed_samples_list))
+    print('Failed: ', len(fails_list))
     dataset_name = args.evaluation_dataset
     path2save = os.path.join(project_path, "intervention_analysis", "intervention_predictions", dataset_name)
     os.makedirs(path2save, exist_ok=True)

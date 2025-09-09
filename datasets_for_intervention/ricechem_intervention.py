@@ -49,6 +49,9 @@ class RiceChemIntervention:
             gold_answer = self.infer_completion(completion)
             sample['score'] = gold_answer
 
+        # TODO: Here i need some kind of validation that the parsing is correct
+        # По сути, надо сделать task2rubric weights check
+
         interventions = self.make_structure_intervention(sample)
         sample['structure_intervention'] = interventions
         # hsvt_intervention_prompt = [self.make_prompt(interventions['HSVT'])]
