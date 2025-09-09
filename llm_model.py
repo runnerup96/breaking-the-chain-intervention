@@ -48,7 +48,7 @@ class LLMModel:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
     
     def generate(self, prompts:  List[str], max_new_tokens: int,
-                 include_chat_template: bool, skip_special_tokens: bool) -> List[Dict[str, str]]:
+                 skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
         Generate text using the model.
         
@@ -61,8 +61,7 @@ class LLMModel:
             Dictionary or list of dictionaries containing generation results
         """
         if self.model_family == QWEN3_MODEL_FAMILY:
-            return self._generate_qwen3_batch(prompts, max_new_tokens,
-                                              include_chat_template, skip_special_tokens)
+            return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens)
         else:
             # For now, return error for non-Qwen3 models
             # TODO: Add other model generation functions
@@ -71,28 +70,28 @@ class LLMModel:
 
     
     def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
-                              include_chat_template: bool, skip_special_tokens: bool) -> List[Dict[str, str]]:
+                              skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts using Qwen3 model in batch.
         """
         # Prepare batch inputs
 
-        if include_chat_template:
-            batch_texts = []
-            for prompt in prompts:
-                messages = [{"role": "user", "content": prompt}]
-                text = self.tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=False
-                )
-                batch_texts.append(text)
-        else:
-            batch_texts = prompts
+        # if include_chat_template:
+        #     batch_texts = []
+        #     for prompt in prompts:
+        #         messages = [{"role": "user", "content": prompt}]
+        #         text = self.tokenizer.apply_chat_template(
+        #             messages,
+        #             tokenize=False,
+        #             add_generation_prompt=True,
+        #             enable_thinking=False
+        #         )
+        #         batch_texts.append(text)
+        # else:
+        #     batch_texts = prompts
         
         # Tokenize batch
-        model_inputs = self.tokenizer(batch_texts, return_tensors="pt", padding=True).to(self.model.device)
+        model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
         
         # Generate
         generated_ids = self.model.generate(

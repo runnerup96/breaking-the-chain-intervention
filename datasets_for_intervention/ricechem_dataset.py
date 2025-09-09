@@ -1,6 +1,7 @@
 import pandas as pd
 import os
-
+from collections import defaultdict
+import random
 pd.options.mode.chained_assignment = None
 
 class RiceChemDataset:
@@ -69,6 +70,8 @@ class RiceChemDataset:
         self.graded_rubric_list = [[gr_q1, q1_rubric, q1_score_range], [gr_q2, q2_rubric, q2_score_range], 
                                    [gr_q3, q3_rubric, q3_score_range], [gr_q4, q4_rubric, q4_score_range]]
         
+        self.task2rubric_weights = {1: q1_rubric, 2: q2_rubric, 3: q3_rubric, 4: q4_rubric}
+        
         def filter_empty_answers(df):
             df.columns = ["SID", "Answer", "Rubric"]
             df = df.dropna(subset=["Answer"])
@@ -104,7 +107,16 @@ class RiceChemDataset:
 
         self.student_answers_list = [[sa_q1, question_1_task], [sa_q2, question_2_task], 
                                      [sa_q3, question_3_task], [sa_q4, question_4_task]]
+        
+
+        self.task2student_answers = dict()
+        for task_idx, (answer_df, _) in enumerate(self.student_answers_list):
+            self.task2student_answers[task_idx] = answer_df['Answer'].tolist()
+
         self.process_data()
+
+    def get_random_student_answer(self, task_idx):
+        return random.choice(self.task2student_answers[task_idx])
 
 
     def process_data(self):
@@ -126,18 +138,19 @@ class RiceChemDataset:
             response_ids = task_df.iloc[1:, 0]
             for response_id in response_ids:
                 rubric_answer_dict = dict()
-                for rubric_item, rubric_weight in task_rubric.items():
+                rubric_score = 0
+                for rubric_item in task_rubric:
                     rubric_answer = bool(task_df[task_df["SID"] == response_id][rubric_item].item())
-                    rubric_answer_dict[rubric_item] = {"answer": rubric_answer,
-                                                                "weight": rubric_weight}
+                    rubric_answer_dict[rubric_item] = rubric_answer# do no need weight here
+                    if rubric_answer:
+                        rubric_score += self.task2rubric_weights[task_idx][rubric_item]
 
                 if response_id in rubric_data[task_idx]:
                     rubric_data[task_idx][response_id]["filled_rubric"] = rubric_answer_dict
                     # rubric_data[task_idx][response_id]["score"] = float(task_df[task_df["SID"] == response_id]["Score"].item())
                     # Calculate score by summing up weights for each rubric item that was answered correctly
                     # currently this version, since i do not know original weights
-                    score = sum(item["weight"] for item in rubric_answer_dict.values() if item["answer"])
-                    rubric_data[task_idx][response_id]["score"] = float(score)
+                    rubric_data[task_idx][response_id]["score"] = float(rubric_score)
                     rubric_data[task_idx][response_id]["score_range"] = task_score_range
 
         self.data = []
@@ -148,7 +161,7 @@ class RiceChemDataset:
                         "idx": f"{response_id}@Task{task_idx}",
                         "task": data["task"],
                         "student_answer": data["student_answer"],
-                        "filled_rubric": data["filled_rubric"],
+                        "filled_rubric": data["filled_rubric"],#this this just a dict structure which we intervene upon
                         "score": data["score"],
                         "score_range": data["score_range"],
                         "task_idx": task_idx
