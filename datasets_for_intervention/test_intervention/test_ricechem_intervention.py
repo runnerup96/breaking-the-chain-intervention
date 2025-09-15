@@ -92,10 +92,10 @@ class TestRiceChemIntervention(unittest.TestCase):
         generated = [{"completion": str(v)} for v in values]
 
         out = self.ic.collect_intervention_completion(s, generated)
-        self.assertEqual(out["structure_intervention"]["HSVT"][0]["result_after_intervention"], 1.0)
+        self.assertEqual(out["structure_intervention"]["HSVT"][0]["score_after_intervention"], 1.0)
         for i in range(M):
-            self.assertEqual(out["structure_intervention"]["Local Edits"][i]["result_after_intervention"], i + 2.0)
-        self.assertEqual(out["structure_intervention"]["Global"][0]["result_after_intervention"], M + 2.0)
+            self.assertEqual(out["structure_intervention"]["Local Edits"][i]["score_after_intervention"], i + 2.0)
+        self.assertEqual(out["structure_intervention"]["Global"][0]["score_after_intervention"], M + 2.0)
 
     # --- mirrors prompt test ---
     def test_interventions_to_prompt_counts_and_flag(self):

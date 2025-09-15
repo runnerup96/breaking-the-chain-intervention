@@ -13,7 +13,7 @@ model_name2simple_model_name() {
 # Paths
 project_path="/home/somov/frontdoor_llm_causality"
 evaluation_dataset="ricechem"
-batch_size=32
+batch_size=56
 
 model_name="Qwen/Qwen3-4B"
 CUDA_DEVICE_NUMBER=0

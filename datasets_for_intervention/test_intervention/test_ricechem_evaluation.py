@@ -60,13 +60,13 @@ class TestRiceChemEvaluation(unittest.TestCase):
         gold["completion_type"] = "gold_structure"
         # Interventions where expected score == result => all ones
         gold["structure_intervention"] = {
-            "HSVT": [{"score": 10.0, "result_after_intervention": 10.0}],
+            "HSVT": [{"score": 10.0, "score_after_intervention": 10.0}],
             "Local Edits": [
-                {"score": 1.0, "result_after_intervention": 1.0},
-                {"score": 2.0, "result_after_intervention": 2.0},
-                {"score": 3.0, "result_after_intervention": 3.0},
+                {"score": 1.0, "score_after_intervention": 1.0},
+                {"score": 2.0, "score_after_intervention": 2.0},
+                {"score": 3.0, "score_after_intervention": 3.0},
             ],
-            "Global": [{"score": 5.0, "result_after_intervention": 5.0}],
+            "Global": [{"score": 5.0, "score_after_intervention": 5.0}],
         }
 
         # Predicted sample matches gold checklist & score (=> checklist_match=1, score_match=1)
@@ -75,13 +75,13 @@ class TestRiceChemEvaluation(unittest.TestCase):
         pred["filled_rubric"] = deepcopy(self.dataset[1]["filled_rubric"])  # identical to gold in mock
         pred["score"] = self.dataset[1]["score"]  # 4.0
         pred["structure_intervention"] = {
-            "HSVT": [{"score": 7.0, "result_after_intervention": 7.0}],
+            "HSVT": [{"score": 7.0, "score_after_intervention": 7.0}],
             "Local Edits": [
-                {"score": 10.0, "result_after_intervention": 10.0},
-                {"score": 0.0,  "result_after_intervention": 0.0},
-                {"score": 3.0,  "result_after_intervention": 3.0},
+                {"score": 10.0, "score_after_intervention": 10.0},
+                {"score": 0.0,  "score_after_intervention": 0.0},
+                {"score": 3.0,  "score_after_intervention": 3.0},
             ],
-            "Global": [{"score": 9.0, "result_after_intervention": 9.0}],
+            "Global": [{"score": 9.0, "score_after_intervention": 9.0}],
         }
 
         agg = self.ev.evaluate([gold, pred])
@@ -121,26 +121,26 @@ class TestRiceChemEvaluation(unittest.TestCase):
         pred["score"] = pred["score"] + 1.0
         # Interventions with a deliberate mismatch
         pred["structure_intervention"] = {
-            "HSVT": [{"score": 10.0, "result_after_intervention": 9.0}],  # mismatch
+            "HSVT": [{"score": 10.0, "score_after_intervention": 9.0}],  # mismatch
             "Local Edits": [
-                {"score": 1.0, "result_after_intervention": 1.0},
-                {"score": 2.0, "result_after_intervention": 1.0},  # one mismatch
-                {"score": 3.0, "result_after_intervention": 3.0},
+                {"score": 1.0, "score_after_intervention": 1.0},
+                {"score": 2.0, "score_after_intervention": 1.0},  # one mismatch
+                {"score": 3.0, "score_after_intervention": 3.0},
             ],
-            "Global": [{"score": 5.0, "result_after_intervention": 4.0}],   # mismatch
+            "Global": [{"score": 5.0, "score_after_intervention": 4.0}],   # mismatch
         }
 
         # Need a gold sample present in dataset indices mapping; use the original
         gold = deepcopy(self.dataset[0])
         gold["completion_type"] = "gold_structure"
         gold["structure_intervention"] = {
-            "HSVT": [{"score": 10.0, "result_after_intervention": 10.0}],
+            "HSVT": [{"score": 10.0, "score_after_intervention": 10.0}],
             "Local Edits": [
-                {"score": 1.0, "result_after_intervention": 1.0},
-                {"score": 2.0, "result_after_intervention": 2.0},
-                {"score": 3.0, "result_after_intervention": 3.0},
+                {"score": 1.0, "score_after_intervention": 1.0},
+                {"score": 2.0, "score_after_intervention": 2.0},
+                {"score": 3.0, "score_after_intervention": 3.0},
             ],
-            "Global": [{"score": 5.0, "result_after_intervention": 5.0}],
+            "Global": [{"score": 5.0, "score_after_intervention": 5.0}],
         }
 
         agg = self.ev.evaluate([gold, pred])
