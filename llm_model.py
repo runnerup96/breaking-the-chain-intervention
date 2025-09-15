@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Optional
 import re
 
 QWEN3_MODEL_FAMILY = "Qwen3"
@@ -24,7 +24,7 @@ class LLMModel:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, 
             device_map=device_map, 
-            dtype=dtype
+            dtype=torch_dtype
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.padding_side = 'left'
@@ -47,21 +47,33 @@ class LLMModel:
         else:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
     
-    def generate(self, prompts:  List[str], max_new_tokens: int,
-                 skip_special_tokens: bool) -> List[Dict[str, str]]:
+    def generate(self, prompts: Optional[List[str]] = None, messages: Optional[List[List[Dict[str, str]]]] = None, max_new_tokens: int = 100,
+                 include_chat_template: bool = False, skip_special_tokens: bool = True) -> List[Dict[str, str]]:
         """
         Generate text using the model.
         
         Args:
-            prompts: Input prompt(s) - list of strings
+            prompts: Input prompt(s) - list of strings (exactly one of prompts or messages must be provided)
+            messages: Input messages - list of lists of dicts, where each dict contains role and content (exactly one of prompts or messages must be provided)
             max_new_tokens: Maximum number of new tokens to generate
-            **kwargs: Additional arguments for generation
+            include_chat_template: Whether to apply chat template
+            skip_special_tokens: Whether to skip special tokens in decoding
             
         Returns:
-            Dictionary or list of dictionaries containing generation results
+            List of dictionaries containing generation results
         """
+        # Validate that exactly one of prompts or messages is provided
+        if (prompts is None) == (messages is None):
+            raise ValueError("Exactly one of 'prompts' or 'messages' must be provided, not both or neither")
+        
+        if prompts is not None and not isinstance(prompts, list):
+            raise ValueError("prompts must be a list of strings")
+        
+        if messages is not None and not isinstance(messages, list):
+            raise ValueError("messages must be a list of lists of dicts")
         if self.model_family == QWEN3_MODEL_FAMILY:
-            return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens)
+            return self._generate_qwen3_batch(prompts, messages, max_new_tokens,
+                                              include_chat_template, skip_special_tokens)
         else:
             # For now, return error for non-Qwen3 models
             # TODO: Add other model generation functions
@@ -69,26 +81,40 @@ class LLMModel:
     
 
     
-    def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
+    def _generate_qwen3_batch(self, prompts: Optional[List[str]], messages: Optional[List[List[Dict[str, str]]]], max_new_tokens: int,
+                              include_chat_template: bool,
                               skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
-        Generate text for multiple prompts using Qwen3 model in batch.
+        Generate text for multiple prompts or messages using Qwen3 model in batch.
         """
         # Prepare batch inputs
-
-        # if include_chat_template:
-        #     batch_texts = []
-        #     for prompt in prompts:
-        #         messages = [{"role": "user", "content": prompt}]
-        #         text = self.tokenizer.apply_chat_template(
-        #             messages,
-        #             tokenize=False,
-        #             add_generation_prompt=True,
-        #             enable_thinking=False
-        #         )
-        #         batch_texts.append(text)
-        # else:
-        #     batch_texts = prompts
+        if messages is not None:
+            # Process messages with chat template
+            batch_texts = []
+            for message_list in messages:
+                assert message_list[-1]["role"] == "user" or message_list[-1]["role"] == "assistant"
+                text = self.tokenizer.apply_chat_template(
+                    message_list,
+                    tokenize=False,
+                    add_generation_prompt=True if message_list[-1]["role"] == "user" else False,
+                    enable_thinking=False
+                )
+                batch_texts.append(text)
+        elif include_chat_template:
+            # Process prompts with chat template
+            batch_texts = []
+            for prompt in prompts:
+                message_list = [{"role": "user", "content": prompt}]
+                text = self.tokenizer.apply_chat_template(
+                    message_list,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False
+                )
+                batch_texts.append(text)
+        else:
+            # Use prompts directly
+            batch_texts = prompts
         
         # Tokenize batch
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
@@ -101,7 +127,8 @@ class LLMModel:
         
         # Decode each output in the batch
         results = []
-        for i in range(len(prompts)):
+        batch_size = len(messages) if messages is not None else len(prompts)
+        for i in range(batch_size):
             # Extract the generated part for this sample
             input_length = model_inputs.input_ids[i].shape[0]
 
