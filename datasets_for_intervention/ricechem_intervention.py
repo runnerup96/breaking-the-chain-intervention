@@ -31,7 +31,7 @@ class RiceChemIntervention:
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
         for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
-            sample['structure_intervention'][intervention_type][idx]['result_after_intervention'] = self.infer_completion(completion)
+            sample['structure_intervention'][intervention_type][idx]['score_after_intervention'] = self.infer_completion(completion)
         return sample
 
     def make_intervention(self, sample:dict, generated_output:dict):
@@ -48,6 +48,9 @@ class RiceChemIntervention:
         elif sample['completion_type'] == "gold_structure":
             gold_answer = self.infer_completion(completion)
             sample['score'] = gold_answer
+
+        # TODO: Here i need some kind of validation that the parsing is correct
+        # По сути, надо сделать task2rubric weights check
 
         interventions = self.make_structure_intervention(sample)
         sample['structure_intervention'] = interventions
@@ -154,7 +157,10 @@ class RiceChemIntervention:
         f"Checklist:\n"
         f"\"\"\"{checklist_string}\"\"\"\n\n"
         f"Final grade (0-8): <0-8>\n"
+        
 
+        # IMPORTANT: Always make the final grading decision based on the filled checklist, without looking back at the question or answer.
+        
         "EXAMPLE of expected output for the arbitrary Question:\n"
         "Checklist:\n"
         "correctly cites decreased electron electron repulsion (weight: 1.0) (True/False): True\n"

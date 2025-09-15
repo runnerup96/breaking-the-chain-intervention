@@ -56,6 +56,8 @@ def extract_checklist_entries(text: str) -> List[Dict]:
         m = LINE_RE.match(line)
         if m:
             question = m.group("question").strip()
+            question = re.sub(r'[\'\"]{1,3}', '', question)
+            # Clean triple quotes from question text (anywhere in the string)
             options = [p.strip() for p in re.split(r"\s*[/,\|]\s*", m.group("options")) if p.strip()]
             answer = m.group("answer").strip()
 
