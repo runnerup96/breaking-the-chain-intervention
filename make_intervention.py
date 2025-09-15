@@ -1,15 +1,18 @@
 
 import argparse
 import llm_model
-from datasets_for_intervention import entailment_intervention, entailment_dataset
-from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
+from datasets_for_intervention import entailment_intervention, entailment_dataset, entailment_evaluation
+# from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 import os
+from dotenv import load_dotenv
 from tqdm import tqdm
 from datetime import datetime
 import json
 from torch.utils.data import DataLoader
 from copy import deepcopy
+
+load_dotenv()
 
 
 model_name2simple_model_name = {
@@ -21,12 +24,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--evaluation_dataset", type=str, required=True)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--try_one_batch", type=bool, default=False)
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--try_one_batch", action="store_true", default=False)
 
     args = parser.parse_args()
 
-    llm_model = llm_model.LLMModel(args.model_name)
+    llm_model = llm_model.LLMModel(args.model_name, device_map="cuda:0")
 
     project_path = os.environ["PROJECT_PATH"]
 
@@ -53,6 +56,7 @@ if __name__ == "__main__":
         dataset = entailment_dataset.EntailmentDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model.stop_token, few_shot_examples=few_shot_examples)
+        evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [amazon_reviews, ricechem]")
@@ -71,7 +75,7 @@ if __name__ == "__main__":
         all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
         completion_type_list = ["structure_prediction"] * len(prompted_batch_with_structure_prediction) + ["gold_structure"] * len(promted_batch_with_gold_structure)
         # DO_X -- if we have ground truth, we wont need to fill it by the model
-        batched_model_outputs = llm_model.generate(all_batch, max_new_tokens=1024,# X2 from batch
+        batched_model_outputs = llm_model.generate(all_batch, max_new_tokens=256,# X2 from batch
                                                    skip_special_tokens=False)
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
