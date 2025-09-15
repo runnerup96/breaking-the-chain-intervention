@@ -11,6 +11,7 @@ class EntailmentDataset:
         raw_data = read_jsonl(file_path)
     
         for entry in raw_data:
+            # All scores initially are set to True since the proofs are presumed correct.
             example = {
                 "id": entry["id"],
                 "proof": entry["meta"]["step_proof"] if "meta" in entry and "step_proof" in entry["meta"] else entry["step_proof"],
@@ -21,7 +22,12 @@ class EntailmentDataset:
                 "intermediate_conclusions": entry["meta"]["intermediate_conclusions"],
                 "hypothesis_id": entry["meta"]["hypothesis_id"],
                 "distractors": entry["meta"]["distractors"],
+                "score": True,
             }
+            assert example["distractors"] is not None, "Distractors are required for entailment intervention"
+            assert example["proof"] is not None, "Proof is required for entailment intervention"
+            assert example["question"] is not None, "Question is required for entailment intervention"
+            assert example["context"] is not None, "Context is required for entailment intervent"
 
             self.data.append(example)
 
