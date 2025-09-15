@@ -7,24 +7,24 @@ QWEN3_MODEL_FAMILY = "Qwen3"
 
 
 class LLMModel:
-    def __init__(self, model_name: str, device_map: str = "auto", torch_dtype: torch.dtype = torch.bfloat16):
+    def __init__(self, model_name: str, device_map: str = "auto", dtype: torch.dtype = torch.bfloat16):
         """
         Initialize the LLM model.
         
         Args:
             model_name: Name or path of the model
             device_map: Device mapping for the model
-            torch_dtype: Torch data type for the model
+            dtype: Torch data type for the model
         """
         self.model_name = model_name
         self.device_map = device_map
-        self.torch_dtype = torch_dtype
+        self.dtype = dtype
         
         # Initialize model and tokenizer
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, 
             device_map=device_map, 
-            torch_dtype=torch_dtype
+            dtype=dtype
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.padding_side = 'left'
