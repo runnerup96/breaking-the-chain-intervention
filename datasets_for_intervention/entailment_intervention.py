@@ -3,10 +3,35 @@ import json
 import os
 import re
 import random
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from collections import defaultdict
+from copy import deepcopy
 
-Rule = Tuple[List[str], str]  # ([lhs_ids], rhs_id)
+class Rule:
+    """
+    Represents a logical rule with optional annotation.
+    Supports tuple unpacking for backward compatibility: lhs_ids, rhs_id = rule
+    """
+    def __init__(self, lhs_ids: List[str], rhs_id: str, annotation: Optional[str] = None):
+        self.lhs_ids = lhs_ids
+        self.rhs_id = rhs_id
+        self.annotation = annotation
+    
+    def __iter__(self):
+        """Support tuple unpacking: lhs, rhs = rule"""
+        return iter((self.lhs_ids, self.rhs_id))
+    
+    def __getitem__(self, index):
+        """Support indexing: rule[0] for lhs_ids, rule[1] for rhs_id"""
+        if index == 0:
+            return self.lhs_ids
+        elif index == 1:
+            return self.rhs_id
+        else:
+            raise IndexError("Rule index out of range")
+    
+    def __repr__(self):
+        return f"Rule({self.lhs_ids}, {self.rhs_id}, {self.annotation!r})"
 
 # ----------------------------
 # Parsing / serialization
@@ -23,15 +48,23 @@ def parse_step_proof(step: str) -> List[Rule]:
         chunk = chunk.strip()
         if not chunk:
             continue
-        # Remove trailing annotation after colon (but only after the RHS)
-        # Strategy: first split on '->', then clean RHS part optionally at ':'
+        # Parse annotation after colon (but only after the RHS)
+        # Strategy: first split on '->', then extract annotation from RHS part
         if '->' not in chunk:
             continue
         lhs_raw, rhs_raw = chunk.split('->', 1)
         lhs_raw = lhs_raw.strip()
         rhs_raw = rhs_raw.strip()
-        # Remove trailing colon annotation from RHS side
-        rhs_clean = re.sub(r':\s*.*$', '', rhs_raw).strip()
+        
+        # Extract annotation if present
+        annotation = None
+        if ':' in rhs_raw:
+            rhs_part, annotation_part = rhs_raw.split(':', 1)
+            rhs_clean = rhs_part.strip()
+            annotation = annotation_part.strip() if annotation_part.strip() else None
+        else:
+            rhs_clean = rhs_raw
+        
         # Validate token-ish RHS id
         m = re.match(r'^(\w+)$', rhs_clean)
         if not m:
@@ -39,24 +72,32 @@ def parse_step_proof(step: str) -> List[Rule]:
         rhs = m.group(1)
         # Split LHS on '&' and clean tokens
         lhs_ids = [tok.strip() for tok in lhs_raw.split('&') if tok.strip()]
-        rules.append((lhs_ids, rhs))
+        rules.append(Rule(lhs_ids, rhs, annotation))
     return rules
 
 
 def serialize_step_proof(rules: List[Rule]) -> str:
     """
     Serialize Rules back to EntailmentBank step_proof string.
-    Keeps simple 'A & B -> C; ...' formatting. No annotations appended.
+    Includes annotations if present.
     """
     parts = []
-    for lhs, rhs in rules:
+    for rule in rules:
+        lhs, rhs = rule.lhs_ids, rule.rhs_id
         if len(lhs) == 0:
-            parts.append(f'-> {rhs}')
+            rule_str = f'-> {rhs}'
         elif len(lhs) == 1:
-            parts.append(f'{lhs[0]} -> {rhs}')
+            rule_str = f'{lhs[0]} -> {rhs}'
         else:
-            parts.append(f' {" & ".join(lhs)} -> {rhs}')
+            rule_str = f'{" & ".join(lhs)} -> {rhs}'
+        
+        # Add annotation if present
+        if rule.annotation:
+            rule_str += f': {rule.annotation}'
+        
+        parts.append(rule_str)
     return '; '.join(parts) + '; '
+
 
 
 # ----------------------------
@@ -66,10 +107,10 @@ def serialize_step_proof(rules: List[Rule]) -> str:
 def build_graph(rules: List[Rule]):
     parents = defaultdict(list)   # rhs -> list of lhs lists (each rule)
     children = defaultdict(list)  # lhs_id -> list of rhs ids
-    for lhs_ids, rhs in rules:
-        parents[rhs].append(lhs_ids)
-        for x in lhs_ids:
-            children[x].append(rhs)
+    for rule in rules:
+        parents[rule.rhs_id].append(rule.lhs_ids)
+        for x in rule.lhs_ids:
+            children[x].append(rule.rhs_id)
     return parents, children
 
 
@@ -79,8 +120,8 @@ def collect_supporting_rules(rules: List[Rule], target_rhs: str) -> List[int]:
     through intermediate nodes (ids starting with 'int').
     """
     idx_by_rhs = defaultdict(list)
-    for i, (lhs, rhs) in enumerate(rules):
-        idx_by_rhs[rhs].append(i)
+    for i, rule in enumerate(rules):
+        idx_by_rhs[rule.rhs_id].append(i)
 
     supporting = set()
     frontier = [target_rhs]
@@ -94,8 +135,8 @@ def collect_supporting_rules(rules: List[Rule], target_rhs: str) -> List[int]:
             if i in supporting:
                 continue
             supporting.add(i)
-            lhs_ids, _ = rules[i]
-            for lhs in lhs_ids:
+            rule = rules[i]
+            for lhs in rule.lhs_ids:
                 if lhs.startswith('int'):
                     frontier.append(lhs)
     return sorted(supporting)
@@ -106,7 +147,7 @@ def collect_supporting_rules(rules: List[Rule], target_rhs: str) -> List[int]:
 # ----------------------------
 
 def _pick_rule_with_min_arity(rules: List[Rule], idxs: List[int], min_arity: int) -> int:
-    cand = [i for i in idxs if len(rules[i][0]) >= min_arity]
+    cand = [i for i in idxs if len(rules[i].lhs_ids) >= min_arity]
     return random.choice(cand) if cand else -1
 
 def _pick_distractor(distractors: List[str], forbidden: List[str]) -> str:
@@ -114,7 +155,7 @@ def _pick_distractor(distractors: List[str], forbidden: List[str]) -> str:
     return random.choice(pool) if pool else None
 
 def _ensure_structural_change(old_rules: List[Rule], new_rules: List[Rule]) -> bool:
-    return any(old_rules[i][0] != new_rules[i][0] or old_rules[i][1] != new_rules[i][1]
+    return any(old_rules[i].lhs_ids != new_rules[i].lhs_ids or old_rules[i].rhs_id != new_rules[i].rhs_id
                for i in range(len(old_rules)))
 
 
@@ -127,15 +168,15 @@ def delete_one_antecedent(rules: List[Rule], target_rules: List[int], rng: rando
     Delete exactly one antecedent from a supporting rule with arity >= 2.
     """
     rng = rng or random
-    new_rules = [([*lhs], rhs) for lhs, rhs in rules]
+    new_rules = [Rule([*rule.lhs_ids], rule.rhs_id, rule.annotation) for rule in rules]
     i = _pick_rule_with_min_arity(new_rules, target_rules, min_arity=2)
     if i == -1:
         return rules  # no valid deletion
-    lhs, rhs = new_rules[i]
-    del_idx = rng.randrange(len(lhs))
-    lhs.pop(del_idx)
-    new_rules[i] = (lhs, rhs)
-    return new_rules if _ensure_structural_change(rules, new_rules) else rules
+    rule = new_rules[i]
+    del_idx = rng.randrange(len(rule.lhs_ids))
+    rule.lhs_ids.pop(del_idx)
+    assert _ensure_structural_change(rules, new_rules), f"No structural change for delete_one_antecedent\n{rules}\n{new_rules}"
+    return new_rules
 
 
 def replace_antecedent_with_distractor(
@@ -147,18 +188,18 @@ def replace_antecedent_with_distractor(
     rng = rng or random
     if not target_rules or not distractors:
         return rules
-    new_rules = [([*lhs], rhs) for lhs, rhs in rules]
+    new_rules = [Rule([*rule.lhs_ids], rule.rhs_id, rule.annotation) for rule in rules]
     i = rng.choice(target_rules)
-    lhs, rhs = new_rules[i]
-    if not lhs:
+    rule = new_rules[i]
+    if not rule.lhs_ids:
         return rules
-    j = rng.randrange(len(lhs))
-    d = _pick_distractor(distractors, forbidden=lhs + [rhs])
+    j = rng.randrange(len(rule.lhs_ids))
+    d = _pick_distractor(distractors, forbidden=rule.lhs_ids + [rule.rhs_id])
     if d is None:
         return rules
-    lhs[j] = d
-    new_rules[i] = (lhs, rhs)
-    return new_rules if _ensure_structural_change(rules, new_rules) else rules
+    rule.lhs_ids[j] = d
+    assert _ensure_structural_change(rules, new_rules), f"No structural change for replace_antecedent_with_distractor\n{rules}\n{new_rules}"
+    return new_rules
 
 
 def rewire_drop_support_creation(rules: List[Rule], target_rules: List[int]) -> List[Rule]:
@@ -166,14 +207,18 @@ def rewire_drop_support_creation(rules: List[Rule], target_rules: List[int]) -> 
     Remove a rule that produces some intermediate 'int*' that is still used downstream.
     This creates a dangling reference (hard break) without touching texts.
     """
-    new_rules = [([*lhs], rhs) for lhs, rhs in rules]
+    new_rules = [Rule([*rule.lhs_ids], rule.rhs_id, rule.annotation) for rule in rules]
     # choose a supporting rule that produces an intermediate
-    candidates = [i for i in target_rules if new_rules[i][1].startswith('int')]
-    if not candidates:
-        return rules
+    candidates = [i for i in target_rules if new_rules[i].rhs_id.startswith('int')]
+    if len(candidates) == 0:
+        rng = random.Random(hash(str(rules)))
+        print("WARNING: No candidates found for rewire_drop_support_creation, deleting one antecedent")
+        return delete_one_antecedent(rules, target_rules, rng)
+    # assert len(candidates) > 0, f"No candidates found for rewire_drop_support_creation\n{rules}\n{target_rules}"
     i = candidates[0]
     del new_rules[i]
-    return new_rules if len(new_rules) < len(rules) else rules
+    # no check for structural change, since we are deleting a rule
+    return new_rules
 
 
 def global_break(
@@ -186,20 +231,20 @@ def global_break(
     """
     rng = rng or random
     supp = collect_supporting_rules(rules, target_rhs)
-    new_rules = [([*lhs], rhs) for lhs, rhs in rules]
+    new_rules = [Rule([*rule.lhs_ids], rule.rhs_id, rule.annotation) for rule in rules]
     for i in supp:
-        lhs, rhs = new_rules[i]
-        if len(lhs) >= 2:
-            lhs.pop(0)
-        elif len(lhs) == 1:
-            d = _pick_distractor(distractors, forbidden=lhs + [rhs])
+        rule = new_rules[i]
+        if len(rule.lhs_ids) >= 2:
+            rule.lhs_ids.pop(0)
+        elif len(rule.lhs_ids) == 1:
+            d = _pick_distractor(distractors, forbidden=rule.lhs_ids + [rule.rhs_id])
             if d is None:
                 # fallback: if no distractor, attempt to drop (results in vacuous rule)
-                lhs.clear()
+                rule.lhs_ids.clear()
             else:
-                lhs[0] = d
-        new_rules[i] = (lhs, rhs)
-    return new_rules if _ensure_structural_change(rules, new_rules) else rules
+                rule.lhs_ids[0] = d
+    assert _ensure_structural_change(rules, new_rules), f"No structural change for global_break\n{rules}\n{new_rules}"
+    return new_rules
 
 
 # ----------------------------
@@ -208,20 +253,20 @@ def global_break(
 
 def _resolve_target_rhs(rules: List[Rule], preferred: str) -> str:
     """
-    Pick the RHS token to target. If 'preferred' (e.g., 'int2') doesn’t appear
+    Pick the RHS token to target. If 'preferred' (e.g., 'int2') doesn't appear
     as a RHS in the proof, but 'hypothesis' does, use 'hypothesis'. Otherwise,
     if neither appears, fall back to the last RHS.
     """
-    rhs_set = {rhs for _, rhs in rules}
+    rhs_set = {rule.rhs_id for rule in rules}
     if preferred in rhs_set:
         return preferred
     if 'hypothesis' in rhs_set:
         return 'hypothesis'
-    # fallback: choose the final rule’s RHS if available
-    return rules[-1][1] if rules else preferred
+    # fallback: choose the final rule's RHS if available
+    return rules[-1].rhs_id if rules else preferred
 
 
-def intervene_step_proof(step_proof: str,
+def intervene_step_proof(step_proof: Optional[str],
                          hypothesis_id: str,
                          distractors: List[str],
                          mode: str = "replace",
@@ -232,12 +277,14 @@ def intervene_step_proof(step_proof: str,
     Returns a new step_proof string with a STRUCTURAL intervention applied.
     Adds robust target resolution and diagnostics.
     """
+    if step_proof is None:
+        return None
     rng = random.Random(seed)
     rules = parse_step_proof(step_proof)
     if verbose:
         print(f"[diag] parsed {len(rules)} rules")
-        for i,(lhs,rhs) in enumerate(rules):
-            print(f"  rule[{i}]: {' & '.join(lhs)} -> {rhs}")
+        for i, rule in enumerate(rules):
+            print(f"  rule[{i}]: {' & '.join(rule.lhs_ids)} -> {rule.rhs_id}")
 
     # --- resolve which RHS to aim at ---
     target_rhs = _resolve_target_rhs(rules, hypothesis_id)
@@ -292,42 +339,156 @@ class EntailmentIntervention:
         self.llm_stop_token = llm_stop_token
         self.few_shot_examples = few_shot_examples
 
-        self.modes = ["delete", "replace", "rewire", "global"]
+        self.modes = ["delete", "replace", "rewire"]
 
-        self.question_verbalizer = "## Question"
-        self.question_separator = "\n"
-        self.context_verbalizer = "## Context"
-        self.context_separator = "\n"
-        self.hypothesis_verbalizer = "## Hypothesis"
-        self.hypothesis_separator = "\n"
-        self.proof_verbalizer = "## Proof"
-        self.proof_separator = "\n"
-        self.conclusion_verbalizer = "## Conclusion"
-        self.conclusion_separator = "\n"
+        self.question_prefix = "## Question\n"
+        self.context_prefix = "## Context\n"
+        self.hypothesis_prefix = "## Hypothesis\n"
+        self.proof_prefix = "## Proof\n"
 
-        self.check_verbalizer = "## Check"
-        self.check_separator = "\n"
+        self.final_answer_prefix = "## Final Answer\nIs the hypothesis correct? "
+        # Used for parsing later
+        self.small_final_answer_prefix = "## Final Answer"
+        assert self.final_answer_prefix.startswith(self.small_final_answer_prefix)
+
     
-    def format_example_without_proof(self, example: Dict) -> str:
+    def interventions_to_prompt(self, sample:dict):
+        interventions = sample['structure_intervention']
+        hsvt_intervention_prompt = [self.make_prompt(interventions['HSVT'][0], include_gold_structure=True)]
+        local_edits_intervention_prompt = [ self.make_prompt(edit, include_gold_structure=True) for edit in interventions['Local Edits']]
+        global_intervention_prompt = [self.make_prompt(interventions['Global'][0], include_gold_structure=True)]
+        all_intervention_prompts = hsvt_intervention_prompt + local_edits_intervention_prompt + global_intervention_prompt
+        return all_intervention_prompts
+
+    def infer_completion(self, completion):
+        "extract only the completion after the intervention, when we test model ability to make a correct decision"
+        if self.small_final_answer_prefix in completion:
+            completion = completion.split(self.small_final_answer_prefix)[1].strip()
+
+        if "Yes" in completion and "No" in completion:
+            return -1
+        elif "Yes" in completion and not "No" in completion:
+            return 1
+        elif "No" in completion and not "Yes" in completion:
+            return 0
+        else:
+            return -1
+
+    def collect_intervention_completion(self, sample:dict, generated_output:list):
+        completion_list = [generation['completion'] for generation in generated_output]
+        intervention = sample['structure_intervention']
+        intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
+        intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
+        for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
+            sample['structure_intervention'][intervention_type][idx]['result_after_intervention'] = self.infer_completion(completion)
+        return sample
+
+
+    def format_example(self, example: Dict, add_proof: bool, add_final_answer_prefix: bool, add_gold_answer: bool) -> str:
         """
         Format an example into a prompt.
         """
-        return f"""{self.question_verbalizer}{self.question_separator}{example["question"]}
-{self.context_verbalizer}{self.context_separator}{example["context"]}
-{self.hypothesis_verbalizer}{self.hypothesis_separator}{example["hypothesis"]}
-"""
+        formatted_question = f"{self.question_prefix}{example['question']}"
+        formatted_context = f"{self.context_prefix}{example['context']}"
+        formatted_hypothesis = f"{self.hypothesis_prefix}{example['hypothesis']}"
 
-    def format_example_with_proof(self, example: Dict) -> str:
-        """
-        Format an example into a prompt.
-        """
-        return self.format_example_without_proof(example) + f"""{self.proof_verbalizer}{self.proof_separator}{example["proof"]}
+        common_sep = "\n"
 
-{self.check_verbalizer}{self.check_separator}Is the hypothesis supported by the proof? Yes
-"""
+        formatted_example = formatted_question + common_sep + formatted_context + common_sep + formatted_hypothesis
+        if add_proof:
+            formatted_proof = f"{self.proof_prefix}{example['proof']}"
+            formatted_example += common_sep + formatted_proof
+        if add_final_answer_prefix:
+            formatted_final_answer_prefix = f"{self.final_answer_prefix}"
+            formatted_example += common_sep + formatted_final_answer_prefix
+        if add_gold_answer:
+            formatted_gold_answer = "Yes" if example["score"] else "No"
+            formatted_example += formatted_gold_answer
+        
+        return formatted_example
+
+    def _extract_entailment_proof(self, completion):
+        if not (self.proof_prefix in completion):
+            return None
+        if not (self.small_final_answer_prefix in completion):
+            return None
+        proof_plus_something = completion.split(self.proof_prefix)[1].strip()
+        proof = proof_plus_something.split(self.small_final_answer_prefix)[0].strip()
+        return proof
+
+    def _extract_entailment_answer(self, completion):
+        if not (self.final_answer_prefix in completion):
+            return None
+        return completion.split(self.final_answer_prefix)[1].strip()
+
+    def make_intervention(self, sample: dict, generated_output: dict):
+        # i get the sample, make the intervention
+        # here i have gold structure, predicted structure and make intervention on both of them.
+
+        completion = generated_output['completion']
+        # here we update the sample with the predicted structure, we have gold result in dataset
+        if sample['completion_type'] == "structure_prediction":
+            # TODO: extract_entailment_proof and extract_entailment_answer are not defined
+            predicted_proof = self._extract_entailment_proof(completion)
+            predicted_answer = self._extract_entailment_answer(completion)
+            sample['proof'] = predicted_proof
+            sample['score'] = predicted_answer
+        elif sample['completion_type'] == "gold_structure":
+            gold_answer = self.infer_completion(completion)
+            sample['score'] = gold_answer
+
+        interventions = self.make_structure_intervention(sample)
+        sample['structure_intervention'] = interventions
+        return sample
+
+    def make_structure_intervention(self, entailment_sample: dict):
+        # i get a entailment original sample and make a structure intervention
+        # i do 3 types of interventions -- HSVT, local edits and global
+        # I get a list 3 types of intervented samples -- 1 + M + 1 size, where M is the amount of local edits
+        # then these samples are used to make a prompt
+        # i also return a list of intervention types for each of the intervented samples
+        # this will be tested in tests
+
+        # TODO: change HSVT intervention to something more meaningful than converting the question to lowercase
+        hsvt_sample = deepcopy(entailment_sample)
+        sample_id = entailment_sample['id']
+        hsvt_sample['question'] = hsvt_sample["question"].lower()
+
+        def calculate_new_expected_score(task_idx, checklist):
+            return sum(self.dataset.task2rubric_weights[task_idx][item] 
+                      for item, value in checklist.items() if value)
+
+        # Local edits intervention -- invalidate the proof in one of the ways: delete, replace, rewire
+        local_edits = []
+        for mode in self.modes:
+            local_edits_sample = deepcopy(entailment_sample)
+            local_edits_sample['proof'] = intervene_step_proof(
+                local_edits_sample['proof'],
+                mode=mode,
+                distractors=local_edits_sample['distractors'],
+                hypothesis_id=local_edits_sample['hypothesis_id'],
+                seed=hash(local_edits_sample['id'])
+            )
+            # Any intervention invalidates the proof
+            local_edits_sample['score'] = not local_edits_sample['score']
+            local_edits.append(local_edits_sample)
+
+        # Global intervention
+        global_sample = deepcopy(entailment_sample)
+        global_sample['proof'] = intervene_step_proof(
+            global_sample['proof'],
+            mode="global",
+            distractors=global_sample['distractors'],
+            hypothesis_id=global_sample['hypothesis_id'],
+            seed=hash(global_sample['id'])
+        )
+        global_sample['score'] = not global_sample['score']
+
+        return {"HSVT": [hsvt_sample], "Local Edits": local_edits, "Global": [global_sample]}
 
 
-    def make_prompt(self, sample: dict) -> str:
+
+    def make_prompt(self, sample: dict, include_gold_structure: bool) -> str:
         """
         Create a prompt for the LLM to generate reasoning steps and final answer.
         
@@ -337,144 +498,52 @@ class EntailmentIntervention:
         Returns:
             str: Formatted prompt for the LLM
         """
+        # TODO: Add clear instructions, including about contradictions
 
-        prompt = "\n\n".join(f"# Example {i}\n{self.format_example_with_proof(example)}" for i, example in enumerate(self.few_shot_examples))
-        prompt += "\n\n" + self.format_example_without_proof(sample)
+        prompt = "\n\n".join(f"# Example {i}\n{self.format_example(example, add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)}"
+            for i, example in enumerate(self.few_shot_examples))
+        # TODO: Add negative examples
+        # Proof constitutes the gold structure. Check part is only present if the gold structure is included, otherwise model must generate it.
+        # Gold answer is never included, since the model always must generate it.
+        # TODO: Add number for last example to avoid distribution shift
+        prompt += "\n\n" + self.format_example(sample, add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
         return prompt
-    
-    def make_intervention(self, generated_output, mode: str = "delete"):
-        """
-        Create interventions by flipping reasoning steps in the generated output.
-        
-        Args:
-            generated_output: The original LLM generation (could be dict or str depending on format)
-            
-        Returns:
-            List of dictionaries with intervention data, or None if intervention fails
-        """
-        # NOTE: In my case, checklists are in prompt, not in completion
-        prompt = generated_output['prompt']
-        completion = generated_output['completion']
-
-        if (self.proof_verbalizer + self.proof_separator) not in completion:
-            return None
-        if (self.conclusion_verbalizer + self.conclusion_separator) not in completion:
-            return None
-
-        step_proof = completion.split(self.proof_verbalizer + self.proof_separator)[1]\
-            .split(self.conclusion_verbalizer + self.conclusion_separator)[0]
-
-        intervened_prompts = []
-        for i in range(5):
-            # NOTE: Ideally I need access to the full dataset sample, to get the distractors, hypothesis_id, etc.
-            new_step_proof = intervene_step_proof(step_proof=step_proof, mode=mode)
-            partial_completion = completion.split(self.check_verbalizer + self.check_separator)[0]
-            partial_completion = partial_completion.replace(step_proof, new_step_proof)
-
-            # new_output = {'prompt': "INTERVENTION " + str(i) + ": " + prompt}
-            intervened_prompts.append(partial_completion)
-
-        return intervened_prompts
-
-    def validate_intervention(self, original_output, intervened_output, original_reasoning, intervention_reasoning):
-        """
-        Validate that an intervention correctly modifies only the intended reasoning step.
-        
-        Args:
-            original_output: The original LLM generation
-            intervened_output: The intervened generation
-            original_reasoning: The original reasoning step
-            intervention_reasoning: The intervened reasoning step
-            
-        Returns:
-            bool: True if intervention is valid, False otherwise
-        """
-        # TODO: Implement this
-        return True
-
-    def validate_all_interventions(self, original_output, intervention_data):
-        """
-        Validate all interventions for a given sample.
-        
-        Args:
-            original_output: The original LLM generation
-            intervention_data: List of intervention dictionaries
-            
-        Returns:
-            bool: True if all interventions are valid, False otherwise
-        """
-        # TODO: Implement this
-        return True
-
-    def reconstruct_interventions_to_prompt(self, original_output, intervened_completions):
-        """
-        Reconstruct prompts for completion after intervention.
-        
-        Args:
-            original_output: The original LLM generation
-            intervened_completions: List of intervention dictionaries
-            
-        Returns:
-            List of prompts ready for LLM completion
-        """
-        return [original_output['prompt']] + [intervention['prompt'] for intervention in intervened_completions]
-
-    def extract_target_from_prompt(self, generated_output):
-        """
-        Extract the final answer/target from the generated output.
-        
-        Args:
-            generated_output: The LLM generation (could be dict or str)
-            
-        Returns:
-            The extracted target value (type depends on dataset)
-        """
-        pass
-
-    def infer_completion(self, completion_output):
-        """
-        Extract the completion result after intervention.
-        
-        Args:
-            completion_output: The LLM completion after intervention
-            
-        Returns:
-            The inferred result (type depends on dataset)
-        """
-        return completion_output["prompt"].split(self.conclusion_verbalizer + self.conclusion_separator)[1]
-
 
 
 if __name__ == "__main__":
-  dataset_path = "entailment_bank/dataset/task_2" #we look at problem with distractors
+    dataset_path = "entailment_trees_emnlp2021_data_v3/dataset/task_2" #we look at problem with distractors
 
-  train_path = os.path.join(dataset_path, "train.jsonl")
-  dev_path = os.path.join(dataset_path, "dev.jsonl")
-  test_path = os.path.join(dataset_path, "test.jsonl")
+    train_path = os.path.join(dataset_path, "train.jsonl")
+    dev_path = os.path.join(dataset_path, "dev.jsonl")
+    test_path = os.path.join(dataset_path, "test.jsonl")
 
-  def read_jsonl(path):
-      with open(path, "r") as f:
-          return [json.loads(line) for line in f]
+    def read_jsonl(path):
+        with open(path, "r") as f:
+            return [json.loads(line) for line in f]
 
-  train_dataset = read_jsonl(train_path)
-  dev_dataset = read_jsonl(dev_path)
-  test_dataset = read_jsonl(test_path)
+    train_dataset = read_jsonl(train_path)
+    dev_dataset = read_jsonl(dev_path)
+    test_dataset = read_jsonl(test_path)
 
-  print('Train dataset size: ', len(train_dataset))
-  print('Dev dataset size: ', len(dev_dataset))
-  print('Test dataset size: ', len(test_dataset))
-  print('Total dataset size: ', len(train_dataset) + len(dev_dataset) + len(test_dataset))
+    print('Train dataset size: ', len(train_dataset))
+    print('Dev dataset size: ', len(dev_dataset))
+    print('Test dataset size: ', len(test_dataset))
+    print('Total dataset size: ', len(train_dataset) + len(dev_dataset) + len(test_dataset))
 
-  ex = train_dataset[0]  # your dict
-  step = ex['meta']['step_proof'] if 'meta' in ex and 'step_proof' in ex['meta'] else ex['step_proof']
+    ex = train_dataset[14]  # your dict
+    step = ex['meta']['step_proof'] if 'meta' in ex and 'step_proof' in ex['meta'] else ex['step_proof']
+    print("Hypothesis:", ex["hypothesis"])
+    print("Original:", step)
+    print("-"*100)
 
-  new_step = intervene_step_proof(
-      step_proof = step,
-      hypothesis_id = ex["meta"]["hypothesis_id"],
-      distractors = ex["meta"]["distractors"],
-      mode = "replace",   # or "delete", "rewire", "global", "replace"
-      seed = 42           # fix seed for reproducibility
-  )
+    for mode in ["delete", "replace", "rewire", "global"]:
+        new_step = intervene_step_proof(
+            step_proof = step,
+            hypothesis_id = ex["meta"]["hypothesis_id"],
+            distractors = ex["meta"]["distractors"],
+            mode = mode,
+            seed = 42
+        )
 
-  print("Original:", step)
-  print("Edited:", new_step)
+        print(f"Edited ({mode}):", new_step)
+        print("-"*100)
