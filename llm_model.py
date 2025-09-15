@@ -48,7 +48,7 @@ class LLMModel:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
     
     def generate(self, prompts: Optional[List[str]] = None, messages: Optional[List[List[Dict[str, str]]]] = None, max_new_tokens: int = 100,
-                 include_origin_prompt: bool = True, include_chat_template: bool = False, skip_special_tokens: bool = True) -> List[Dict[str, str]]:
+                 include_chat_template: bool = False, skip_special_tokens: bool = True) -> List[Dict[str, str]]:
         """
         Generate text using the model.
         
@@ -56,7 +56,6 @@ class LLMModel:
             prompts: Input prompt(s) - list of strings (exactly one of prompts or messages must be provided)
             messages: Input messages - list of lists of dicts, where each dict contains role and content (exactly one of prompts or messages must be provided)
             max_new_tokens: Maximum number of new tokens to generate
-            include_origin_prompt: Whether to include original prompt in output
             include_chat_template: Whether to apply chat template
             skip_special_tokens: Whether to skip special tokens in decoding
             
@@ -74,7 +73,7 @@ class LLMModel:
             raise ValueError("messages must be a list of lists of dicts")
         if self.model_family == QWEN3_MODEL_FAMILY:
             return self._generate_qwen3_batch(prompts, messages, max_new_tokens,
-                                              include_origin_prompt, include_chat_template, skip_special_tokens)
+                                              include_chat_template, skip_special_tokens)
         else:
             # For now, return error for non-Qwen3 models
             # TODO: Add other model generation functions
@@ -83,7 +82,7 @@ class LLMModel:
 
     
     def _generate_qwen3_batch(self, prompts: Optional[List[str]], messages: Optional[List[List[Dict[str, str]]]], max_new_tokens: int,
-                              include_origin_prompt: bool, include_chat_template: bool,
+                              include_chat_template: bool,
                               skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts or messages using Qwen3 model in batch.
