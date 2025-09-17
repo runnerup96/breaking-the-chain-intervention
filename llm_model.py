@@ -24,13 +24,21 @@ class LLMModel:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, 
             device_map=device_map, 
-            dtype=torch_dtype
+            dtype=dtype
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.padding_side = 'left'
 
 
         self.stop_token = self.tokenizer.eos_token
+        self.stop_token_id = self.tokenizer.eos_token_id
+
+        # Ensure pad token is set for left-padding; fall back to EOS if undefined
+        if self.tokenizer.pad_token_id is None:
+            # Many chat models use EOS as PAD safely
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        if getattr(self.model.config, "pad_token_id", None) is None:
+            self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
         self.model_family = self.identify_model_family(model_name)
         
@@ -117,17 +125,19 @@ class LLMModel:
             batch_texts = prompts
         
         # Tokenize batch
-        model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        model_inputs = self.tokenizer(batch_texts, return_tensors="pt", padding=True).to(self.model.device)
         
         # Generate
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
+            eos_token_id=self.stop_token_id,
+            pad_token_id=self.tokenizer.pad_token_id
         )
         
         # Decode each output in the batch
         results = []
-        batch_size = len(messages) if messages is not None else len(prompts)
+        batch_size = len(batch_texts)
         for i in range(batch_size):
             # Extract the generated part for this sample
             input_length = model_inputs.input_ids[i].shape[0]
