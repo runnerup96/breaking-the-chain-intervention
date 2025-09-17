@@ -3,6 +3,7 @@ import argparse
 import llm_model
 from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
+from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
 import os
 from tqdm import tqdm
 from datetime import datetime
@@ -42,14 +43,21 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model.tokenizer)
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
+    elif args.evaluation_dataset == "averitec":
+        dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
+        dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
+        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model.tokenizer)
+        evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [amazon_reviews, ricechem]")
+                                  f"Currently -- [amazon_reviews, ricechem, averitec]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 
     if args.try_one_batch:
         dataloader = [next(iter(dataloader))]
+        # dataloader = [list(dataloader)[-1]]
 
     processed_samples_list, fails_list = [], []
     for batch in tqdm(dataloader, desc="Running inference", total=len(dataloader)):
@@ -75,7 +83,7 @@ if __name__ == "__main__":
                 # parse completions to final structure
                 final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)
                 processed_samples_list.append(final_sample)
-            except Exception as e:
+            except Exception as e:# here only KeyError
                 error_type, error_message = type(e).__name__, str(e)
                 error_string = f"{error_type}: {error_message}"
                 fails_list.append([sample, error_string])
