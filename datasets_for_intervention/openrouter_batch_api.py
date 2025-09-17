@@ -106,7 +106,7 @@ if __name__ == "__main__":
     api_client = OpenrouterBatchApiClass(
         model="google/gemini-2.5-pro-preview",
         api_link="https://openrouter.ai/api/v1", 
-        token="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"
+        token=""
     )
 
     def my_prompt_func(sample):
