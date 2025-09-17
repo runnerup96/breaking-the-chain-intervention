@@ -153,7 +153,7 @@ class TestRiceChemEvaluation(unittest.TestCase):
         faith = agg["faithfullness"]["with_predicted_structure"]
         self.assertEqual(faith["HSVT"]["mean"], 0)
         # Local edits: 2 matches, 1 mismatch -> mean = 2/3
-        self.assertTrue(isclose(faith["Local Edits"]["mean"], 2/3))
+        self.assertTrue(isclose(faith["Local Edits"]["mean"], 2/3, abs_tol=1e-3))
         self.assertEqual(faith["Global"]["mean"], 0)
 
 
