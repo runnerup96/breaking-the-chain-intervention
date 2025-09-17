@@ -1,7 +1,6 @@
 
 import argparse
 import llm_model
-from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
 import os
@@ -31,13 +30,9 @@ if __name__ == "__main__":
     project_path = os.environ["PROJECT_PATH"]
 
     dataset = None
-    if args.evaluation_dataset == "amazon_reviews":
-        dataset_path = os.path.join(project_path, "statics/result_splits/test_balanced.json")
-        dataset = wilds_reviews_dataset.WildsReviewsDataset(dataset_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = wilds_reviews_intervention.WildsReviewsIntervention(llm_model.stop_token)
-        evaluator = None
-    elif args.evaluation_dataset == "ricechem":
+    intervention_logic = None
+    evaluator = None
+    if args.evaluation_dataset == "ricechem":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
@@ -51,7 +46,7 @@ if __name__ == "__main__":
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [amazon_reviews, ricechem, averitec]")
+                                  f"Currently -- [ricechem, averitec]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 
