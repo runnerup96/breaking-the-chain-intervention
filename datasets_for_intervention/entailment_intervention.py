@@ -6,6 +6,7 @@ import random
 from typing import List, Tuple, Dict, Optional
 from collections import defaultdict
 from copy import deepcopy
+from datasets_for_intervention.entailment_dataset import EntailmentDataset
 
 class Rule:
     """
@@ -327,7 +328,7 @@ def intervene_step_proof(step_proof: Optional[str],
 
 
 class EntailmentIntervention:
-    def __init__(self, dataset, llm_stop_token: str, few_shot_examples: List[Dict]):
+    def __init__(self, dataset: EntailmentDataset, llm_stop_token: str, few_shot_examples: List[Dict]):
         """
         Initialize the intervention class with dataset and stop token.
         
@@ -350,6 +351,10 @@ class EntailmentIntervention:
         # Used for parsing later
         self.small_final_answer_prefix = "## Final Answer"
         assert self.final_answer_prefix.startswith(self.small_final_answer_prefix)
+    
+        self.system_prompt = """You are an expert at checking hypotheses correctness.
+You will be given a question, some context and a hypothesis.
+For each example, you first generate a proof, and then predict the final answer: whether the hypothesis is correct."""
 
     
     def interventions_to_prompt(self, sample:dict):
@@ -384,20 +389,24 @@ class EntailmentIntervention:
         return sample
 
 
-    def format_example(self, example: Dict, add_proof: bool, add_final_answer_prefix: bool, add_gold_answer: bool) -> str:
+    def format_example(self, example: Dict, add_question_context_hypothesis: bool, add_proof: bool, add_final_answer_prefix: bool, add_gold_answer: bool) -> str:
         """
         Format an example into a prompt.
         """
-        formatted_question = f"{self.question_prefix}{example['question']}"
-        formatted_context = f"{self.context_prefix}{example['context']}"
-        formatted_hypothesis = f"{self.hypothesis_prefix}{example['hypothesis']}"
 
+        formatted_example = ""
         common_sep = "\n"
 
-        formatted_example = formatted_question + common_sep + formatted_context + common_sep + formatted_hypothesis
+        if add_question_context_hypothesis:
+            formatted_question = f"{self.question_prefix}{example['question']}"
+            formatted_context = f"{self.context_prefix}{example['context']}"
+            formatted_hypothesis = f"{self.hypothesis_prefix}{example['hypothesis']}"
+
+            formatted_example += formatted_question + common_sep + formatted_context + common_sep + formatted_hypothesis
+        
         if add_proof:
             formatted_proof = f"{self.proof_prefix}{example['proof']}"
-            formatted_example += common_sep + formatted_proof
+            formatted_example += formatted_proof if formatted_example == "" else common_sep + formatted_proof
         if add_final_answer_prefix:
             formatted_final_answer_prefix = f"{self.final_answer_prefix}"
             formatted_example += common_sep + formatted_final_answer_prefix
@@ -422,13 +431,13 @@ class EntailmentIntervention:
         return completion.split(self.final_answer_prefix)[1].strip()
 
     def make_intervention(self, sample: dict, generated_output: dict):
+        # TODO: support message list instead of prompts
         # i get the sample, make the intervention
         # here i have gold structure, predicted structure and make intervention on both of them.
 
         completion = generated_output['completion']
         # here we update the sample with the predicted structure, we have gold result in dataset
         if sample['completion_type'] == "structure_prediction":
-            # TODO: extract_entailment_proof and extract_entailment_answer are not defined
             predicted_proof = self._extract_entailment_proof(completion)
             predicted_answer = self._extract_entailment_answer(completion)
             sample['proof'] = predicted_proof
@@ -442,6 +451,7 @@ class EntailmentIntervention:
         return sample
 
     def make_structure_intervention(self, entailment_sample: dict):
+        # TODO: support message list instead of prompts
         # i get a entailment original sample and make a structure intervention
         # i do 3 types of interventions -- HSVT, local edits and global
         # I get a list 3 types of intervented samples -- 1 + M + 1 size, where M is the amount of local edits
@@ -487,7 +497,6 @@ class EntailmentIntervention:
         return {"HSVT": [hsvt_sample], "Local Edits": local_edits, "Global": [global_sample]}
 
 
-
     def make_prompt(self, sample: dict, include_gold_structure: bool) -> str:
         """
         Create a prompt for the LLM to generate reasoning steps and final answer.
@@ -498,16 +507,38 @@ class EntailmentIntervention:
         Returns:
             str: Formatted prompt for the LLM
         """
-        # TODO: Add clear instructions, including about contradictions
+        prompt = self.system_prompt + "\n\n"
 
-        prompt = "\n\n".join(f"# Example {i}\n{self.format_example(example, add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)}"
+        prompt += "\n\n".join(f"# Example {i}\n{self.format_example(example, add_question_context_hypothesis=True, add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)}"
             for i, example in enumerate(self.few_shot_examples))
-        # TODO: Add negative examples
         # Proof constitutes the gold structure. Check part is only present if the gold structure is included, otherwise model must generate it.
         # Gold answer is never included, since the model always must generate it.
-        # TODO: Add number for last example to avoid distribution shift
-        prompt += "\n\n" + self.format_example(sample, add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
+        prompt += f"\n\n# Example {len(self.few_shot_examples)}\n" + self.format_example(sample, add_question_context_hypothesis=True,
+            add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
         return prompt
+
+    def make_message_list(self, sample: dict, include_gold_structure: bool) -> List[Dict[str, str]]:
+        """
+        Create a message list for the LLM to generate reasoning steps and final answer.
+        """
+        message_list = []
+        message_list.append({"role": "system", "content": self.system_prompt})
+
+        for example in self.few_shot_examples:
+            user_message = self.format_example(example, add_question_context_hypothesis=True,
+                add_proof=False, add_final_answer_prefix=False, add_gold_answer=False)
+            message_list.append({"role": "user", "content": user_message})
+            assistant_message = self.format_example(example, add_question_context_hypothesis=False,
+                add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)
+            message_list.append({"role": "assistant", "content": assistant_message})
+
+        user_message = self.format_example(sample, add_question_context_hypothesis=True,
+            add_proof=False, add_final_answer_prefix=False, add_gold_answer=False)
+        message_list.append({"role": "user", "content": user_message})
+        assistant_message = self.format_example(sample, add_question_context_hypothesis=False,
+            add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
+        message_list.append({"role": "assistant", "content": assistant_message})
+        return message_list
 
 
 if __name__ == "__main__":
@@ -547,3 +578,19 @@ if __name__ == "__main__":
 
         print(f"Edited ({mode}):", new_step)
         print("-"*100)
+
+
+    val_dataset = EntailmentDataset(dev_path)
+    few_shot_dataset = EntailmentDataset(train_path)
+    intervention = EntailmentIntervention(val_dataset, "<eos>", [sample for sample in few_shot_dataset[:5]])
+    print("-"*100)
+    print("Prompt:")
+    print(intervention.make_prompt(val_dataset[0], include_gold_structure=True))
+    print("-"*100)
+    print("Message list:")
+    message_list = intervention.make_message_list(val_dataset[0], include_gold_structure=True)
+    for message in message_list:
+        print(message['role'].upper() + ": " + message['content'])
+        print("---")
+    print()
+    print("-"*100)
