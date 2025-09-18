@@ -102,6 +102,8 @@ class RiceChemIntervention:
         hsvt_sample['student_answer'] = arbitrary_student_answer
 
         def calculate_new_expected_score(task_idx, checklist):
+            # вот тут и происходит ошибка так как мы сгенерированным ключом лезем в истинный
+            # Почему то иногда вылазят ковычки странные, из за этого ломается, но таких всего 26 элементов
             return sum(self.dataset.task2rubric_weights[task_idx][item] 
                       for item, value in checklist.items() if value)
 
@@ -180,7 +182,7 @@ class RiceChemIntervention:
             for rubric_item, answer in ricechem_sample['filled_rubric'].items():
                 checklist_item = f"{rubric_item} (weight: {item2weight[rubric_item]}) (True/False): {answer}\n"
                 checklist_string += checklist_item
-            checklist_string += "Final grade (0-8): <0-8>: "
+            checklist_string += "Final grade (0-8): "
             messages.append({"role": "assistant", "content": checklist_string})
 
             add_generation_prompt_status = False

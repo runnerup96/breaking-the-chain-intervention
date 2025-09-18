@@ -95,14 +95,13 @@ class OpenrouterBatchApiClass:
 
 
 if __name__ == "__main__":
-    import random
-    your_samples = [
-        {"sample_idx": 1, "text": "Hello, world!"},
-        {"sample_idx": 2, "text": "Hello, world!"},
-    ]*50
 
-    # for sample in your_samples:
-    #     sample['text'] = sample['text']*random.randint(1, 10)
+    # load samples
+    samples = json.load(open("/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/AVeriTeC/data/onlyboolean_samples.json", "r"))
+
+    samples_for_evaluation = []
+    for idx, sample in enumerate(samples):
+        samples_for_evaluation.append({"sample_idx": idx, "text": sample['claim']})
 
     api_client = OpenrouterBatchApiClass(
         model="google/gemini-2.5-pro-preview",
@@ -111,12 +110,17 @@ if __name__ == "__main__":
     )
 
     def my_prompt_func(sample):
-        return f"Invert this text: {sample['text']}"
+        prompt = (f"For this claim: '{sample['text']}', write down 5 meaning-preserving paraphrases"
+        "(same semantic meaning, but different words, different sentence structure, different style, different length)."
+        "The paraphrases should be maximally different from each other and from original claim."
+        "In terms of semantic meaning, they should be maximally close to the original claim." 
+        "Write down all paraphrases separated by the '|' symbol.")
+        return prompt
 
     results = api_client.call(
-        samples=your_samples,
+        samples=samples_for_evaluation,
         prompt_func=my_prompt_func,
         sample_idx_key="sample_idx"
     )
 
-    json.dump(results, open("results.json", "w"), ensure_ascii=False, indent=4)
+    json.dump(results, open("/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/AVeriTeC/data/onlyboolean_paraphrases.json", "w"), ensure_ascii=False, indent=4)
