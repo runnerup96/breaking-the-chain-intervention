@@ -4,7 +4,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fake_tokenizer_mock import FakeTokenizer
+from llm_mocks import FakeLLMModel
 from averitec_mocks import AVeriTeCDatasetMock, FakeCapture
 from datasets_for_intervention.averitec_intervention import AVeriTeCIntervention
 
@@ -12,8 +12,8 @@ from datasets_for_intervention.averitec_intervention import AVeriTeCIntervention
 class TestAVeriTeCIntervention(unittest.TestCase):
     def setUp(self):
         self.dataset = AVeriTeCDatasetMock()
-        self.tokenizer = FakeTokenizer()
-        self.ic = AVeriTeCIntervention(self.dataset, self.tokenizer)
+        self.llm_model = FakeLLMModel()
+        self.ic = AVeriTeCIntervention(self.dataset, self.llm_model)
 
         module_name = self.ic.__class__.__module__
         mod = __import__(module_name, fromlist=["capture_averitec_checklist"])

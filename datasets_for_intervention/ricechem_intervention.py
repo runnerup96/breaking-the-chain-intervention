@@ -6,11 +6,9 @@ from datasets_for_intervention import capture_ricechem_checklist
 
 
 class RiceChemIntervention:
-    def __init__(self, dataset, tokenizer):
+    def __init__(self, dataset, llm_model):
         self.dataset = dataset
-        self.tokenizer = tokenizer
-        self.stop_token = tokenizer.eos_token
-
+        self.llm_model = llm_model
 
     def interventions_to_prompt(self, sample:dict):
         interventions = sample['structure_intervention']
@@ -225,17 +223,13 @@ class RiceChemIntervention:
             add_generation_prompt_status = False
 
 
-        clean_end_token = lambda text, eos_token: text[:-len(f"{eos_token}\n")] if text.endswith(f"{eos_token}\n") else text
-        
-        prompt = self.tokenizer.apply_chat_template(
+        prompt = self.llm_model.apply_chat_template(
             messages,
-            tokenize=False,
-            add_generation_prompt=add_generation_prompt_status,
-            enable_thinking=False
+            add_generation_prompt=add_generation_prompt_status
         )
 
         # remove the end token if it is present since we need to continue the generation
         if add_generation_prompt_status == False:
-            prompt = clean_end_token(prompt, self.stop_token)
+            prompt = self.llm_model.clean_model_specific_completion(prompt)
 
         return prompt

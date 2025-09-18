@@ -13,6 +13,8 @@ from copy import deepcopy
 
 model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
+        "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
+        "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
     }
 
 
@@ -36,13 +38,13 @@ if __name__ == "__main__":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model.tokenizer)
+        intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model)
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "averitec":
         dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model.tokenizer)
+        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
