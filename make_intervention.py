@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 from torch.utils.data import DataLoader
 from copy import deepcopy
+import time
 
 load_dotenv()
 
@@ -26,6 +27,7 @@ if __name__ == "__main__":
     parser.add_argument("--evaluation_dataset", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--try_one_batch", action="store_true", default=False)
+    parser.add_argument("--logging-dir", type=str, default="logs")
 
     args = parser.parse_args()
 
@@ -34,13 +36,7 @@ if __name__ == "__main__":
     project_path = os.environ["PROJECT_PATH"]
 
     dataset = None
-    if args.evaluation_dataset == "amazon_reviews":
-        dataset_path = os.path.join(project_path, "statics/result_splits/test_balanced.json")
-        dataset = wilds_reviews_dataset.WildsReviewsDataset(dataset_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = wilds_reviews_intervention.WildsReviewsIntervention(llm_model.stop_token)
-        evaluator = None
-    elif args.evaluation_dataset == "ricechem":
+    if args.evaluation_dataset == "ricechem":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
@@ -66,10 +62,15 @@ if __name__ == "__main__":
     if args.try_one_batch:
         dataloader = [next(iter(dataloader))]
 
+    curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
+
     processed_samples_list, fails_list = [], []
-    for batch in tqdm(dataloader, desc="Running inference", total=len(dataloader)):
+    start_time = time.perf_counter()
+    for batch_idx, batch in enumerate(tqdm(dataloader, desc="Running inference")):
+        batch_start = time.perf_counter()
+        batch_ids = [sample["id"] for sample in batch]
+        print(f"Processing batch {batch_idx}: {len(batch)} samples, IDs: {batch_ids}")
         
-        # batch_idx_list = [sample["idx"] for sample in batch]
         prompted_batch_with_structure_prediction = [intervention_logic.make_prompt(sample, include_gold_structure=False) for sample in batch]
         promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
         all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
@@ -77,6 +78,12 @@ if __name__ == "__main__":
         # DO_X -- if we have ground truth, we wont need to fill it by the model
         batched_model_outputs = llm_model.generate(all_batch, max_new_tokens=256,# X2 from batch
                                                    skip_special_tokens=False)
+        print(f"Raw model outputs for batch {batch_idx}:")
+        for i, output in enumerate(batched_model_outputs):
+            print(f"  Sample {batch_ids[i]}: {len(output['completion'])} chars")
+            raw_outputs_path = os.path.join(args.logging_dir, f"raw_outputs_{curr_time}.jsonl")
+            with open(raw_outputs_path, "a") as f:
+                json.dump(output, f, ensure_ascii=False, indent=2)
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
         for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
@@ -92,8 +99,20 @@ if __name__ == "__main__":
                 processed_samples_list.append(final_sample)
             except Exception as e:
                 error_type, error_message = type(e).__name__, str(e)
-                error_string = f"{error_type}: {error_message}"
-                fails_list.append([sample, error_string])
+                error_context = {
+                    'sample_id': sample.get('id', 'unknown'),
+                    'completion_type': completion_type,
+                    'error_type': error_type,
+                    'error_message': error_message,
+                    'model_output_length': len(model_output.get('completion', '')),
+                    'has_proof': 'proof' in sample,
+                    'has_distractors': 'distractors' in sample
+                }
+                print(f"ERROR processing sample {error_context['sample_id']}: {error_context}")
+                fails_list.append([sample, error_context])
+
+        batch_time = time.time() - batch_start
+        print(f"Batch {batch_idx} completed in {batch_time:.2f}s")
 
 
     evaluation_metrics = evaluator.evaluate(processed_samples_list)
@@ -107,7 +126,6 @@ if __name__ == "__main__":
 
     model_name = model_name2simple_model_name[args.model_name]
 
-    curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
     file_name = f"{model_name}_{curr_time}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}.json"
     path2save = os.path.join(path2save, file_name)
 
