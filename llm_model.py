@@ -5,6 +5,7 @@ import re
 
 QWEN3_MODEL_FAMILY = "Qwen3"
 FALCON3_MODEL_FAMILY = "Falcon3"
+LLAMA32_MODEL_FAMILY = "Llama3.2"
 
 
 class LLMModel:
@@ -20,14 +21,16 @@ class LLMModel:
         self.model_name = model_name
         self.device_map = device_map
         self.torch_dtype = torch_dtype
-        
+
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, 
-            device_map=device_map, 
+            model_name,
+            device_map=device_map,
             torch_dtype=torch_dtype
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.padding_side = 'left'
+        if self.tokenizer.pad_token == None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
 
         self.model_family = self.identify_model_family(model_name)
@@ -47,6 +50,11 @@ class LLMModel:
               self.model.config.architectures[0] == "LlamaForCausalLM" and
               "falcon3" in model_name.lower()):
             return FALCON3_MODEL_FAMILY
+        elif (hasattr(self.model.config, 'architectures') and 
+              self.model.config.architectures and 
+              self.model.config.architectures[0] == "LlamaForCausalLM" and
+              "llama-3.2" in model_name.lower()):
+            return LLAMA32_MODEL_FAMILY
         else:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
     
@@ -56,6 +64,8 @@ class LLMModel:
             return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens)
         elif self.model_family == FALCON3_MODEL_FAMILY:
             return self._generate_falcon3_batch(prompts, max_new_tokens, skip_special_tokens)
+        elif self.model_family == LLAMA32_MODEL_FAMILY:
+            return self._generate_llama32_batch(prompts, max_new_tokens, skip_special_tokens)
         else:
             # For now, return error for non-supported models
             # TODO: Add other model generation functions
@@ -71,6 +81,12 @@ class LLMModel:
                 enable_thinking=False
             )
         elif self.model_family == FALCON3_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
+        elif self.model_family == LLAMA32_MODEL_FAMILY:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -129,6 +145,32 @@ class LLMModel:
         
         return results
 
+    def _generate_llama32_batch(self, prompts: List[str], max_new_tokens: int,
+                               skip_special_tokens: bool) -> List[Dict[str, str]]:
+        """
+        Generate text for multiple prompts using Llama3.2 model in batch.
+        """
+        model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        
+        generated_ids = self.model.generate(
+            **model_inputs,
+            max_new_tokens=max_new_tokens,
+        )
+        
+        results = []
+        for i in range(len(prompts)):
+            input_length = model_inputs.input_ids[i].shape[0]
+
+            prompt_ids = generated_ids[i][:input_length].tolist()
+            completion_ids = generated_ids[i][input_length:].tolist()
+            
+            prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
+            completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
+
+            results.append({"prompt": prompt, "completion": completion})
+        
+        return results
+
     def clean_model_specific_completion(self, output: str) -> str:
         if self.model_family == QWEN3_MODEL_FAMILY:
             last_im_end = output.rfind('<|im_end|>')
@@ -137,6 +179,8 @@ class LLMModel:
             output = re.sub(r'<\|endoftext\|>|<\|im_end\|>', '', output)
         elif self.model_family == FALCON3_MODEL_FAMILY:
             output = re.sub(r'<\|endoftext\|>', '', output)
+        elif self.model_family == LLAMA32_MODEL_FAMILY:
+            output = re.sub(r'<\|eot_id\|>', '', output)
         else:
             raise NotImplementedError(f"Model family for {self.model_name} not yet implemented")
         return output

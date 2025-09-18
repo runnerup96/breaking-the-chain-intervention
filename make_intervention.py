@@ -15,6 +15,8 @@ model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
+        "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
+        "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
     }
 
 
