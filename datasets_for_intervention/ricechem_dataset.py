@@ -111,6 +111,7 @@ class RiceChemDataset:
 
         self.task2student_answers = dict()
         for task_idx, (answer_df, _) in enumerate(self.student_answers_list):
+            task_idx = task_idx + 1
             self.task2student_answers[task_idx] = answer_df['Answer'].tolist()
 
         self.process_data()

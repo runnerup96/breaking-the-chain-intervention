@@ -12,7 +12,7 @@ model_name2simple_model_name() {
 
 # Paths
 project_path="/home/somov/frontdoor_llm_causality"
-evaluation_dataset="ricechem"
+evaluation_dataset="averitec"
 batch_size=56
 
 model_name="Qwen/Qwen3-4B"

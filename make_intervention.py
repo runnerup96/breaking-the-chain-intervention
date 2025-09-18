@@ -2,8 +2,8 @@
 import argparse
 import llm_model
 from datasets_for_intervention import entailment_intervention, entailment_dataset, entailment_evaluation
-# from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
+from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
 import os
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -36,6 +36,8 @@ if __name__ == "__main__":
     project_path = os.environ["PROJECT_PATH"]
 
     dataset = None
+    intervention_logic = None
+    evaluator = None
     if args.evaluation_dataset == "ricechem":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
@@ -48,19 +50,26 @@ if __name__ == "__main__":
         few_shot_examples = train_dataset[::128][:5]
         assert len(few_shot_examples) == 5
 
-        dataset_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/dev.jsonl")
+        dataset_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/test.jsonl")
         dataset = entailment_dataset.EntailmentDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model.stop_token, few_shot_examples=few_shot_examples)
         evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
+    elif args.evaluation_dataset == "averitec":
+        dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
+        dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
+        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model.tokenizer)
+        evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [amazon_reviews, ricechem]")
+                                  f"Currently -- [ricechem, averitec]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 
     if args.try_one_batch:
         dataloader = [next(iter(dataloader))]
+        # dataloader = [list(dataloader)[-1]]
 
     curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
 
@@ -97,7 +106,7 @@ if __name__ == "__main__":
                 # parse completions to final structure
                 final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)
                 processed_samples_list.append(final_sample)
-            except Exception as e:
+            except Exception as e:# here only KeyError
                 error_type, error_message = type(e).__name__, str(e)
                 error_context = {
                     'sample_id': sample.get('id', 'unknown'),

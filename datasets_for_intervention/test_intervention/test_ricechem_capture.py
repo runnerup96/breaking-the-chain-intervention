@@ -76,6 +76,12 @@ class TestChecklistRegex(unittest.TestCase):
         self.assertFalse(entries["Y"])
         self.assertFalse(entries["Z"])
 
+        s = """X (weight: 1) (True/False): True"""
+        entries = extract_checklist_entries(s)
+        self.assertTrue(entries["X"])
+
+
+
     def test_non_matching_lines_are_ignored(self):
         s = """\
         Not a checklist line
