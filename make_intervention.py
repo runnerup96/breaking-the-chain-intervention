@@ -1,20 +1,38 @@
 
 import argparse
+import json
+import os
+import time
+import random
+from dotenv import load_dotenv
+from tqdm import tqdm
+from datetime import datetime
+from copy import deepcopy
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+from transformers.utils import logging
+
 import llm_model
 from datasets_for_intervention import entailment_intervention, entailment_dataset, entailment_evaluation
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
-import os
-from dotenv import load_dotenv
-from tqdm import tqdm
-from datetime import datetime
-import json
-from torch.utils.data import DataLoader
-from copy import deepcopy
-import time
 
 load_dotenv()
 
+logging.set_verbosity_error()
+
+def fix_seed(seed=42):
+    """Fix random seeds for reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ['PYTHONHASHSEED'] = str(seed) 
 
 model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
@@ -34,8 +52,11 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--try_one_batch", action="store_true", default=False)
     parser.add_argument("--logging-dir", type=str, default="logs")
+    parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
+    
+    fix_seed(args.seed)
 
     llm_model = llm_model.LLMModel(args.model_name, device_map="cuda:0")
 
