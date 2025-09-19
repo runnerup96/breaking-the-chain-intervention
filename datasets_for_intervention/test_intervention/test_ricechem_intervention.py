@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from fake_tokenizer_mock import FakeTokenizer
+from llm_mocks import FakeTokenizer
 from ricechem_mocks import RiceChemDatasetMock, FakeCapture
 from datasets_for_intervention.ricechem_intervention import RiceChemIntervention
 import math
