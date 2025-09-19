@@ -71,9 +71,9 @@ if __name__ == "__main__":
         intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "tabfact":
-        dataset_path = os.path.join(project_path, "statics/result_splits/TabFact")
-        dataset = tabfact_dataset.TabFactDataset('~/datasets/Table-Fact-Checking/bootstrap/bootstrap_new.json',
-                                                 '~/datasets/Table-Fact-Checking/data/all_csv')
+        dataset_path = os.path.join(project_path, "statics/result_splits/Table-Fact-Checking")
+        dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap/bootstrap_new.json',
+                                                 f'{dataset_path}/data/all_csv')
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model)
         evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)

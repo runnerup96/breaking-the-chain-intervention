@@ -19,64 +19,69 @@ class TabFactIntervention:
         all_intervention_prompts = hsvt_intervention_prompt + local_edits_intervention_prompt + global_intervention_prompt
         return all_intervention_prompts
 
-    # def infer_completion(self, completion: str) -> bool:
-    #     decision_prefixes = [
-    #         "final verdict:",
-    #         "final decision:",
-    #         "final answer:",
-    #         "answer:",
-    #         "decision:",
-    #         "conclusion:",
-    #     ]
-
-    #     expr_pattern = r'[a-z_]+{.*?}=(?:true|false)'
-    #     bool_pattern = r'\b(true|false)\b'
-
-    #     completion_lower = completion.lower()
-    #     lines = completion_lower.split('\n')
-
-    #     for line in lines:
-    #         line_stripped = line.strip()
-    #         for prefix in decision_prefixes:
-    #             if line_stripped.startswith(prefix):
-    #                 after_prefix = line_stripped[len(prefix):].strip()
-    #                 match = re.search(bool_pattern, after_prefix)
-    #                 if match:
-    #                     return True if match.group(1) == "true" else False
-
-    #     expr_spans = []
-    #     for match in re.finditer(expr_pattern, completion_lower, re.DOTALL):
-    #         expr_spans.append((match.start(), match.end()))
-
-    #     candidates = []
-    #     for match in re.finditer(bool_pattern, completion_lower):
-    #         bool_start = match.start()
-    #         inside_expr = any(start <= bool_start < end for start, end in expr_spans)
-    #         if not inside_expr:
-    #             candidates.append(match.group(1))
-
-    #     if candidates:
-    #         result = candidates[-1]
-    #         return True if result == "true" else False
-
-    #     return None
-
     def infer_completion(self, completion: str) -> bool:
-        lines = completion.strip().split('\n')
-        if not lines:
-            return None
-        last_line = lines[-1].strip()
-        if not last_line.lower().startswith(self.final_verdict_prefix):
-            print(f"[WARNING] Unexpected format: {last_line}")
-            return None
-        verdict = last_line.split(":", 1)[1].strip()
-        if verdict == "True":
-            return True
-        elif verdict == "False":
-            return False
-        else:
-            print(f"[WARNING] Unexpected verdict: {verdict}")
-            return None
+        decision_prefixes = [
+            "final verdict:",
+            "final decision:",
+            "final answer:",
+            "answer:",
+            "decision:",
+            "conclusion:",
+        ]
+
+        expr_pattern = r'[a-z_]+{.*?}=(?:true|false)'
+        bool_pattern = r'\b(true|false)\b'
+
+        completion_lower = completion.lower()
+        lines = completion_lower.split('\n')
+
+        for line in lines:
+            line_stripped = line.strip()
+            for prefix in decision_prefixes:
+                if line_stripped.startswith(prefix):
+                    after_prefix = line_stripped[len(prefix):].strip()
+                    match = re.search(bool_pattern, after_prefix)
+                    if match:
+                        return True if match.group(1) == "true" else False
+
+        expr_spans = []
+        for match in re.finditer(expr_pattern, completion_lower, re.DOTALL):
+            expr_spans.append((match.start(), match.end()))
+
+        candidates = []
+        for match in re.finditer(bool_pattern, completion_lower):
+            bool_start = match.start()
+            inside_expr = any(start <= bool_start < end for start, end in expr_spans)
+            if not inside_expr:
+                candidates.append(match.group(1))
+
+        if candidates:
+            result = candidates[-1]
+            return True if result == "true" else False
+
+        print(f"[WARNING] Unexpected verdict: {completion}")
+
+        return None
+
+    # def infer_completion(self, completion: str) -> bool:
+    #     lines = completion.strip().split('\n')
+    #     if not lines:
+    #         return None
+    #     last_line = lines[-1].strip()
+    #     print('!!!!!!!!!', completion)
+    #     if not last_line.lower().startswith(self.final_verdict_prefix):
+            
+    #         print(f"[WARNING] Unexpected format: {last_line}")
+    #         return None
+    #     print('OK')
+    #     verdict = last_line.split(":", 1)[1].strip()
+    #     if verdict == "True":
+    #         return True
+    #     elif verdict == "False":
+    #         return False
+    #     else:
+    #         print(f"[WARNING] Unexpected verdict: {verdict}")
+    #         return None
 
     def collect_intervention_completion(self, sample:dict, generated_output:list):
         completion_list = [generation['completion'] for generation in generated_output]
@@ -256,6 +261,7 @@ class TabFactIntervention:
             "Your response must contain ONLY two lines and no other text:\n"
             "Verifier Query: <your DSL expression ending with =True or =False>\n"
             "Final Verdict: <True or False>\n\n"
+            "Use only True or False in your answer. If somethin wrong with the data use ERROR"
 
             "### FEW-SHOT EXAMPLES\n\n"
 
