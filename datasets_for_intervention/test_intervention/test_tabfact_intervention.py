@@ -1,7 +1,7 @@
 import unittest
 import re
 from copy import deepcopy
-from fake_tokenizer_mock import FakeTokenizer
+from llm_mocks import FakeTokenizer
 from tabfact_mocks import TabFactDatasetMock
 from datasets_for_intervention.tabfact_intervention import TabFactIntervention
 
