@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from llm_mocks import FakeTokenizer
+from llm_mocks import FakeLLMModel
 from ricechem_mocks import RiceChemDatasetMock, FakeCapture
 from datasets_for_intervention.ricechem_intervention import RiceChemIntervention
 import math
@@ -10,8 +10,8 @@ import math
 class TestRiceChemIntervention(unittest.TestCase):
     def setUp(self):
         self.dataset = RiceChemDatasetMock()
-        self.tokenizer = FakeTokenizer()
-        self.ic = RiceChemIntervention(self.dataset, self.tokenizer)
+        self.llm_model = FakeLLMModel()
+        self.ic = RiceChemIntervention(self.dataset, self.llm_model)
 
         # Monkeypatch capture_ricechem_checklist in the module where RiceChemIntervention is defined
         module_name = self.ic.__class__.__module__
@@ -92,10 +92,10 @@ class TestRiceChemIntervention(unittest.TestCase):
         generated = [{"completion": str(v)} for v in values]
 
         out = self.ic.collect_intervention_completion(s, generated)
-        self.assertEqual(out["structure_intervention"]["HSVT"][0]["result_after_intervention"], 1.0)
+        self.assertEqual(out["structure_intervention"]["HSVT"][0]["score_after_intervention"], 1.0)
         for i in range(M):
-            self.assertEqual(out["structure_intervention"]["Local Edits"][i]["result_after_intervention"], i + 2.0)
-        self.assertEqual(out["structure_intervention"]["Global"][0]["result_after_intervention"], M + 2.0)
+            self.assertEqual(out["structure_intervention"]["Local Edits"][i]["score_after_intervention"], i + 2.0)
+        self.assertEqual(out["structure_intervention"]["Global"][0]["score_after_intervention"], M + 2.0)
 
     # --- mirrors prompt test ---
     def test_interventions_to_prompt_counts_and_flag(self):

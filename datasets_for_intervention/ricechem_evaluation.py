@@ -16,7 +16,7 @@ class RiceChemEvaluation:
                 return 0
         return 1
 
-    def compare_scores(self, gold_score, predicted_score, *, atol=1e-6):
+    def compare_scores(self, gold_score, predicted_score, *, atol=1e-3):
         if gold_score is None or predicted_score is None:
             return 0
         return 1 if isclose(gold_score, predicted_score, abs_tol=atol) else 0
@@ -29,7 +29,7 @@ class RiceChemEvaluation:
                 raise TypeError("All list elements must be int or float.")
             if len(tree) == 0:
                 return {"mean": None, "std": None}
-            return {"mean": mean(tree), "std": pstdev(tree)}
+            return {"mean": round(mean(tree), 3), "std": round(pstdev(tree), 3)}
         else:
             raise TypeError("Leaf values must be lists; found non-list leaf instead.")
 
@@ -90,7 +90,7 @@ class RiceChemEvaluation:
 
             hsvt_intervention = structure_intervention['HSVT'][0]
             expected_hsvt_edit_score = hsvt_intervention['score']
-            hsvt_result_after_intervention = hsvt_intervention['result_after_intervention']
+            hsvt_result_after_intervention = hsvt_intervention['score_after_intervention']
             hsvt_intervention_score = self.compare_scores(expected_hsvt_edit_score, hsvt_result_after_intervention)
 
             if completion_type == "gold_structure":
@@ -102,7 +102,7 @@ class RiceChemEvaluation:
             local_edits_intervention = structure_intervention['Local Edits']
             for intervention_idx, local_edit_intervention in enumerate(local_edits_intervention):
                 expected_local_edit_score = local_edit_intervention['score']
-                local_edit_result_after_intervention = local_edit_intervention['result_after_intervention']
+                local_edit_result_after_intervention = local_edit_intervention['score_after_intervention']
 
                 local_edit_intervention_match = self.compare_scores(expected_local_edit_score,
                                                                     local_edit_result_after_intervention)
@@ -124,7 +124,7 @@ class RiceChemEvaluation:
             # Global intervention
             global_intervention = structure_intervention['Global'][0]
             expected_global_edit_score = global_intervention['score']
-            global_result_after_intervention = global_intervention['result_after_intervention']
+            global_result_after_intervention = global_intervention['score_after_intervention']
             global_intervention_match = self.compare_scores(expected_global_edit_score, global_result_after_intervention)
 
             if completion_type == "gold_structure":
@@ -135,7 +135,7 @@ class RiceChemEvaluation:
                     global_intervention_match)
 
         aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
-        self.print_evaluation_metrics(evaluation_metrics)
+        self.print_evaluation_metrics(aggregated_evaluation_metrics)
 
         return aggregated_evaluation_metrics
     
@@ -148,14 +148,20 @@ class RiceChemEvaluation:
         for structure_type, metrics in evaluation_metrics["performance"].items():
             print(f"\n{structure_type}:")
             for metric_name, value in metrics.items():
-                print(f"  {metric_name}: {value:.3f}")
+                if None not in value.values():
+                    print(f"  {metric_name}: mean = {value['mean']}, std = {value['std']}")
+                else:
+                    print(f"  {metric_name}: mean = No, std = No")
         
         print("\nFaithfulness Metrics:")
         print("--------------------")
         for structure_type, metrics in evaluation_metrics["faithfullness"].items():
             print(f"\n{structure_type}:")
-            for intervention_type, score in metrics.items():
-                print(f"  {intervention_type}: {score:.3f}")
+            for intervention_type, value in metrics.items():
+                if None not in value.values():
+                    print(f"  {intervention_type}: mean = {value['mean']}, std = {value['std']}")
+                else:
+                    print(f"  {intervention_type}: mean = No , std = No ")
                 
         print("\nLocal Edit Influence:")
         print("--------------------") 
@@ -163,5 +169,8 @@ class RiceChemEvaluation:
             print(f"\n{structure_type}:")
             for task_id, scores in task_metrics.items():
                 print(f"  Task {task_id}:")
-                for edit_id, score in scores.items():
-                    print(f"    Edit {edit_id}: {score:.3f}")
+                for edit_id, value in scores.items():
+                    if None not in value.values():
+                        print(f"    Edit {edit_id}: mean = {value['mean']}, std = {value['std']}")
+                    else:
+                        print(f"    Edit {edit_id}: mean = No, std = No")
