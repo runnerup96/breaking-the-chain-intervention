@@ -1,19 +1,17 @@
 import unittest
 from copy import deepcopy
 
-from datasets_for_intervention.entailment_dataset import EntailmentDataset
+from llm_mocks import FakeLLMModel
 from datasets_for_intervention.entailment_intervention import EntailmentIntervention
-
+from entailment_mocks import EntailmentBankDatasetMock
 
 class TestEntailmentIntervention(unittest.TestCase):
     def setUp(self):
-        # Use a small real subset prepared by the user for stability
-        dataset_path = \
-            "/disk/4tb/seleznev/breaking-the-chain-intervention/entailment_trees_emnlp2021_data_v3/dataset/task_2/dev_first5.jsonl"
-        self.dataset = EntailmentDataset(dataset_path)
+        self.dataset = EntailmentBankDatasetMock()
+        assert all(example["question_paraphrases"] is not None for example in self.dataset), "DEBUG1"
         # few-shot: use first 2 examples from the same small dataset
         self.few_shot = [self.dataset[i] for i in range(min(2, len(self.dataset)))]
-        self.ic = EntailmentIntervention(self.dataset, llm_stop_token="<eos>", few_shot_examples=self.few_shot)
+        self.ic = EntailmentIntervention(self.dataset, FakeLLMModel(), few_shot_examples=self.few_shot, hsvt_mode="paraphrase")
 
         self.sample = deepcopy(self.dataset[0])
         # Default to gold structure unless overridden per-test
@@ -30,13 +28,16 @@ class TestEntailmentIntervention(unittest.TestCase):
         self.assertIsInstance(tree["HSVT"], list)
         self.assertEqual(len(tree["HSVT"]), 1)
         self.assertIsInstance(tree["Local Edits"], list)
-        self.assertEqual(len(tree["Local Edits"]), len(self.ic.modes))
+        self.assertEqual(len(tree["Local Edits"]), len(self.ic.edit_modes))
         self.assertIsInstance(tree["Global"], list)
         self.assertEqual(len(tree["Global"]), 1)
 
         # HSVT: question changed (lowercased), proof preserved
         hsvt = tree["HSVT"][0]
-        self.assertEqual(hsvt["question"], self.sample["question"].lower())
+        if self.ic.hsvt_mode == "paraphrase":
+            self.assertEqual(hsvt["question"] in self.sample["question_paraphrases"], True)
+        else:
+            self.assertEqual(hsvt["question"], self.sample["question"].lower())
         self.assertEqual(hsvt["proof"], self.sample["proof"])
 
         # Local edits: proof structurally changed and score flipped
