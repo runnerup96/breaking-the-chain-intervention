@@ -111,6 +111,7 @@ class RiceChemDataset:
 
         self.task2student_answers = dict()
         for task_idx, (answer_df, _) in enumerate(self.student_answers_list):
+            task_idx = task_idx + 1
             self.task2student_answers[task_idx] = answer_df['Answer'].tolist()
 
         self.process_data()
@@ -182,8 +183,8 @@ if __name__ == "__main__":
     import json
     data_path = "/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/RiceChem"
     dataset = RiceChemDataset(data_path=data_path)
-    for i in range(3):
-        print("Student answer: ", dataset[i])
-        print('--------------------------------')
-
-    json.dump(dataset.data, open("sample.json", 'w'), ensure_ascii=False, indent=4)
+    counter_dict = {1: 0, 2: 0, 3: 0, 4: 0}
+    for i in range(len(dataset)):
+        if counter_dict[dataset[i]['task_idx']] < 1:
+            print(dataset[i])
+            counter_dict[dataset[i]['task_idx']] += 1
