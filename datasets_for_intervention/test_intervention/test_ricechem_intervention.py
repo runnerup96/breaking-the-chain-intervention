@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from fake_tokenizer_mock import FakeTokenizer
+from llm_mocks import FakeLLMModel
 from ricechem_mocks import RiceChemDatasetMock, FakeCapture
 from datasets_for_intervention.ricechem_intervention import RiceChemIntervention
 import math
@@ -10,8 +10,8 @@ import math
 class TestRiceChemIntervention(unittest.TestCase):
     def setUp(self):
         self.dataset = RiceChemDatasetMock()
-        self.tokenizer = FakeTokenizer()
-        self.ic = RiceChemIntervention(self.dataset, self.tokenizer)
+        self.llm_model = FakeLLMModel()
+        self.ic = RiceChemIntervention(self.dataset, self.llm_model)
 
         # Monkeypatch capture_ricechem_checklist in the module where RiceChemIntervention is defined
         module_name = self.ic.__class__.__module__

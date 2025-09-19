@@ -4,6 +4,9 @@ from typing import Dict, List, Union, Optional
 import re
 
 QWEN3_MODEL_FAMILY = "Qwen3"
+FALCON3_MODEL_FAMILY = "Falcon3"
+LLAMA32_MODEL_FAMILY = "Llama3.2"
+GEMMA2_MODEL_FAMILY = "Gemma2"
 
 
 class LLMModel:
@@ -19,26 +22,17 @@ class LLMModel:
         self.model_name = model_name
         self.device_map = device_map
         self.dtype = dtype
-        
-        # Initialize model and tokenizer
+
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, 
-            device_map=device_map, 
+            model_name,
+            device_map=device_map,
             dtype=dtype
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.padding_side = 'left'
-
-
-        self.stop_token = self.tokenizer.eos_token
-        self.stop_token_id = self.tokenizer.eos_token_id
-
-        # Ensure pad token is set for left-padding; fall back to EOS if undefined
-        if self.tokenizer.pad_token_id is None:
-            # Many chat models use EOS as PAD safely
+        if self.tokenizer.pad_token == None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        if getattr(self.model.config, "pad_token_id", None) is None:
-            self.model.config.pad_token_id = self.tokenizer.pad_token_id
+        self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
 
         self.model_family = self.identify_model_family(model_name)
         
@@ -52,82 +46,151 @@ class LLMModel:
                          self.model.config.architectures and 
                          self.model.config.architectures[0] == "Qwen3ForCausalLM"):
             return QWEN3_MODEL_FAMILY
+        elif (hasattr(self.model.config, 'architectures') and 
+              self.model.config.architectures and 
+              self.model.config.architectures[0] == "LlamaForCausalLM" and
+              "falcon3" in model_name.lower()):
+            return FALCON3_MODEL_FAMILY
+        elif (hasattr(self.model.config, 'architectures') and 
+              self.model.config.architectures and 
+              self.model.config.architectures[0] == "LlamaForCausalLM" and
+              "llama-3.2" in model_name.lower()):
+            return LLAMA32_MODEL_FAMILY
+        elif (hasattr(self.model.config, 'architectures') and 
+              self.model.config.architectures and 
+              self.model.config.architectures[0] == "Gemma2ForCausalLM"):
+            return GEMMA2_MODEL_FAMILY
         else:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
     
-    def generate(self, prompts: Optional[List[str]] = None, messages: Optional[List[List[Dict[str, str]]]] = None, max_new_tokens: int = 100,
-                 include_chat_template: bool = False, skip_special_tokens: bool = True) -> List[Dict[str, str]]:
-        """
-        Generate text using the model.
-        
-        Args:
-            prompts: Input prompt(s) - list of strings (exactly one of prompts or messages must be provided)
-            messages: Input messages - list of lists of dicts, where each dict contains role and content (exactly one of prompts or messages must be provided)
-            max_new_tokens: Maximum number of new tokens to generate
-            include_chat_template: Whether to apply chat template
-            skip_special_tokens: Whether to skip special tokens in decoding
-            
-        Returns:
-            List of dictionaries containing generation results
-        """
-        # Validate that exactly one of prompts or messages is provided
-        if (prompts is None) == (messages is None):
-            raise ValueError("Exactly one of 'prompts' or 'messages' must be provided, not both or neither")
-        
-        if prompts is not None and not isinstance(prompts, list):
-            raise ValueError("prompts must be a list of strings")
-        
-        if messages is not None and not isinstance(messages, list):
-            raise ValueError("messages must be a list of lists of dicts")
+    def generate(self, prompts:  List[str], max_new_tokens: int,
+                 skip_special_tokens: bool) -> List[Dict[str, str]]:
         if self.model_family == QWEN3_MODEL_FAMILY:
-            return self._generate_qwen3_batch(prompts, messages, max_new_tokens,
-                                              include_chat_template, skip_special_tokens)
+            return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens)
+        elif self.model_family == FALCON3_MODEL_FAMILY:
+            return self._generate_falcon3_batch(prompts, max_new_tokens, skip_special_tokens)
+        elif self.model_family == LLAMA32_MODEL_FAMILY:
+            return self._generate_llama32_batch(prompts, max_new_tokens, skip_special_tokens)
+        elif self.model_family == GEMMA2_MODEL_FAMILY:
+            return self._generate_gemma2_batch(prompts, max_new_tokens, skip_special_tokens)
         else:
-            # For now, return error for non-Qwen3 models
+            # For now, return error for non-supported models
             # TODO: Add other model generation functions
             raise NotImplementedError(f"Generation for model type {type(self.model).__name__} not yet implemented")
-    
 
     
-    def _generate_qwen3_batch(self, prompts: Optional[List[str]], messages: Optional[List[List[Dict[str, str]]]], max_new_tokens: int,
-                              include_chat_template: bool,
+    def apply_chat_template(self, messages: List[Dict], add_generation_prompt: bool) -> str:
+        if self.model_family == QWEN3_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+                enable_thinking=False
+            )
+        elif self.model_family == FALCON3_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
+        elif self.model_family == LLAMA32_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
+        elif self.model_family == GEMMA2_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
+        else:
+            raise NotImplementedError(f"Chat template for model type {type(self.model).__name__} not yet implemented")
+        return prompt
+    
+    def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
                               skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts or messages using Qwen3 model in batch.
         """
-        # Prepare batch inputs
-        if messages is not None:
-            # Process messages with chat template
-            batch_texts = []
-            for message_list in messages:
-                assert message_list[-1]["role"] == "user" or message_list[-1]["role"] == "assistant"
-                text = self.tokenizer.apply_chat_template(
-                    message_list,
-                    tokenize=False,
-                    add_generation_prompt=True if message_list[-1]["role"] == "user" else False,
-                    enable_thinking=False
-                )
-                batch_texts.append(text)
-        elif include_chat_template:
-            # Process prompts with chat template
-            batch_texts = []
-            for prompt in prompts:
-                message_list = [{"role": "user", "content": prompt}]
-                text = self.tokenizer.apply_chat_template(
-                    message_list,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=False
-                )
-                batch_texts.append(text)
-        else:
-            # Use prompts directly
-            batch_texts = prompts
+        model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
         
-        # Tokenize batch
-        model_inputs = self.tokenizer(batch_texts, return_tensors="pt", padding=True).to(self.model.device)
+        generated_ids = self.model.generate(
+            **model_inputs,
+            max_new_tokens=max_new_tokens,
+        )
         
-        # Generate
+        results = []
+        for i in range(len(prompts)):
+            input_length = model_inputs.input_ids[i].shape[0]
+
+            prompt_ids = generated_ids[i][:input_length].tolist()
+            completion_ids = generated_ids[i][input_length:].tolist()
+            
+            prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
+            completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
+
+            results.append({"prompt": prompt, "completion": completion})
+        
+        return results
+
+    def _generate_falcon3_batch(self, prompts: List[str], max_new_tokens: int,
+                               skip_special_tokens: bool) -> List[Dict[str, str]]:
+        model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        
+        generated_ids = self.model.generate(
+            **model_inputs,
+            max_new_tokens=max_new_tokens,
+        )
+        
+        results = []
+        for i in range(len(prompts)):
+            input_length = model_inputs.input_ids[i].shape[0]
+
+            prompt_ids = generated_ids[i][:input_length].tolist()
+            completion_ids = generated_ids[i][input_length:].tolist()
+            
+            prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
+            completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
+
+            results.append({"prompt": prompt, "completion": completion})
+        
+        return results
+
+    def _generate_llama32_batch(self, prompts: List[str], max_new_tokens: int,
+                               skip_special_tokens: bool) -> List[Dict[str, str]]:
+        """
+        Generate text for multiple prompts using Llama3.2 model in batch.
+        """
+        model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        
+        generated_ids = self.model.generate(
+            **model_inputs,
+            max_new_tokens=max_new_tokens,
+        )
+        
+        results = []
+        for i in range(len(prompts)):
+            input_length = model_inputs.input_ids[i].shape[0]
+
+            prompt_ids = generated_ids[i][:input_length].tolist()
+            completion_ids = generated_ids[i][input_length:].tolist()
+            
+            prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
+            completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
+
+            results.append({"prompt": prompt, "completion": completion})
+        
+        return results
+
+    def _generate_gemma2_batch(self, prompts: List[str], max_new_tokens: int,
+                               skip_special_tokens: bool) -> List[Dict[str, str]]:
+        """
+        Generate text for multiple prompts using Gemma2 model in batch.
+        """
+        model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
@@ -135,11 +198,8 @@ class LLMModel:
             pad_token_id=self.tokenizer.pad_token_id
         )
         
-        # Decode each output in the batch
         results = []
-        batch_size = len(batch_texts)
-        for i in range(batch_size):
-            # Extract the generated part for this sample
+        for i in range(len(prompts)):
             input_length = model_inputs.input_ids[i].shape[0]
 
             prompt_ids = generated_ids[i][:input_length].tolist()
@@ -156,9 +216,16 @@ class LLMModel:
         if self.model_family == QWEN3_MODEL_FAMILY:
             last_im_end = output.rfind('<|im_end|>')
             if last_im_end != -1:
-                # Keep everything up to but not including the last <|im_end|>
                 output = output[:last_im_end]
             output = re.sub(r'<\|endoftext\|>|<\|im_end\|>', '', output)
+        elif self.model_family == FALCON3_MODEL_FAMILY:
+            output = re.sub(r'<\|endoftext\|>', '', output)
+        elif self.model_family == LLAMA32_MODEL_FAMILY:
+            output = re.sub(r'<\|eot_id\|>', '', output)
+        elif self.model_family == GEMMA2_MODEL_FAMILY:
+            last_end_of_turn = output.rfind('<end_of_turn>')
+            if last_end_of_turn != -1:
+                output = output[:last_end_of_turn]
         else:
             raise NotImplementedError(f"Model family for {self.model_name} not yet implemented")
         return output
