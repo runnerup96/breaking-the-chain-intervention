@@ -303,14 +303,12 @@ class TabFactIntervention:
             messages.append({"role": "assistant", "content": assistant_prefix})
             add_generation_prompt_status = False
 
-        prompt = self.tokenizer.apply_chat_template(
+        prompt = self.llm_model.apply_chat_template(
             messages,
-            tokenize=False,
-            add_generation_prompt=add_generation_prompt_status,
-            enable_thinking=False
+            add_generation_prompt=add_generation_prompt_status
         )
 
         if not add_generation_prompt_status:
-            prompt = prompt.rstrip(self.stop_token) if prompt.endswith(self.stop_token) else prompt
+            prompt = self.llm_model.clean_model_specific_completion(prompt)
 
         return prompt
