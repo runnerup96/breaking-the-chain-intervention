@@ -1,8 +1,8 @@
 
 import argparse
 import llm_model
-from datasets_for_intervention import wilds_reviews_intervention, wilds_reviews_dataset
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
+from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
 import os
 from tqdm import tqdm
 from datetime import datetime
@@ -30,18 +30,19 @@ if __name__ == "__main__":
     project_path = os.environ["PROJECT_PATH"]
 
     dataset = None
-    if args.evaluation_dataset == "amazon_reviews":
-        dataset_path = os.path.join(project_path, "statics/result_splits/test_balanced.json")
-        dataset = wilds_reviews_dataset.WildsReviewsDataset(dataset_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = wilds_reviews_intervention.WildsReviewsIntervention(llm_model.stop_token)
-        evaluator = None
-    elif args.evaluation_dataset == "ricechem":
+    if args.evaluation_dataset == "ricechem":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model.tokenizer)
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
+    elif args.evaluation_dataset == "tabfact":
+        dataset_path = os.path.join(project_path, "statics/result_splits/TabFact")
+        dataset = tabfact_dataset.TabFactDataset('~/datasets/Table-Fact-Checking/bootstrap/bootstrap_new.json',
+                                                 '~/datasets/Table-Fact-Checking/data/all_csv')
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
+        intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model.tokenizer)
+        evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [amazon_reviews, ricechem]")
@@ -92,12 +93,3 @@ if __name__ == "__main__":
     with open(path2save, "w") as f:
         json.dump(final_dataset_dict, f, ensure_ascii=False, indent=4)
     print(f"The results are saved to {path2save}!")
-
-
-
-            
-        
-        
-
-
-
