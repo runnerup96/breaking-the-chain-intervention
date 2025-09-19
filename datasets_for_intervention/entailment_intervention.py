@@ -328,17 +328,24 @@ def intervene_step_proof(step_proof: Optional[str],
 
 
 class EntailmentIntervention:
-    def __init__(self, dataset: EntailmentDataset, few_shot_examples: List[Dict]):
+    def __init__(self, dataset: EntailmentDataset, few_shot_examples: List[Dict], hsvt_mode: str):
         """
         Initialize the intervention class with dataset and stop token.
         
         Args:
             dataset: The EntailmentBank dataset instance
+            few_shot_examples: The few shot examples
+            hsvt_mode: The mode of HSVT intervention -- whether to convert the question to lowercase or to use paraphrases
         """
+        assert hsvt_mode in ["lower", "paraphrase"]
+
         self.dataset = dataset
         self.few_shot_examples = few_shot_examples
 
-        self.modes = ["delete", "replace", "rewire"]
+        self.edit_modes = ["delete", "replace", "rewire"]
+        self.hsvt_mode = hsvt_mode
+        if self.hsvt_mode == "paraphrase":
+            assert all(example["question_paraphrases"] is not None for example in self.dataset), "Dataset must have question paraphrases when using 'paraphrase' HSVT mode"
 
         self.question_prefix = "## Question\n"
         self.context_prefix = "## Context\n"
@@ -460,15 +467,17 @@ For each example, you first generate a proof, and then predict the final answer:
         # TODO: change HSVT intervention to something more meaningful than converting the question to lowercase
         hsvt_sample = deepcopy(entailment_sample)
         sample_id = entailment_sample['id']
-        hsvt_sample['question'] = hsvt_sample["question"].lower()
 
-        def calculate_new_expected_score(task_idx, checklist):
-            return sum(self.dataset.task2rubric_weights[task_idx][item] 
-                      for item, value in checklist.items() if value)
+        if self.hsvt_mode == "lower":
+            hsvt_sample['question'] = hsvt_sample["question"].lower()
+        elif self.hsvt_mode == "paraphrase":
+            n_paraphrases = len(hsvt_sample["question_paraphrases"])
+            hash_based_idx = hash(sample_id) % n_paraphrases
+            hsvt_sample['question'] = hsvt_sample["question_paraphrases"][hash_based_idx]
 
         # Local edits intervention -- invalidate the proof in one of the ways: delete, replace, rewire
         local_edits = []
-        for mode in self.modes:
+        for mode in self.edit_modes:
             local_edits_sample = deepcopy(entailment_sample)
             local_edits_sample['proof'] = intervene_step_proof(
                 local_edits_sample['proof'],
@@ -580,7 +589,7 @@ if __name__ == "__main__":
 
     val_dataset = EntailmentDataset(dev_path)
     few_shot_dataset = EntailmentDataset(train_path)
-    intervention = EntailmentIntervention(val_dataset, "<eos>", [sample for sample in few_shot_dataset[:5]])
+    intervention = EntailmentIntervention(val_dataset, [sample for sample in few_shot_dataset[:5]], hsvt_mode="paraphrase")
     print("-"*100)
     print("Prompt:")
     print(intervention.make_prompt(val_dataset[0], include_gold_structure=True))
