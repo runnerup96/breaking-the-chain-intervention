@@ -9,7 +9,23 @@ from datetime import datetime
 import json
 from torch.utils.data import DataLoader
 from copy import deepcopy
+from transformers.utils import logging
+import random
+import numpy as np
+import torch
 
+logging.set_verbosity_error()
+
+def fix_seed(seed=42):
+    """Fix random seeds for reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ['PYTHONHASHSEED'] = str(seed) 
 
 model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
@@ -28,8 +44,11 @@ if __name__ == "__main__":
     parser.add_argument("--evaluation_dataset", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--try_one_batch", type=bool, default=False)
+    parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
+    
+    fix_seed(args.seed)
 
     llm_model = llm_model.LLMModel(args.model_name)
 
