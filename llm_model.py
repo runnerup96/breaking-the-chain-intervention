@@ -3,6 +3,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import Dict, List, Union
 import re
 
+
 QWEN3_MODEL_FAMILY = "Qwen3"
 FALCON3_MODEL_FAMILY = "Falcon3"
 LLAMA32_MODEL_FAMILY = "Llama3.2"
@@ -119,6 +120,8 @@ class LLMModel:
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
+            do_sample=False,
+            num_beams=1
         )
         
         results = []
@@ -142,6 +145,8 @@ class LLMModel:
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
+            do_sample=False,
+            num_beams=1
         )
         
         results = []
@@ -168,6 +173,8 @@ class LLMModel:
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
+            do_sample=False,
+            num_beams=1
         )
         
         results = []
@@ -194,6 +201,8 @@ class LLMModel:
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
+            do_sample=False,
+            num_beams=1
         )
         
         results = []
