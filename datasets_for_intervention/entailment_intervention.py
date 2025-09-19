@@ -328,16 +328,14 @@ def intervene_step_proof(step_proof: Optional[str],
 
 
 class EntailmentIntervention:
-    def __init__(self, dataset: EntailmentDataset, llm_stop_token: str, few_shot_examples: List[Dict]):
+    def __init__(self, dataset: EntailmentDataset, few_shot_examples: List[Dict]):
         """
         Initialize the intervention class with dataset and stop token.
         
         Args:
             dataset: The EntailmentBank dataset instance
-            llm_stop_token: The stop token used by the LLM model
         """
         self.dataset = dataset
-        self.llm_stop_token = llm_stop_token
         self.few_shot_examples = few_shot_examples
 
         self.modes = ["delete", "replace", "rewire"]
