@@ -81,7 +81,7 @@ if __name__ == "__main__":
         paraphrases_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/aligned_test_question_paraphases.json")
         dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase")
+        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase")
         evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "averitec":
         dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
