@@ -6,6 +6,7 @@ import random
 from typing import List, Tuple, Dict, Optional
 from collections import defaultdict
 from copy import deepcopy
+from llm_model import LLMModel
 from datasets_for_intervention.entailment_dataset import EntailmentDataset
 
 class Rule:
@@ -328,7 +329,7 @@ def intervene_step_proof(step_proof: Optional[str],
 
 
 class EntailmentIntervention:
-    def __init__(self, dataset: EntailmentDataset, few_shot_examples: List[Dict], hsvt_mode: str):
+    def __init__(self, dataset: EntailmentDataset, llm_model: LLMModel, few_shot_examples: List[Dict], hsvt_mode: str):
         """
         Initialize the intervention class with dataset and stop token.
         
@@ -340,6 +341,7 @@ class EntailmentIntervention:
         assert hsvt_mode in ["lower", "paraphrase"]
 
         self.dataset = dataset
+        self.llm_model = llm_model
         self.few_shot_examples = few_shot_examples
 
         self.edit_modes = ["delete", "replace", "rewire"]
@@ -357,10 +359,31 @@ class EntailmentIntervention:
         self.small_final_answer_prefix = "## Final Answer"
         assert self.final_answer_prefix.startswith(self.small_final_answer_prefix)
     
-        self.system_prompt = """You are an expert at checking hypotheses correctness.
-You will be given a question, some context and a hypothesis.
-For each example, you first generate a proof, and then predict the final answer: whether the hypothesis is correct."""
+        self.system_prompt = """You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing an intermediate structure (a step-by-step logical proof) and then providing a final answer.
 
+Task explanation:
+- You are given a question, context containing factual sentences, and a hypothesis to evaluate.
+- You must construct a logical proof that traces the reasoning from context sentences to intermediate conclusions.
+- The final answer determines whether the hypothesis is correct based on your proof.
+
+Intermediate structure construction (Proof):
+- Use only the given context sentences and logical reasoning—do not assume or invent new facts.
+- Reference context sentences using identifiers (sent1, sent2, etc.) as they appear in the context.
+- Create intermediate conclusions (int1, int2, etc.) by combining sentences using logical rules.
+- Follow the format: "sentX & sentY -> intZ" for combining multiple sentences, or "sentX -> intZ" for single-sentence inferences.
+- Each step should represent a valid logical inference that brings you closer to evaluating the hypothesis.
+- Build your proof incrementally, where each intermediate conclusion can be used in subsequent steps.
+- The final step should connect your reasoning to the hypothesis being evaluated.
+
+Logical reasoning guidelines:
+- Ensure each inference step is logically sound and based on the information provided.
+- If multiple reasoning paths are possible, choose the most direct and clear one.
+
+Important output format:
+Your response must contain exactly two sections in this order:
+1) Proof: (step-by-step logical reasoning using the sentence reference format)
+2) Final Answer: Is the hypothesis correct? <Yes/No>
+"""
     
     def interventions_to_prompt(self, sample:dict):
         interventions = sample['structure_intervention']
@@ -514,14 +537,34 @@ For each example, you first generate a proof, and then predict the final answer:
         Returns:
             str: Formatted prompt for the LLM
         """
-        prompt = self.system_prompt + "\n\n"
+        prompt = self.system_prompt + "\n\nFEW-SHOT EXAMPLES:\n\n"
 
         prompt += "\n\n".join(f"# Example {i}\n{self.format_example(example, add_question_context_hypothesis=True, add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)}"
             for i, example in enumerate(self.few_shot_examples))
         # Proof constitutes the gold structure. Check part is only present if the gold structure is included, otherwise model must generate it.
         # Gold answer is never included, since the model always must generate it.
         prompt += f"\n\n# Example {len(self.few_shot_examples)}\n" + self.format_example(sample, add_question_context_hypothesis=True,
-            add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
+            add_proof=False, add_final_answer_prefix=False, add_gold_answer=False)
+        
+        messages = [{"role": "user", "content": prompt}]
+
+        assistant_message = ""
+        add_generation_prompt_status = True
+        if include_gold_structure:
+            assistant_message = self.format_example(sample, add_question_context_hypothesis=False,
+                add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
+            messages.append({"role": "assistant", "content": assistant_message})
+            add_generation_prompt_status = False
+
+        prompt = self.llm_model.apply_chat_template(
+            messages,
+            add_generation_prompt=add_generation_prompt_status
+        )
+
+        # remove the end token if it is present since we need to continue the generation
+        if add_generation_prompt_status == False:
+            prompt = self.llm_model.clean_model_specific_completion(prompt)
+        
         return prompt
 
     def make_message_list(self, sample: dict, include_gold_structure: bool) -> List[Dict[str, str]]:
