@@ -1,16 +1,15 @@
+from tkinter import E
 import unittest
 from copy import deepcopy
 
 from datasets_for_intervention.entailment_dataset import EntailmentDataset
 from datasets_for_intervention.entailment_evaluation import EntailmentEvaluation
 from datasets_for_intervention.entailment_intervention import serialize_step_proof, parse_step_proof
-
+from entailment_mocks import EntailmentBankDatasetMock
 
 class TestEntailmentEvaluation(unittest.TestCase):
     def setUp(self):
-        dataset_path = \
-            "/disk/4tb/seleznev/breaking-the-chain-intervention/entailment_trees_emnlp2021_data_v3/dataset/task_2/dev_first5.jsonl"
-        self.dataset = EntailmentDataset(dataset_path)
+        self.dataset = EntailmentBankDatasetMock()
         # intervention_logic is only used for modes in local_edit_influence; pass a minimal stub
         class Stub:
             modes = ["delete", "replace", "rewire"]

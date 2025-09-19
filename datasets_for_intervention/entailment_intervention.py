@@ -449,6 +449,8 @@ Your response must contain exactly two sections in this order:
             return None
         if not (self.small_final_answer_prefix in completion):
             return None
+        if completion.find(self.small_final_answer_prefix) < completion.find(self.proof_prefix):
+            return None
         proof_plus_something = completion.split(self.proof_prefix)[1].strip()
         proof = proof_plus_something.split(self.small_final_answer_prefix)[0].strip()
         return proof
