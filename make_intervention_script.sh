@@ -34,7 +34,7 @@ datasets=("ricechem" "averitec")
 
 models=(
     "Qwen/Qwen3-4B"
-    "Qwen/Qwen3-8B"
+    # "Qwen/Qwen3-8B"
     "tiiuae/Falcon3-3B-Instruct"
 #    "tiiuae/Falcon3-7B-Instruct"
 #    "alpindale/Llama-3.2-3B-Instruct"
