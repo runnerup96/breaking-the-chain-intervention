@@ -120,18 +120,19 @@ class AVeriTeCEvaluation:
                         evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx] = []
                     evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx].append(local_edit_intervention_match)
 
-            # Global intervention
-            global_intervention = structure_intervention['Global'][0]
-            expected_global_verdict = global_intervention['label']
-            global_result_after_intervention = global_intervention['label_after_intervention']
-            global_intervention_match = self.compare_verdicts(expected_global_verdict, global_result_after_intervention)
+            # Global intervention (we do it only if more then one local edit)
+            if len(local_edits_intervention) > 1:
+                global_intervention = structure_intervention['Global'][0]
+                expected_global_verdict = global_intervention['label']
+                global_result_after_intervention = global_intervention['label_after_intervention']
+                global_intervention_match = self.compare_verdicts(expected_global_verdict, global_result_after_intervention)
 
-            if completion_type == "gold_structure":
-                evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
-                    global_intervention_match)
-            elif completion_type == "structure_prediction":
-                evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
-                    global_intervention_match)
+                if completion_type == "gold_structure":
+                    evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
+                        global_intervention_match)
+                elif completion_type == "structure_prediction":
+                    evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
+                        global_intervention_match)
 
         aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
         self.print_evaluation_metrics(aggregated_evaluation_metrics)
