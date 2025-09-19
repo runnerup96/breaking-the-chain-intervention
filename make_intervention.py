@@ -75,7 +75,7 @@ if __name__ == "__main__":
         dataset = tabfact_dataset.TabFactDataset('~/datasets/Table-Fact-Checking/bootstrap/bootstrap_new.json',
                                                  '~/datasets/Table-Fact-Checking/data/all_csv')
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model.tokenizer)
+        intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model)
         evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"

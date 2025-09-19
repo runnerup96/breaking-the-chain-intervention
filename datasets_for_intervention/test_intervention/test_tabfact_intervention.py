@@ -1,7 +1,7 @@
 import unittest
 import re
 from copy import deepcopy
-from llm_mocks import FakeTokenizer
+from llm_mocks import FakeLLMModel
 from tabfact_mocks import TabFactDatasetMock
 from datasets_for_intervention.tabfact_intervention import TabFactIntervention
 
@@ -9,8 +9,8 @@ from datasets_for_intervention.tabfact_intervention import TabFactIntervention
 class TestTabFactIntervention(unittest.TestCase):
     def setUp(self):
         self.dataset = TabFactDatasetMock()
-        self.tokenizer = FakeTokenizer()
-        self.ic = TabFactIntervention(self.dataset, self.tokenizer)
+        self.llm_model = FakeLLMModel()
+        self.ic = TabFactIntervention(self.dataset, self.llm_model)
 
         # Fix prompt for deterministic tests
         self.ic.make_prompt = lambda sample, include_gold_structure=True: f"PROMPT(gold={include_gold_structure})"

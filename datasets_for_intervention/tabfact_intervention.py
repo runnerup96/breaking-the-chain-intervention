@@ -4,10 +4,9 @@ import re
 
 
 class TabFactIntervention:
-    def __init__(self, dataset, tokenizer):
+    def __init__(self, dataset, llm_model):
         self.dataset = dataset
-        self.tokenizer = tokenizer
-        self.stop_token = tokenizer.eos_token
+        self.llm_model = llm_model
 
         self.query_prefix = "Verifier Query:"
         self.final_verdict_prefix = "final verdict:"
