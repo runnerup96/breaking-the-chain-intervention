@@ -58,13 +58,16 @@ class EntailmentEvaluation:
             return None
         if isinstance(value, str):
             v = value.strip().lower()
-            if v in {"-1"}:
+            contains_positive = any([ans in v for ans in ["1", "true", "yes"]])
+            contains_negative = any([ans in v for ans in ["0", "false", "no"]])
+            
+            if contains_negative and contains_positive:
                 return "invalid"
-            if v in {"1", "true", "yes"}:
+            elif contains_positive:
                 return True
-            if v in {"0", "false", "no"}:
+            elif contains_negative:
                 return False
-            return None
+            return "invalid"
         return None
 
     def compare_binary_targets(self, gold_bool, predicted_value):
