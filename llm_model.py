@@ -11,7 +11,7 @@ GEMMA2_MODEL_FAMILY = "Gemma2"
 
 
 class LLMModel:
-    def __init__(self, model_name: str, device_map: str = "auto", torch_dtype: torch.dtype = torch.bfloat16):
+    def __init__(self, model_name: str, device_map: str = "cuda", torch_dtype: torch.dtype = torch.bfloat16):
         """
         Initialize the LLM model.
         
