@@ -321,6 +321,116 @@ def intervene_random_semantic_flip(
     
     return current_prog
 
+
+def generate_three_false_variants(prog: str,
+                                  col_distractors=None,
+                                  value_distractors=None,
+                                  entity_swaps=None,
+                                  seed: int = 0,
+                                  dummy_value: str = "__dummy__",
+                                  impossible_left: str = "__IMP_A__",
+                                  impossible_right: str = "__IMP_B__"):
+    """
+    Возвращает список из 3 словарей:
+      {"expression": <dsl_expr_str>, "explanation": <short_str>}
+    Гарантирует 3 варианта (без None).
+    Стратегии:
+      1) Попытаться инвертировать верхний оператор. Если нет — eq{IMP_A, IMP_B}=True.
+      2) Попробовать semantic flip (через distractors). Если не удалось — "сломать" первый filter/hop.
+         Если и этого нет — eq{IMP_A_2, IMP_B_2}=True.
+      3) Жёсткая обёртка: and{False; <expr>}=True.
+    """
+    rng = random.Random(seed)
+    node, tail = parse_program(prog)
+    variants = []
+    seen = set()
+
+    def _add_variant(expr_str, expl):
+        if expr_str in seen:
+            expr_str = expr_str.replace("=True", f"#{len(seen)}=True").replace("=False", f"#{len(seen)}=False")
+        seen.add(expr_str)
+        variants.append({"expression": expr_str, "explanation": expl})
+
+    # ---------- Variant 1: invert top-level ----------
+    opposites = {
+        "greater": "less",
+        "less": "greater",
+        "greater_eq": "less",
+        "less_eq": "greater",
+        "eq": "not_eq",
+        "not_eq": "eq",
+        "all_greater": "all_less",
+        "all_less": "all_greater",
+        "all_greater_eq": "all_less",
+    }
+    if isinstance(node, Call) and node.name in opposites:
+        inv = Call(opposites[node.name], list(node.args))
+        _add_variant(serialize(inv, tail),
+                     f"Inverted top-level operator {node.name} → {opposites[node.name]}")
+    else:
+        contradiction = Call("eq", [Lit(impossible_left), Lit(impossible_right)])
+        _add_variant(serialize(contradiction, "=True"),
+                     "Forced contradiction eq of two different constants")
+
+    # ---------- Variant 2: semantic flip OR dummy break ----------
+    flipped = None
+    if col_distractors and value_distractors and entity_swaps:
+        flipped = intervene_random_semantic_flip(
+            prog, col_distractors, value_distractors, entity_swaps,
+            seed=seed, num_changes=1
+        )
+    if flipped and flipped != prog:
+        _add_variant(flipped, "Applied semantic flip (changed filter/hop/constant)")
+    else:
+        # fallback: try breaking first filter value
+        def _is_filter_value_target(n):
+            return (isinstance(n, Call) and n.name.startswith("filter_")
+                    and len(n.args) >= 3 and isinstance(n.args[2], Lit))
+        def _repl_filter_value(n):
+            new_args = list(n.args)
+            new_args[2] = Lit(dummy_value)
+            return Call(n.name, new_args)
+        node2, changed = replace_first(node, _is_filter_value_target, _repl_filter_value)
+        if changed:
+            _add_variant(serialize(node2, tail),
+                         f"Replaced first filter value with dummy `{dummy_value}`")
+        else:
+            # try hop target
+            def _is_hop_target(n):
+                return (isinstance(n, Call) and n.name == "hop"
+                        and len(n.args) >= 2 and isinstance(n.args[1], Lit))
+            def _repl_hop_target(n):
+                new_args = list(n.args)
+                new_args[1] = Lit("__bad_field__")
+                return Call(n.name, new_args)
+            node3, changed2 = replace_first(node, _is_hop_target, _repl_hop_target)
+            if changed2:
+                _add_variant(serialize(node3, tail),
+                             "Changed first hop target field to a non-existent field `__bad_field__`")
+            else:
+                contradiction2 = Call("eq", [Lit(impossible_left+"_2"),
+                                             Lit(impossible_right+"_2")])
+                _add_variant(serialize(contradiction2, "=True"),
+                             "Fallback contradiction (no filter/hop found)")
+
+    # ---------- Variant 3: wrapper ----------
+    wrapper = Call("and", [Lit("False"), node])
+    _add_variant(serialize(wrapper, "=True"),
+                 "Wrapped expression with and{False; <expr>} to force False")
+
+    # safety: ensure exactly 3
+    if len(variants) > 3:
+        variants = variants[:3]
+    while len(variants) < 3:
+        last = variants[-1]
+        expr = last["expression"].replace("=True", f"#dup{len(variants)}=True").replace("=False", f"#dup{len(variants)}=False")
+        variants.append({"expression": expr,
+                         "explanation": last["explanation"]+" (dup)"})
+
+    return variants
+
+
+
 if __name__ == "__main__":
   prog = "and{only{filter_eq{all_rows; nationality; united states}}; eq{hop{filter_eq{all_rows; nationality; united states}; athlete}; shawn crawford}}=True"
 

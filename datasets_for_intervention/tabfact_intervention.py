@@ -1,6 +1,7 @@
-from .tabfact_intervention_helper import intervene_random_semantic_flip
+from .tabfact_intervention_helper import generate_three_false_variants
 from copy import deepcopy
 import re
+import numpy as np
 
 
 class TabFactIntervention:
@@ -9,7 +10,7 @@ class TabFactIntervention:
         self.llm_model = llm_model
 
         self.query_prefix = "Verifier Query:"
-        self.final_verdict_prefix = "final verdict:"
+        self.final_verdict_prefix = "execution result:"
 
     def interventions_to_prompt(self, sample:dict):
         interventions = sample['structure_intervention']
@@ -21,7 +22,7 @@ class TabFactIntervention:
 
     def infer_completion(self, completion: str) -> bool:
         decision_prefixes = [
-            "final verdict:",
+            "execution result:",
             "final decision:",
             "final answer:",
             "answer:",
@@ -59,7 +60,7 @@ class TabFactIntervention:
             result = candidates[-1]
             return True if result == "true" else False
 
-        print(f"[WARNING] Unexpected verdict: {completion}")
+        print(f"[WARNING] Unexpected result: {completion}")
 
         return None
 
@@ -89,6 +90,7 @@ class TabFactIntervention:
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
         for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
+            sample['structure_intervention'][intervention_type][idx]['completion'] = completion
             sample['structure_intervention'][intervention_type][idx]['result_after_intervention'] = self.infer_completion(completion)
         return sample
 
@@ -152,7 +154,13 @@ class TabFactIntervention:
 
         if sample['completion_type'] == "structure_prediction":
             predicted_expression = self._extract_verifier_expression(sample, completion)
+            predicted_answer = self.infer_completion(completion)
+            sample['base_comletion'] = completion
             sample['verifier_query_gt'] = predicted_expression
+            sample['result'] = predicted_answer
+        elif sample['completion_type'] == "gold_structure":
+            gold_answer = self.infer_completion(completion)
+            sample['result'] = gold_answer
 
         interventions = self.make_structure_intervention(sample)
         sample['structure_intervention'] = interventions
@@ -172,54 +180,35 @@ class TabFactIntervention:
         column_values = distractors.get('values', {})
         entity_swaps = distractors.get('entity_swaps', [])
 
-        # 1. HSVT: Replace the original question with another one related to the same table ---
+        # 1. HSVT ---
         hsvt_sample = deepcopy(sample)
         hsvt_sample['statement'] = self.dataset.get_random_alternate_question(sample)
 
-        # 2. Local Edits: Randomly replace several entities in the arguments of expression functions with others from the same table ---
+        # 2. Local Edits ---
         local_edits = []
+        #if sample.get("completion_type") == "structure_prediction":
+            # динамическая генерация
+        generated_edits = generate_three_false_variants(
+            original_expression,
+            col_distractors={"filter": table_columns, "hop": table_columns, "aggregation": table_columns},
+            value_distractors=column_values,
+            entity_swaps={"value": entity_swaps},
+            seed=np.random.randint(0, 99999)
+        )
+        for edit in generated_edits:
+            local_sample = deepcopy(sample)
+            local_sample['verifier_query_gt'] = edit['expression']
+            local_sample['local_edit_explanation'] = edit['explanation']
+            local_edits.append(local_sample)
+        # else:
+        #     # fallback: готовые local edits из датасета
+        #     random_sample_edits = self.dataset.get_random_local_edits(sample)
+        #     for e in random_sample_edits:
+        #         local_sample = deepcopy(sample)
+        #         local_sample['verifier_query_gt'] = e
+        #         local_edits.append(local_sample)
 
-        col_distractors = {'filter_eq': table_columns, 'hop': table_columns, 'aggregation': table_columns}
-        value_distractors = column_values
-        entity_swaps_dict = {'entity': entity_swaps}
-
-        strategies = [
-            {'num_changes': 1, 'seed_offset': 0},
-            {'num_changes': 2, 'seed_offset': 1000},
-            {'num_changes': 3, 'seed_offset': 2000}
-        ]
-        
-        for i, strategy in enumerate(strategies):
-            for attempt in range(5):
-                local_sample = deepcopy(sample)
-                new_expression = intervene_random_semantic_flip(
-                    prog=original_expression,
-                    col_distractors=col_distractors,
-                    value_distractors=value_distractors,
-                    entity_swaps=entity_swaps_dict,
-                    seed=hash(sample['idx']) + strategy['seed_offset'] + attempt,
-                    num_changes=strategy['num_changes']
-                )
-                
-                if new_expression != original_expression:
-                    local_sample['verifier_query_gt'] = new_expression
-                    local_edits.append(local_sample)
-                    break
-            else:
-                # Fallback: минимальное изменение
-                local_sample = deepcopy(sample)
-                new_expression = intervene_random_semantic_flip(
-                    prog=original_expression,
-                    col_distractors=col_distractors,
-                    value_distractors=value_distractors,
-                    entity_swaps=entity_swaps_dict,
-                    seed=hash(sample['idx']) + 9999,
-                    num_changes=1
-                )
-                local_sample['verifier_query_gt'] = new_expression
-                local_edits.append(local_sample)
-
-        # 3. Global Edit: Completely replace the expression from the model with another one related to the same table ---
+        # 3. Global ---
         global_sample = deepcopy(sample)
         global_sample['verifier_query_gt'] = self.dataset.get_random_alternate_program(sample)
 
@@ -233,35 +222,57 @@ class TabFactIntervention:
         user_prompt = (
             "You are an expert table fact-checking system. "
             "Your task is to evaluate a claim against tabular data by first constructing a verifier query "
-            "using the provided Domain Specific Language (DSL), and then give a final verdict.\n\n"
+            "using the provided Domain Specific Language (DSL), and then give a result of this verifier query execution as final verdict.\n\n"
 
             "### TASK EXPLANATION\n"
-            "1. **Construct a Verifier Query**: Generate a logical expression using the DSL functions below. "
-            "This query should precisely capture the logical steps needed to verify the statement against the table.\n"
-            "2. **Make a Final Verdict**: Based SOLELY on the result of evaluating your Verifier Query, "
-            "output a final verdict: `True` if the statement is supported by the table, `False` otherwise.\n\n"
+            "You have to do the following:\n"
+            "1. **Construct a Verifier Query**: Analyze the claim and the table. Generate a precise logical expression using the DSL functions below." 
+            "This expression MUST be executable and should encode the steps to verify the claim.\n"
+            "2. **Output the Execution Result**: EXECUTE the Verifier Query you just constructed. Output the boolean result (`True` or `False`) of this execution. This result is your final answer.\n\n"
 
             "### DOMAIN SPECIFIC LANGUAGE (DSL)\n"
             "Use these functions to build your verifier query:\n"
-            "- `greater{A, B}`: Returns True if A > B\n"
-            "- `less{A, B}`: Returns True if A < B\n"
-            "- `eq{A, B}`: Returns True if A == B\n"
-            "- `not_eq{A, B}`: Returns True if A != B\n"
-            "- `and{A, B, ...}`: Returns True if all arguments are True\n"
-            "- `hop{Row, Field}`: Extracts the value of 'Field' from the given 'Row'\n"
-            "- `count{C}`: Returns the number of rows in the set 'C'\n"
-            "- `only{C}`: Returns True if the set 'C' contains exactly one row\n"
-            "- `filter_eq{C, Field, Value}`: Returns rows from 'C' where 'Field' equals 'Value'\n"
-            "- `filter_greater{C, Field, Value}`: Returns rows from 'C' where 'Field' > 'Value'\n"
-            "- `argmax{C, Field}`: Returns the row from 'C' with the maximum value in 'Field'\n"
-            "- `max{C}`: Returns the maximum value in the set 'C'\n"
-            "- `all_rows`: A special constant representing all rows in the table\n\n"
+            "- `greater{A, B}`: A is greater than B, return True, other return False"
+            "- `hop{Row, Field Name}`: Hop to the Field name column in the Row."
+            "- `count{C}`: Counting how many rows are in the given C Rows."
+            "- `eq{A, B}`: A is equal to B, return True, other return False"
+            "- `and{A, B, ...}`: Logical AND operation, return True if all arguments are True, otherwise return False"
+            "- `only{C}`: Check if the given set of rows C contains exactly one row, return True if so, otherwise return False"
+            "- `diff{A, B}`: Calculate the difference between A and B (A - B)"
+            "- `avg{C}`: Calculate the average value of the specified field across the given set of rows C"
+            "- `all_greater{C, Value}`: Check if all values in the specified field across the given set of rows C are greater than the given Value, return True if so"
+            "- `sum{C}`: Calculate the sum of the values in the specified field across the given set of rows C"
+            "- `all_eq{C, Value}`: Check if all values in the specified field across the given set of rows C are equal to the given Value, return True if so"
+            "- `filter_eq{C, Field Name, Value}`: Filter the set of rows C to include only those where the specified Field Name equals the given Value"
+            "- `filter_greater{C, Field Name, Value}`: Filter the set of rows C to include only those where the specified Field Name is greater than the given Value"
+            "- `filter_not_eq{C, Field Name, Value}`: Filter the set of rows C to include only those where the specified Field Name is not equal to the given Value"
+            "- `filter_less{C, Field Name, Value}`: Filter the set of rows C to include only those where the specified Field Name is less than the given Value"
+            "- `argmax{C, Field Name}`: Return the row from the set C that has the maximum value in the specified Field Name"
+            "- `argmin{C, Field Name}`: Return the row from the set C that has the minimum value in the specified Field Name"
+            "- `max{C}`: Find the maximum value in the specified field across the given set of rows C"
+            "- `min{C}`: Find the minimum value in the specified field across the given set of rows C"
+            "- `filter_greater_eq{C, Field Name, Value}`: Filter the set of rows C to include only those where the specified Field Name is greater than or equal to the given Value"
+            "- `filter_less_eq{C, Field Name, Value}`: Filter the set of rows C to include only those where the specified Field Name is less than or equal to the given Value"
+            "- `all_greater_eq{C, Value}`: Check if all values in the specified field across the given set of rows C are greater than or equal to the given Value, return True if so"
+            "- `all_less{C, Value}`: Check if all values in the specified field across the given set of rows C are less than the given Value, return True if so"
+            "- `not_eq{A, B}`: A is not equal to B, return True, other return False\n\n"
+
+            "### CRITICAL: UNDERSTANDING THE `=True`/`=False` SUFFIX\n"
+
+            "The suffix `=True` or `=False` at the end of every expression is NOT a label or a guess. It is an INTEGRAL PART of the logical statement."
+
+            "*   **Meaning of `expr=True`**: This means Evaluate the expression `expr`. If the result is logically `True`, then the entire statement is `True`. If `expr` evaluates to `False`, then the entire statement is `False`."
+            "*   **Meaning of `expr=False`**: This means Evaluate the expression `expr`. If the result is logically `False`, then the entire statement is `True`. If `expr` evaluates to `True`, then the entire statement is `False`."
+            "*   **Mandatory Format**: The expression MUST end with either `=True` or `=False`. No other suffix (like `=Maybe`, `=Error`, `=Unknown`, `=1.2`, `=name` e.t.c.) is allowed. The output format is strictly binary."
+            "*   **Handling Invalid/Impossible Expressions**: If the expression is logically invalid, impossible to evaluate, or contains a contradiction (e.g., comparing incompatible types, referencing a non-existent field), you MUST construct the expression so that it evaluates to `False` and append `=True`. For example:"
+            "    *   If the logic is broken, output: `eq{1; 0}=True` (which is `False=True`, a false statement)."
+            "    *   If a field doesn't exist, output: `eq{hop{all_rows; non_existent_field}; some_value}=True` (which should evaluate to `False`)."
+            "    *   The goal is to produce a syntactically valid DSL expression that is GUARANTEED to be logically `False` when the suffix `=True` is applied.\n\n"
 
             "### OUTPUT FORMAT\n"
-            "Your response must contain ONLY two lines and no other text:\n"
+            "No Thinking. Your response must contain ONLY two lines and no other text:\n"
             "Verifier Query: <your DSL expression ending with =True or =False>\n"
-            "Final Verdict: <True or False>\n\n"
-            "Use only True or False in your answer. If somethin wrong with the data use ERROR"
+            "Execution Result: <True or False>\n\n"
 
             "### FEW-SHOT EXAMPLES\n\n"
 
@@ -272,7 +283,7 @@ class TabFactIntervention:
             "2#Shawn Crawford#United States#1\n\n"
             "Claim: Usain Bolt won more gold medals than Shawn Crawford.\n"
             "Verifier Query: greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True\n"
-            "Final Verdict: True\n\n"
+            "Execution Result: True\n\n"
 
             "Example #2\n"
             "Table:\n"
@@ -281,7 +292,7 @@ class TabFactIntervention:
             "Ronaldo#AlNassr#25\n\n"
             "Claim: Ronaldo scored more goals than Messi.\n"
             "Verifier Query: greater{hop{filter_eq{all_rows; player; Ronaldo}; goals}; hop{filter_eq{all_rows; player; Messi}; goals}}=True\n"
-            "Final Verdict: False\n\n"
+            "Execution Result: False\n\n"
 
             "Example #3\n"
             "Table:\n"
@@ -290,9 +301,9 @@ class TabFactIntervention:
             "World Cup#2022#Qatar\n\n"
             "Claim: The World Cup was held after the Olympics.\n"
             "Verifier Query: greater{hop{filter_eq{all_rows; event; World Cup}; year}; hop{filter_eq{all_rows; event; Olympics}; year}}=True\n"
-            "Final Verdict: True\n\n"
+            "Execution Result: True\n\n"
 
-            "Now follow the same structure for the given input.\n\n"
+            "Now follow the same structure for the given input. Follow the answer structure described above!\n\n"
             "Table:\n"
             f"{sample['table_html_csv']}\n\n"
             "Claim:\n"
@@ -304,7 +315,7 @@ class TabFactIntervention:
         add_generation_prompt_status = True
 
         if include_gold_structure:
-            assistant_prefix = f"Verifier Query: {sample['verifier_query_gt']}\nFinal Verdict: "
+            assistant_prefix = f"Verifier Query: {sample['verifier_query_gt']}\nExecution Result:"
             messages.append({"role": "assistant", "content": assistant_prefix})
             add_generation_prompt_status = False
 

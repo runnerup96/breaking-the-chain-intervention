@@ -8,15 +8,19 @@ from typing import Callable, List, Dict, Any
 
 
 class OpenrouterBatchApiClass:
-    def __init__(self, model: str, api_link: str, token: str, max_tokens: int = 4096, num_threads: int = 20):
+    def __init__(self, model: str, api_link: str, token: str, max_tokens: int = 4096, num_threads: int = 20, http_client: str = None):
         self.model = model
         self.api_link = api_link
         self.token = token
         self.max_tokens = max_tokens
         self.num_threads = num_threads
+        self.http_client = http_client
     
     def _send_question(self, messages: List[Dict[str, str]], max_retries: int = 10) -> Dict[str, Any]:
-        client = openai.OpenAI(api_key=self.token, base_url=self.api_link)
+        if self.http_client:
+            client = openai.OpenAI(api_key=self.token, base_url=self.api_link, http_client=self.http_client)
+        else:
+            client = openai.OpenAI(api_key=self.token, base_url=self.api_link)
 
         for attempt in range(max_retries):
             try:
