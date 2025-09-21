@@ -30,15 +30,15 @@ get_batch_size() {
 project_path="/home/somov/frontdoor_llm_causality"
 CUDA_DEVICE_NUMBER=0
 
-datasets=("ricechem" "averitec")
+datasets=("averitec" "ricechem")
 
 models=(
-    "Qwen/Qwen3-4B"
+#    "Qwen/Qwen3-4B"
     # "Qwen/Qwen3-8B"
-    "tiiuae/Falcon3-3B-Instruct"
+#    "tiiuae/Falcon3-3B-Instruct"
 #    "tiiuae/Falcon3-7B-Instruct"
 #    "alpindale/Llama-3.2-3B-Instruct"
-    "alpindale/Llama-3.2-1B-Instruct"
+#    "alpindale/Llama-3.2-1B-Instruct"
     "google/gemma-2-2b-it"
 #    "google/gemma-2-9b-it"
 )

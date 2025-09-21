@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 logging.set_verbosity_error()
+torch._dynamo.config.accumulated_cache_size_limit = 2048
 
 def fix_seed(seed=42):
     """Fix random seeds for reproducibility"""
@@ -29,6 +30,7 @@ def fix_seed(seed=42):
 
 model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
+        "Qwen/Qwen3-8B": "qwen3-8B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
@@ -92,7 +94,7 @@ if __name__ == "__main__":
                                                    skip_special_tokens=False)
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
-        for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
+        for sample, model_output, completion_type in tqdm(zip(doubled_batch, batched_model_outputs, completion_type_list), total=len(doubled_batch)):
             sample['completion_type'] = completion_type
             # Mediator(DO_X)
             try:

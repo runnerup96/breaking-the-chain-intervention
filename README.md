@@ -1,4 +1,5 @@
-## Breaking the chain ⛓️‍💥: A Front-Door Causal Analysis of Chain-of-Thought Mediation
+## Breaking the Chain ⛓️‍💥: A Causal Analysis of Faithful Reasoning in LLMs
+
 
 ## Code Structure Overview
 
