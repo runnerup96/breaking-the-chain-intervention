@@ -15,6 +15,7 @@ class TabFactDataset:
 
         self.table_id2alt_questions = {}
         self.table_id2alt_programs = {}
+        self.sample_id2local_edits = {}
 
         self.process_data()
 
@@ -72,37 +73,6 @@ class TabFactDataset:
                 "entity_swaps": []
             }
 
-    def process_data(self):
-        self.data = []
-
-        for table_id, statements_list in self.queries_data.items():
-            if table_id not in self.tables:
-                print(f"Warning: Table file '{table_id}' not found in {self.tables_dir}. Skipping.")
-                continue
-
-            table_content = self.tables[table_id]
-
-            table_path = os.path.join(self.tables_dir, table_id)
-            distractors = self._parse_table_for_distractors(table_path)
-
-            for item in statements_list:
-                statement = self._preprocess_text(item[0])
-                verifier_query_gt = self._preprocess_text(item[4]) 
-
-                sample_id = self._generate_sample_id(table_id, statement)
-
-                sample = {
-                    "idx": sample_id,
-                    "table_id": table_id,
-                    "table_html_csv": table_content,
-                    "statement": statement,
-                    "distractors": distractors,
-                    "verifier_query_gt": verifier_query_gt,
-                }
-                self.data.append(sample)
-
-        print(f"Total processed samples: {len(self.data)}")
-
     
     def process_data(self):
         self.data = []
@@ -127,6 +97,7 @@ class TabFactDataset:
 
                 alt_questions = [self._preprocess_text(q) for q in entry.get("alternate_questions", [])]
                 alt_programs = [self._preprocess_text(p) for p in entry.get("alternate_programs", [])]
+                local_edits = [self._preprocess_text(p) for p in entry.get("local_edits", [])]
 
                 all_alt_questions.extend(alt_questions)
                 all_alt_programs.extend(alt_programs)
@@ -144,9 +115,11 @@ class TabFactDataset:
                     "distractors": distractors,
                 }
                 self.data.append(sample)
+                self.sample_id2local_edits[sample_id] = local_edits
 
             self.table_id2alt_questions[table_id] = list(set(all_alt_questions))
             self.table_id2alt_programs[table_id] = list(set(all_alt_programs))
+            
 
     def get_random_alternate_question(self, sample: dict) -> str:
         table_id = sample['table_id']
@@ -171,6 +144,11 @@ class TabFactDataset:
                 return orig_prog[:-len("=False")] + "=True"
             else:
                 return orig_prog
+            
+    def get_random_local_edits(self, sample: dict, n=3) -> str:
+        sample_id = sample['idx']
+        pool = self.sample_id2local_edits.get(sample_id, [])
+        return np.random.choice(pool, size=n, replace=False).tolist()
 
     def __len__(self):
         return len(self.data)

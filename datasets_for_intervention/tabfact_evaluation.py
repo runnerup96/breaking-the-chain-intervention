@@ -102,7 +102,7 @@ class TabFactEvaluation:
 
             # Retrieve predictions
             predicted_expression = sample.get('verifier_query_gt', "")
-            predicted_label = sample.get('score', None)
+            predicted_label = sample.get('result', None)
 
             # --- 1. Performance Metrics ---
             label_match = self.compare_labels(gold_label, predicted_label)

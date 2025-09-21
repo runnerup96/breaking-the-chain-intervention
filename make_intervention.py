@@ -30,6 +30,7 @@ def fix_seed(seed=42):
 
 model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
+        "Qwen/Qwen3-8B": "qwen3-8B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
@@ -50,6 +51,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     fix_seed(args.seed)
+
+    torch._dynamo.config.cache_size_limit = 8192
 
     llm_model = llm_model.LLMModel(args.model_name)
 
@@ -72,7 +75,7 @@ if __name__ == "__main__":
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "tabfact":
         dataset_path = os.path.join(project_path, "statics/result_splits/Table-Fact-Checking")
-        dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap/bootstrap_new.json',
+        dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap/bootstrap_full.json',
                                                  f'{dataset_path}/data/all_csv')
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model)
