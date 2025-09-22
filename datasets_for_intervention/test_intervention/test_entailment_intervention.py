@@ -109,7 +109,29 @@ class TestEntailmentIntervention(unittest.TestCase):
         self.assertEqual(self.ic.infer_completion("## Final Answer\nYes"), 1)
         self.assertEqual(self.ic.infer_completion("## Final Answer\nNo"), 0)
         self.assertEqual(self.ic.infer_completion("## Final Answer\nmaybe"), -1)
+        self.assertEqual(self.ic.infer_completion("Final Answer\nYes"), 1)
+        self.assertEqual(self.ic.infer_completion("## Final Answer Is the hypothesis correct? Yes"), 1)
+        self.assertEqual(self.ic.infer_completion("# Final Answer\nYes"), 1)
+        self.assertEqual(self.ic.infer_completion("Final Answer\nNo"), 0)
+        self.assertEqual(self.ic.infer_completion("## Final Answer Is the hypothesis correct? No"), 0)
+        self.assertEqual(self.ic.infer_completion("# Final Answer\nNo"), 0)
         self.assertEqual(self.ic.infer_completion("Yes and No"), -1)
+
+    def test_extract_entailment_proof(self):
+        template_proof = "sent1 & sent2 -> int1; int1 & sent3 -> hypothesis"
+        self.assertEqual(self.ic._extract_entailment_proof(f"## Proof\n{template_proof}## Final Answer\nYes"), template_proof)
+        self.assertEqual(self.ic._extract_entailment_proof(f"## Proof\n{template_proof}## Final Answer\nNo"), template_proof)
+        self.assertEqual(self.ic._extract_entailment_proof(f"## Proof\n{template_proof}## Final Answer\nmaybe"), template_proof)
+        self.assertEqual(self.ic._extract_entailment_proof("Final Answer\nYes"), None)
+        self.assertEqual(self.ic._extract_entailment_proof("## Final Answer Is the hypothesis correct? Yes"), None)
+        self.assertEqual(self.ic._extract_entailment_proof("# Final Answer\nYes"), None)
+        # Handle formatting flexibly
+        self.assertEqual(self.ic._extract_entailment_proof(f"# Proof\n{template_proof} # Final Answer\nYes"), template_proof)
+        self.assertEqual(self.ic._extract_entailment_proof(f"Proof{template_proof}Final Answer\nYes"), template_proof)
+        self.assertEqual(self.ic._extract_entailment_proof(f"1) Proof:\n{template_proof} 2) Final Answer:\nYes"), template_proof)
+        self.assertEqual(self.ic._extract_entailment_proof(f"1) Proof:\n{template_proof} \n\n 2) Final Answer:\nYes"), template_proof)
+        
+        
 
     # Test parsing functions with incorrect/malformed completion formats
     def test_parsing_functions_handle_incorrect_formats(self):
@@ -121,8 +143,6 @@ class TestEntailmentIntervention(unittest.TestCase):
             "sent1 -> int1; ## Final Answer\nYes",
             # Missing "## Final Answer" section  
             "## Proof\nsent1 -> int1;",
-            # Wrong section headers
-            "# Proof\nsent1 -> int1; # Final Answer\nYes",
             # Empty completion
             "",
             # Only whitespace
@@ -131,6 +151,8 @@ class TestEntailmentIntervention(unittest.TestCase):
             "This is just random text without proper formatting",
             # Reversed order
             "## Final Answer\nYes\n## Proof\nsent1 -> int1;",
+            # Several proofs
+            "## Proof\nsent1 -> int1; ## Final Answer\nYes\n## Proof\nsent2 -> int2; ## Final Answer\nNo",
         ]
         
         for completion in test_cases_proof:
@@ -143,10 +165,7 @@ class TestEntailmentIntervention(unittest.TestCase):
         test_cases_answer = [
             # Missing exact prefix
             "## Final\nYes",
-            "Final Answer\nYes", 
-            "## Final Answer Is the hypothesis correct? Yes",  # Missing newline
             # Wrong formatting
-            "# Final Answer\nYes",
             "## final answer\nYes",  # Case sensitive
             # Empty or whitespace only
             "",
@@ -157,9 +176,9 @@ class TestEntailmentIntervention(unittest.TestCase):
         
         for completion in test_cases_answer:
             with self.subTest(completion=completion):
-                result = self.ic._extract_entailment_answer(completion)
+                result = self.ic.infer_completion(completion)
                 # Should return None for malformed input
-                self.assertIsNone(result, f"Expected None for malformed answer: {completion!r}")
+                self.assertEqual(result, -1, f"Expected -1 for malformed answer: {completion!r}")
         
         # Test make_intervention with malformed completions for structure_prediction
         s = deepcopy(self.sample)
