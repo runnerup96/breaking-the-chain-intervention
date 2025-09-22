@@ -353,11 +353,14 @@ class EntailmentIntervention:
         self.context_prefix = "## Context\n"
         self.hypothesis_prefix = "## Hypothesis\n"
         self.proof_prefix = "## Proof\n"
+        # Used for parsing later
+        self.small_proof_prefix = "Proof"
+        assert self.small_proof_prefix in self.proof_prefix 
 
         self.final_answer_prefix = "## Final Answer\nIs the hypothesis correct? "
         # Used for parsing later
-        self.small_final_answer_prefix = "## Final Answer"
-        assert self.final_answer_prefix.startswith(self.small_final_answer_prefix)
+        self.small_final_answer_prefix = "Final Answer"
+        assert self.small_final_answer_prefix in self.final_answer_prefix 
     
         self.system_prompt = """You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing an intermediate structure (a step-by-step logical proof) and then providing a final answer.
 
@@ -395,8 +398,14 @@ Your response must contain exactly two sections in this order:
 
     def infer_completion(self, completion):
         "extract only the completion after the intervention, when we test model ability to make a correct decision"
-        if self.small_final_answer_prefix in completion:
-            completion = completion.split(self.small_final_answer_prefix)[1].strip()
+        # Expecting exactly one final answer prefix
+        if completion.count(self.small_final_answer_prefix) != 1:
+            return -1
+    
+        completion = completion.split(self.small_final_answer_prefix)[1]
+        # Model might put ":" after the final answer
+        completion = completion.strip(":")
+        completion = completion.strip()
 
         if "Yes" in completion and "No" in completion:
             return -1
@@ -413,6 +422,7 @@ Your response must contain exactly two sections in this order:
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
         for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
+            sample['structure_intervention'][intervention_type][idx]['completion'] = completion
             sample['structure_intervention'][intervention_type][idx]['result_after_intervention'] = self.infer_completion(completion)
         return sample
 
@@ -445,20 +455,29 @@ Your response must contain exactly two sections in this order:
         return formatted_example
 
     def _extract_entailment_proof(self, completion):
-        if not (self.proof_prefix in completion):
+        if completion.count(self.small_proof_prefix) != 1:
             return None
-        if not (self.small_final_answer_prefix in completion):
+        if completion.count(self.small_final_answer_prefix) != 1:
             return None
         if completion.find(self.small_final_answer_prefix) < completion.find(self.proof_prefix):
             return None
-        proof_plus_something = completion.split(self.proof_prefix)[1].strip()
-        proof = proof_plus_something.split(self.small_final_answer_prefix)[0].strip()
-        return proof
+        
+        if self.proof_prefix in completion and self.final_answer_prefix in completion:
+            proof_plus_something = completion.split(self.proof_prefix)[1].strip()
+            proof = proof_plus_something.split(self.final_answer_prefix)[0].strip()
+            proof = proof.strip()
+            return proof
+        else:
+            # small proof prefix and small final answer prefix are definitely present due to the check above
+            proof_plus_something = completion.split(self.small_proof_prefix)[1]
+            # We need to whitespaces, hashtags and colons which are present in full prefixes
+            proof_plus_something = proof_plus_something.strip().strip(":#").strip()
+            proof = proof_plus_something.split(self.small_final_answer_prefix)[0]
+            # Sometimes model puts 2) before final answer section due to the system prompt -- we remove this.
+            proof = proof.replace("2)", "")
+            proof = proof.strip().strip(":#").strip()
 
-    def _extract_entailment_answer(self, completion):
-        if not (self.final_answer_prefix in completion):
-            return None
-        return completion.split(self.final_answer_prefix)[1].strip()
+        return proof
 
     def make_intervention(self, sample: dict, generated_output: dict):
         # TODO: support message list instead of prompts
@@ -469,7 +488,7 @@ Your response must contain exactly two sections in this order:
         # here we update the sample with the predicted structure, we have gold result in dataset
         if sample['completion_type'] == "structure_prediction":
             predicted_proof = self._extract_entailment_proof(completion)
-            predicted_answer = self._extract_entailment_answer(completion)
+            predicted_answer = self.infer_completion(completion)
             sample['proof'] = predicted_proof
             sample['score'] = predicted_answer
         elif sample['completion_type'] == "gold_structure":
