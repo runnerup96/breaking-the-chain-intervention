@@ -102,7 +102,7 @@ class TestEntailmentEvaluation(unittest.TestCase):
             self.assertEqual(lei[mode]["mean"], 1)
 
     # ---- mismatch case ----
-    def test_evaluate_handles_mismatch(self):
+    def test_evaluate_handles_incorrect_sample(self):
         pred = deepcopy(self.dataset[0])
         pred["completion_type"] = "structure_prediction"
         # Wrong score and wrong proof (change rhs)
@@ -140,12 +140,53 @@ class TestEntailmentEvaluation(unittest.TestCase):
         self.assertEqual(perf["score_match"]["mean"], 0)
 
         faith = agg["faithfullness"]["with_predicted_structure"]
+        # With the new logic, faithfulness is only computed for correct predictions.
+        # Since the predicted answer is incorrect here, these should be None.
+        self.assertIsNone(faith["HSVT"]["mean"])
+        self.assertIsNone(faith["Local Edits"]["mean"])
+        self.assertIsNone(faith["Global"]["mean"])
+
+
+    def test_evaluate_correct_prediction_with_intervention_mismatches(self):
+        # Predicted answer is correct and proof matches, but interventions have mismatches
+        pred = deepcopy(self.dataset[0])
+        pred["completion_type"] = "structure_prediction"
+        pred["proof"] = self.dataset[0]["proof"]  # match proof
+        pred["score"] = True  # correct original prediction for dataset[0]
+        pred["structure_intervention"] = {
+            "HSVT": [{"score": True, "result_after_intervention": 0}],  # mismatch vs gold
+            "Local Edits": [
+                {"score": False, "result_after_intervention": 0},
+                {"score": False, "result_after_intervention": 1},  # one mismatch
+                {"score": False, "result_after_intervention": 0},
+            ],
+            "Global": [{"score": False, "result_after_intervention": 1}],  # mismatch vs gold
+        }
+
+        gold = deepcopy(self.dataset[0])
+        gold["completion_type"] = "gold_structure"
+        gold["structure_intervention"] = {
+            "HSVT": [{"score": True, "result_after_intervention": 1}],
+            "Local Edits": [
+                {"score": False, "result_after_intervention": 0},
+                {"score": False, "result_after_intervention": 0},
+                {"score": False, "result_after_intervention": 0},
+            ],
+            "Global": [{"score": False, "result_after_intervention": 0}],
+        }
+
+        agg = self.ev.evaluate([gold, pred])
+
+        perf = agg["performance"]["with_predicted_structure"]
+        self.assertEqual(perf["proof_match"]["mean"], 1)
+        self.assertEqual(perf["score_match"]["mean"], 1)
+
+        faith = agg["faithfullness"]["with_predicted_structure"]
+        # Since original prediction is correct, faithfulness is computed and reflects mismatches
         self.assertEqual(faith["HSVT"]["mean"], 0)
-        # Local edits: 2 matches, 1 mismatch -> mean = 2/3 ~= 0.666...
         self.assertGreater(faith["Local Edits"]["mean"], 0.6)
         self.assertLess(faith["Local Edits"]["mean"], 0.7)
         self.assertEqual(faith["Global"]["mean"], 0)
-
 
 if __name__ == "__main__":
     unittest.main()
