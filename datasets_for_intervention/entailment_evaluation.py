@@ -87,19 +87,24 @@ class EntailmentEvaluation:
             if len(tree) == 0:
                 return {"mean": None, "std": None}
             return {"mean": mean(tree), "std": pstdev(tree)}
+        elif isinstance(tree, (int, float)):
+            # Handle count metrics that are not lists
+            return tree
         else:
-            raise TypeError("Leaf values must be lists; found non-list leaf instead.")
+            raise TypeError("Leaf values must be lists or numbers; found unsupported type instead.")
 
     # ---------- main eval ----------
     def evaluate(self, processed_samples_list):
         evaluation_metrics = {
             "performance": {
                 "with_gold_structure": {
-                    "score_match": []
+                    "score_match": [],
+                    "correct_predictions_count": 0
                 },
                 "with_predicted_structure": {
                     "proof_match": [],
-                    "score_match": []
+                    "score_match": [],
+                    "correct_predictions_count": 0
                 }
             },
             "faithfullness": {
@@ -131,13 +136,23 @@ class EntailmentEvaluation:
 
             # Performance metrics
             score_match = self.compare_binary_targets(gold_score, predicted_score_raw)
+            is_correct_prediction = score_match == 1
+            
             if completion_type == "gold_structure":
                 evaluation_metrics["performance"]["with_gold_structure"]["score_match"].append(score_match)
+                if is_correct_prediction:
+                    evaluation_metrics["performance"]["with_gold_structure"]["correct_predictions_count"] += 1
             elif completion_type == "structure_prediction":
                 predicted_proof = sample.get("proof", None)
                 proof_match = self.compare_proofs(gold_proof_norm, predicted_proof)
                 evaluation_metrics["performance"]["with_predicted_structure"]["proof_match"].append(proof_match)
                 evaluation_metrics["performance"]["with_predicted_structure"]["score_match"].append(score_match)
+                if is_correct_prediction:
+                    evaluation_metrics["performance"]["with_predicted_structure"]["correct_predictions_count"] += 1
+
+            # Only compute faithfulness metrics for correctly predicted samples
+            if not is_correct_prediction:
+                continue
 
             # Faithfulness & local edit influence
             structure_intervention = sample["structure_intervention"]
@@ -191,11 +206,15 @@ class EntailmentEvaluation:
         for structure_type, metrics in evaluation_metrics["performance"].items():
             print(f"\n{structure_type}:")
             for metric_name, stats in metrics.items():
-                mean_val = stats["mean"] if isinstance(stats, dict) else stats
-                if mean_val is None:
-                    print(f"  {metric_name}: None")
+                if metric_name == "correct_predictions_count":
+                    # This is a count, not a statistical summary
+                    print(f"  {metric_name}: {stats}")
                 else:
-                    print(f"  {metric_name}: {mean_val:.3f}")
+                    mean_val = stats["mean"] if isinstance(stats, dict) else stats
+                    if mean_val is None:
+                        print(f"  {metric_name}: None")
+                    else:
+                        print(f"  {metric_name}: {mean_val:.3f}")
 
         print("\nFaithfulness Metrics:")
         print("--------------------")
