@@ -36,6 +36,7 @@ def fix_seed(seed=42):
 
 model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
+        "Qwen/Qwen3-8B": "qwen3-8B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
@@ -132,13 +133,15 @@ if __name__ == "__main__":
         for i, output in enumerate(structure_prediction_outputs):
             print(f"  Sample {batch_ids[i]} (structure_prediction): {len(output['completion'])} chars")
             with open(raw_outputs_path, "a") as f:
-                json.dump({**output, "sample_id": batch_ids[i], "completion_type": "structure_prediction"}, f, ensure_ascii=False, indent=2)
+                json.dump({**output, "sample_id": batch_ids[i], "completion_type": "structure_prediction"}, f, ensure_ascii=False)
+                f.write('\n')
 
         # Log gold structure outputs
         for i, output in enumerate(gold_structure_outputs):
             print(f"  Sample {batch_ids[i]} (gold_structure): {len(output['completion'])} chars")
             with open(raw_outputs_path, "a") as f:
-                json.dump({**output, "sample_id": batch_ids[i], "completion_type": "gold_structure"}, f, ensure_ascii=False, indent=2)
+                json.dump({**output, "sample_id": batch_ids[i], "completion_type": "gold_structure"}, f, ensure_ascii=False)
+                f.write('\n')
 
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
@@ -188,12 +191,4 @@ if __name__ == "__main__":
     with open(path2save, "w") as f:
         json.dump(final_dataset_dict, f, ensure_ascii=False, indent=4)
     print(f"The results are saved to {path2save}!")
-
-
-
-            
-        
-        
-
-
 
