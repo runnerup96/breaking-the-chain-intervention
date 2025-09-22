@@ -398,14 +398,15 @@ Your response must contain exactly two sections in this order:
 
     def infer_completion(self, completion):
         "extract only the completion after the intervention, when we test model ability to make a correct decision"
-        # Expecting exactly one final answer prefix
-        if completion.count(self.small_final_answer_prefix) != 1:
+        # Expecting one (for structure_prediction) or no (for gold_structure) final answer prefix
+        if completion.count(self.small_final_answer_prefix) > 1:
             return -1
     
-        completion = completion.split(self.small_final_answer_prefix)[1]
-        # Model might put ":" after the final answer
-        completion = completion.strip(":")
-        completion = completion.strip()
+        if self.small_final_answer_prefix in completion:
+            completion = completion.split(self.small_final_answer_prefix)[1]
+            # Model might put ":" after the final answer
+            completion = completion.strip(":")
+            completion = completion.strip()
 
         if "Yes" in completion and "No" in completion:
             return -1
