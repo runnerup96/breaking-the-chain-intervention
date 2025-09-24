@@ -33,14 +33,16 @@ CUDA_DEVICE_NUMBER=0
 datasets=("tabfact")
 
 models=(
-    "Qwen/Qwen3-4B"
-    "Qwen/Qwen3-8B"
-    "tiiuae/Falcon3-3B-Instruct"
-    "tiiuae/Falcon3-7B-Instruct"
-    "alpindale/Llama-3.2-3B-Instruct"
-    "alpindale/Llama-3.2-1B-Instruct"
-    "google/gemma-2-2b-it"
-    "google/gemma-2-9b-it"
+    "Qwen/Qwen3-1.7B"
+    #"Qwen/Qwen3-4B"
+    #"Qwen/Qwen3-8B"
+    #"tiiuae/Falcon3-3B-Instruct"
+    #"tiiuae/Falcon3-7B-Instruct"
+    #"alpindale/Llama-3.2-3B-Instruct"
+    #"alpindale/Llama-3.2-1B-Instruct"
+    #"unsloth/Meta-Llama-3.1-8B-Instruct"
+    #"google/gemma-2-2b-it"
+    #"google/gemma-2-9b-it"
 )
 
 run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)"
@@ -57,7 +59,7 @@ for model_name in "${models[@]}"; do
         
         echo "Running: $simple_model_name on $evaluation_dataset with batch_size=$batch_size"
 
-        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_intervention.py \
+        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/.conda/envs/breaking-the-chain-env/bin/python make_intervention.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
             --batch_size $batch_size" ENTER
