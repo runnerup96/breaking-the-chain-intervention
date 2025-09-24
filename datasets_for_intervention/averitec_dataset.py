@@ -61,25 +61,3 @@ class AVeriTeCDataset:
     def __getitem__(self, i):
         return self.data[i]
 
-
-if __name__ == "__main__":
-    data_path = "/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/AVeriTeC/data"
-    dataset = AVeriTeCDataset(data_path=data_path)
-    
-    print(f"Total samples = {len(dataset)}")
-    
-    # Print first 3 samples
-    # где то проблема с индексацией, не те парафразы летят
-    for i in range(min(10, len(dataset))):
-        print(f"Sample {i}:")
-        print(f"  ID: {dataset[i]['idx']}")
-        print(f"  Claim: {dataset[i]['claim']}")
-        print(f"  Label: {dataset[i]['label']}")
-        print(f"  Questions: {len(dataset[i]['supporting_questions'])} questions")
-        explanations_dict = dataset[i]['explanations']
-        for q, a in dataset[i]['supporting_questions'].items():
-            print(f"    Q: {q}")
-            print(f"    A: {a}")
-            print(f"    E: {explanations_dict[q]}")
-        print(f"  Paraphrases: {dataset.get_random_paraphrase(dataset[i]['idx'])}")
-        print('--------------------------------')
