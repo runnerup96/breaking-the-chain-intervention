@@ -5,10 +5,7 @@ import copy
 import pandas as pd
 import json
 from typing import Callable, List, Dict, Any
-from dotenv import load_dotenv
 import os
-
-load_dotenv()
 
 class OpenrouterBatchApiClass:
     def __init__(self, model: str, api_link: str, token: str, max_tokens: int = 4096, num_threads: int = 20):
@@ -113,8 +110,8 @@ def load_entailment(data_path):
 if __name__ == "__main__":
 
     # load samples
-    data_path = "/mnt/extremessd10tb/seleznev/breaking-the-chain-intervention/entailment_trees_emnlp2021_data_v3/dataset/task_2/test.jsonl"
-    output_path = "/mnt/extremessd10tb/seleznev/breaking-the-chain-intervention/entailment_trees_emnlp2021_data_v3/dataset/task_2/test_question_paraphases.json"
+    data_path = ""
+    output_path = ""
 
     samples_for_evaluation = load_entailment(data_path)
 

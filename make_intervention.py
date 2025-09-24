@@ -4,7 +4,6 @@ import json
 import os
 import time
 import random
-from dotenv import load_dotenv
 from tqdm import tqdm
 from datetime import datetime
 from copy import deepcopy
@@ -18,8 +17,6 @@ import llm_model
 from datasets_for_intervention import entailment_intervention, entailment_dataset, entailment_evaluation
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
-
-load_dotenv()
 
 logging.set_verbosity_error()
 
@@ -75,13 +72,13 @@ if __name__ == "__main__":
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model)
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "entailment":
-        train_dataset_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/train.jsonl")
+        train_dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/train.jsonl")
         train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
         few_shot_examples = train_dataset[::128][:5]
         assert len(few_shot_examples) == 5
 
-        dataset_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/test.jsonl")
-        paraphrases_path = os.path.join(project_path, "entailment_trees_emnlp2021_data_v3/dataset/task_2/aligned_test_question_paraphases.json")
+        dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/test.jsonl")
+        paraphrases_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/aligned_test_question_paraphases.json")
         dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase")
@@ -102,7 +99,6 @@ if __name__ == "__main__":
         dataloader = [next(iter(dataloader))]
         # dataloader = [list(dataloader)[-1]]
 
-    curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
 
     processed_samples_list, fails_list = [], []
     start_time = time.perf_counter()
@@ -127,24 +123,6 @@ if __name__ == "__main__":
         batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
         completion_type_list = ["structure_prediction"] * len(structure_prediction_outputs) + ["gold_structure"] * len(gold_structure_outputs)
 
-        # Log outputs with correct IDs
-        print(f"Raw model outputs for batch {batch_idx}:")
-        raw_outputs_path = os.path.join(args.logging_dir, f"raw_outputs_{curr_time}.jsonl")
-
-        # Log structure prediction outputs
-        for i, output in enumerate(structure_prediction_outputs):
-            print(f"  Sample {batch_ids[i]} (structure_prediction): {len(output['completion'])} chars")
-            with open(raw_outputs_path, "a") as f:
-                json.dump({**output, "sample_id": batch_ids[i], "completion_type": "structure_prediction"}, f, ensure_ascii=False)
-                f.write('\n')
-
-        # Log gold structure outputs
-        for i, output in enumerate(gold_structure_outputs):
-            print(f"  Sample {batch_ids[i]} (gold_structure): {len(output['completion'])} chars")
-            with open(raw_outputs_path, "a") as f:
-                json.dump({**output, "sample_id": batch_ids[i], "completion_type": "gold_structure"}, f, ensure_ascii=False)
-                f.write('\n')
-
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
         for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
@@ -160,20 +138,8 @@ if __name__ == "__main__":
                 processed_samples_list.append(final_sample)
             except Exception as e:# here only KeyError
                 error_type, error_message = type(e).__name__, str(e)
-                error_context = {
-                    'sample_id': sample.get('id', 'unknown'),
-                    'completion_type': completion_type,
-                    'error_type': error_type,
-                    'error_message': error_message,
-                    'model_output_length': len(model_output.get('completion', '')),
-                    'has_proof': 'proof' in sample,
-                    'has_distractors': 'distractors' in sample
-                }
-                print(f"ERROR processing sample {error_context['sample_id']}: {error_context}")
-                fails_list.append([sample, error_context])
-
-        batch_time = time.time() - batch_start
-        print(f"Batch {batch_idx} completed in {batch_time:.2f}s")
+                error_string = f"{error_type}: {error_message}"
+                fails_list.append([sample, error_string])
 
 
     evaluation_metrics = evaluator.evaluate(processed_samples_list)
@@ -186,7 +152,7 @@ if __name__ == "__main__":
     os.makedirs(path2save, exist_ok=True)
 
     model_name = model_name2simple_model_name[args.model_name]
-
+    curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
     file_name = f"{model_name}_{curr_time}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}.json"
     path2save = os.path.join(path2save, file_name)
 
