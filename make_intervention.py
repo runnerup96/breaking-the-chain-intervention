@@ -84,14 +84,21 @@ if __name__ == "__main__":
     processed_samples_list, fails_list = [], []
     for batch in tqdm(dataloader, desc="Running inference", total=len(dataloader)):
         
-        # batch_idx_list = [sample["idx"] for sample in batch]
+        # Process structure prediction separately (1024 tokens)
         prompted_batch_with_structure_prediction = [intervention_logic.make_prompt(sample, include_gold_structure=False) for sample in batch]
-        promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
-        all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
-        completion_type_list = ["structure_prediction"] * len(prompted_batch_with_structure_prediction) + ["gold_structure"] * len(promted_batch_with_gold_structure)
-        # DO_X -- if we have ground truth, we wont need to fill it by the model
-        batched_model_outputs = llm_model.generate(all_batch, max_new_tokens=1024,# X2 from batch
+        structure_prediction_outputs = llm_model.generate(prompted_batch_with_structure_prediction,
+                                                         max_new_tokens=1024,
+                                                         skip_special_tokens=False)
+
+        # Process gold structure separately with smaller max_new_tokens
+        prompted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
+        gold_structure_outputs = llm_model.generate(prompted_batch_with_gold_structure, 
+                                                   max_new_tokens=10,
                                                    skip_special_tokens=False)
+        # Combine outputs and completion types
+        batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
+        completion_type_list = ["structure_prediction"] * len(structure_prediction_outputs) + ["gold_structure"] * len(gold_structure_outputs)
+
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
         for sample, model_output, completion_type in tqdm(zip(doubled_batch, batched_model_outputs, completion_type_list), total=len(doubled_batch)):
