@@ -19,6 +19,12 @@ class TabFactIntervention:
         global_intervention_prompt = [self.make_prompt(interventions['Global'][0], include_gold_structure=True)]
         all_intervention_prompts = hsvt_intervention_prompt + local_edits_intervention_prompt + global_intervention_prompt
         return all_intervention_prompts
+    
+    def clean_llm_output(self, text):
+        tokens_to_remove = ['<|im_end|>', '<|endoftext|>', '<|im_start|>', '<|eot_id|>', '<|pad|>']
+        for token in tokens_to_remove:
+            text = text.replace(token, '')
+        return text.strip()
 
     def infer_completion(self, completion: str) -> bool:
         decision_prefixes = [
@@ -85,7 +91,7 @@ class TabFactIntervention:
     #         return None
 
     def collect_intervention_completion(self, sample:dict, generated_output:list):
-        completion_list = [generation['completion'] for generation in generated_output]
+        completion_list = [self.clean_llm_output(generation['completion']) for generation in generated_output]
         intervention = sample['structure_intervention']
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
@@ -150,7 +156,7 @@ class TabFactIntervention:
         return expr
     
     def make_intervention(self, sample: dict, generated_output: dict) -> dict:
-        completion = generated_output['completion']
+        completion = self.clean_llm_output(generated_output['completion'])
 
         if sample['completion_type'] == "structure_prediction":
             predicted_expression = self._extract_verifier_expression(sample, completion)

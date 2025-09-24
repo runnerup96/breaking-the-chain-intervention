@@ -7,6 +7,7 @@ import re
 QWEN3_MODEL_FAMILY = "Qwen3"
 FALCON3_MODEL_FAMILY = "Falcon3"
 LLAMA32_MODEL_FAMILY = "Llama3.2"
+LLAMA31_MODEL_FAMILY = "Llama3.1"
 GEMMA2_MODEL_FAMILY = "Gemma2"
 
 
@@ -59,6 +60,11 @@ class LLMModel:
             return LLAMA32_MODEL_FAMILY
         elif (hasattr(self.model.config, 'architectures') and 
               self.model.config.architectures and 
+              self.model.config.architectures[0] == "LlamaForCausalLM" and
+              "llama-3.1" in model_name.lower()):
+            return LLAMA31_MODEL_FAMILY
+        elif (hasattr(self.model.config, 'architectures') and 
+              self.model.config.architectures and 
               self.model.config.architectures[0] == "Gemma2ForCausalLM"):
             return GEMMA2_MODEL_FAMILY
         else:
@@ -70,8 +76,8 @@ class LLMModel:
             return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens)
         elif self.model_family == FALCON3_MODEL_FAMILY:
             return self._generate_falcon3_batch(prompts, max_new_tokens, skip_special_tokens)
-        elif self.model_family == LLAMA32_MODEL_FAMILY:
-            return self._generate_llama32_batch(prompts, max_new_tokens, skip_special_tokens)
+        elif self.model_family in [LLAMA32_MODEL_FAMILY, LLAMA31_MODEL_FAMILY]:
+            return self._generate_llama_batch(prompts, max_new_tokens, skip_special_tokens)
         elif self.model_family == GEMMA2_MODEL_FAMILY:
             return self._generate_gemma2_batch(prompts, max_new_tokens, skip_special_tokens)
         else:
@@ -95,6 +101,12 @@ class LLMModel:
                 add_generation_prompt=add_generation_prompt,
             )
         elif self.model_family == LLAMA32_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
+        elif self.model_family == LLAMA31_MODEL_FAMILY:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -163,7 +175,7 @@ class LLMModel:
         
         return results
 
-    def _generate_llama32_batch(self, prompts: List[str], max_new_tokens: int,
+    def _generate_llama_batch(self, prompts: List[str], max_new_tokens: int,
                                skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts using Llama3.2 model in batch.
@@ -227,7 +239,7 @@ class LLMModel:
             output = re.sub(r'<\|endoftext\|>|<\|im_end\|>', '', output)
         elif self.model_family == FALCON3_MODEL_FAMILY:
             output = re.sub(r'<\|endoftext\|>', '', output)
-        elif self.model_family == LLAMA32_MODEL_FAMILY:
+        elif self.model_family in [LLAMA32_MODEL_FAMILY, LLAMA31_MODEL_FAMILY]:
             output = re.sub(r'<\|eot_id\|>', '', output)
         elif self.model_family == GEMMA2_MODEL_FAMILY:
             last_end_of_turn = output.rfind('<end_of_turn>')
