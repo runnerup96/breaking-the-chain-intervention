@@ -35,10 +35,12 @@ def fix_seed(seed=42):
     os.environ['PYTHONHASHSEED'] = str(seed) 
 
 model_name2simple_model_name = {
+        "Qwen/Qwen3-1.7B": "qwen3-1.7B",
         "Qwen/Qwen3-4B": "qwen3-4B",
         "Qwen/Qwen3-8B": "qwen3-8B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
+        "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
         "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
         "google/gemma-2-2b-it": "gemma2-2B",
