@@ -5,5 +5,5 @@ intervention_predictions/
 .pytest_cache/
 __pycache__/
 artifacts/
-tmp.ipynb
-plots.ipynb
+*.ipynb
+*.ipynb

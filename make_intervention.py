@@ -1,7 +1,6 @@
 
 import argparse
 import json
-from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
 import os
 import time
 import random
@@ -18,6 +17,7 @@ import llm_model
 from datasets_for_intervention import entailment_intervention, entailment_dataset, entailment_evaluation
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
+from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
 
 logging.set_verbosity_error()
 torch._dynamo.config.accumulated_cache_size_limit = 2048
