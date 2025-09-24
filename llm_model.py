@@ -1,33 +1,34 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Optional
 import re
 
 
 QWEN3_MODEL_FAMILY = "Qwen3"
 FALCON3_MODEL_FAMILY = "Falcon3"
 LLAMA32_MODEL_FAMILY = "Llama3.2"
+LLAMA31_MODEL_FAMILY = "Llama3.1"
 GEMMA2_MODEL_FAMILY = "Gemma2"
 
 
 class LLMModel:
-    def __init__(self, model_name: str, device_map: str = "cuda", torch_dtype: torch.dtype = torch.bfloat16):
+    def __init__(self, model_name: str, device_map: str = "auto", dtype: torch.dtype = torch.bfloat16):
         """
         Initialize the LLM model.
         
         Args:
             model_name: Name or path of the model
             device_map: Device mapping for the model
-            torch_dtype: Torch data type for the model
+            dtype: Torch data type for the model
         """
         self.model_name = model_name
         self.device_map = device_map
-        self.torch_dtype = torch_dtype
+        self.dtype = dtype
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device_map,
-            torch_dtype=torch_dtype
+            dtype=dtype
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.padding_side = 'left'
@@ -59,6 +60,11 @@ class LLMModel:
             return LLAMA32_MODEL_FAMILY
         elif (hasattr(self.model.config, 'architectures') and 
               self.model.config.architectures and 
+              self.model.config.architectures[0] == "LlamaForCausalLM" and
+              "llama-3.1" in model_name.lower()):
+            return LLAMA31_MODEL_FAMILY
+        elif (hasattr(self.model.config, 'architectures') and 
+              self.model.config.architectures and 
               self.model.config.architectures[0] == "Gemma2ForCausalLM"):
             return GEMMA2_MODEL_FAMILY
         else:
@@ -71,6 +77,9 @@ class LLMModel:
         elif self.model_family == FALCON3_MODEL_FAMILY:
             return self._generate_falcon3_batch(prompts, max_new_tokens, skip_special_tokens)
         elif self.model_family == LLAMA32_MODEL_FAMILY:
+            return self._generate_llama32_batch(prompts, max_new_tokens, skip_special_tokens)
+        elif self.model_family == LLAMA31_MODEL_FAMILY:
+            # we can use the same function as llama3.2
             return self._generate_llama32_batch(prompts, max_new_tokens, skip_special_tokens)
         elif self.model_family == GEMMA2_MODEL_FAMILY:
             return self._generate_gemma2_batch(prompts, max_new_tokens, skip_special_tokens)
@@ -100,6 +109,12 @@ class LLMModel:
                 tokenize=False,
                 add_generation_prompt=add_generation_prompt,
             )
+        elif self.model_family == LLAMA31_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+            )
         elif self.model_family == GEMMA2_MODEL_FAMILY:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
@@ -113,7 +128,7 @@ class LLMModel:
     def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
                               skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
-        Generate text for multiple prompts using Qwen3 model in batch.
+        Generate text for multiple prompts or messages using Qwen3 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
         
@@ -228,6 +243,8 @@ class LLMModel:
         elif self.model_family == FALCON3_MODEL_FAMILY:
             output = re.sub(r'<\|endoftext\|>', '', output)
         elif self.model_family == LLAMA32_MODEL_FAMILY:
+            output = re.sub(r'<\|eot_id\|>', '', output)
+        elif self.model_family == LLAMA31_MODEL_FAMILY:
             output = re.sub(r'<\|eot_id\|>', '', output)
         elif self.model_family == GEMMA2_MODEL_FAMILY:
             last_end_of_turn = output.rfind('<end_of_turn>')
