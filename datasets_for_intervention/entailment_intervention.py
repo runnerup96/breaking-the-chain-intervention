@@ -329,7 +329,7 @@ def intervene_step_proof(step_proof: Optional[str],
 
 
 class EntailmentIntervention:
-    def __init__(self, dataset: EntailmentDataset, llm_model: LLMModel, few_shot_examples: List[Dict], hsvt_mode: str):
+    def __init__(self, dataset: EntailmentDataset, llm_model: LLMModel, few_shot_examples: List[Dict], hsvt_mode: str, prompting_regime: str):
         """
         Initialize the intervention class with dataset and stop token.
         
@@ -349,6 +349,15 @@ class EntailmentIntervention:
         if self.hsvt_mode == "paraphrase":
             assert all(example["question_paraphrases"] is not None for example in self.dataset), "Dataset must have question paraphrases when using 'paraphrase' HSVT mode"
 
+        self.prompting_regime = prompting_regime
+        if self.prompting_regime == "detailed_instruction":
+            additional_instruction = """\n\nAdditional instructions:
+- The intermediate structure might be altered as a result of an external intervention.
+- In case of contradiction between the original context and the intermediate structure, prioritize the evidence from the intermediate structure.
+"""
+        else:
+            additional_instruction = ""
+
         self.question_prefix = "## Question\n"
         self.context_prefix = "## Context\n"
         self.hypothesis_prefix = "## Hypothesis\n"
@@ -362,7 +371,7 @@ class EntailmentIntervention:
         self.small_final_answer_prefix = "Final Answer"
         assert self.small_final_answer_prefix in self.final_answer_prefix 
     
-        self.system_prompt = """You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing an intermediate structure (a step-by-step logical proof) and then providing a final answer.
+        self.system_prompt = f"""You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing an intermediate structure (a step-by-step logical proof) and then providing a final answer.
 
 Task explanation:
 - You are given a question, context containing factual sentences, and a hypothesis to evaluate.
@@ -380,7 +389,7 @@ Intermediate structure construction (Proof):
 
 Logical reasoning guidelines:
 - Ensure each inference step is logically sound and based on the information provided.
-- If multiple reasoning paths are possible, choose the most direct and clear one.
+- If multiple reasoning paths are possible, choose the most direct and clear one.{additional_instruction}
 
 Important output format:
 Your response must contain exactly two sections in this order:
@@ -409,6 +418,7 @@ Your response must contain exactly two sections in this order:
             completion = completion.strip()
 
         if "Yes" in completion and "No" in completion:
+            # Invalid completion, since it contains both Yes and No
             return -1
         elif "Yes" in completion and not "No" in completion:
             return 1
