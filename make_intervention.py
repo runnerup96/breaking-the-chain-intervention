@@ -1,5 +1,6 @@
 
 import argparse
+import hashlib
 import json
 import os
 import time
@@ -47,6 +48,55 @@ model_name2simple_model_name = {
         "google/gemma-2-9b-it": "gemma2-9B",
     }
 
+def get_few_shot_examples(train_dataset_path: str, prompting_regime: str, n_few_shot_examples: int):
+    train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
+    if prompting_regime == "baseline_structure_faithfulness":
+        stride = max(1, len(train_dataset) // (n_few_shot_examples * 2))
+        examples = [deepcopy(train_dataset[idx]) for idx in range(0, len(train_dataset), stride)]
+        examples = examples[:n_few_shot_examples]
+    elif prompting_regime == "detailed_instruction":
+        if len(train_dataset) == 0:
+            raise ValueError("The train dataset is empty, cannot build few-shot examples.")
+
+        def stable_seed(sample_id: str, mode: str) -> int:
+            digest = hashlib.sha256(f"{sample_id}::{mode}".encode("utf-8")).digest()
+            return int.from_bytes(digest[:4], "big")
+
+        intervention_modes = ["delete", "replace", "rewire", "global"]
+        mode_idx = 0
+        examples = []
+        n_pairs = (n_few_shot_examples + 1) // 2
+        stride = max(1, len(train_dataset) // max(1, n_pairs))
+
+        for idx in range(0, len(train_dataset), stride):
+            if len(examples) >= n_few_shot_examples:
+                break
+
+            original_sample = deepcopy(train_dataset[idx])
+            original_id = original_sample["id"]
+            original_sample["id"] = f"{original_id}::orig"
+            examples.append(original_sample)
+            if len(examples) >= n_few_shot_examples:
+                break
+
+            intervened_sample = deepcopy(train_dataset[idx])
+            mode = intervention_modes[mode_idx % len(intervention_modes)]
+            mode_idx += 1
+            intervened_sample["id"] = f"{original_id}::{mode}"
+            intervened_sample["proof"] = entailment_intervention.intervene_step_proof(
+                step_proof=intervened_sample["proof"],
+                hypothesis_id=intervened_sample["hypothesis_id"],
+                distractors=intervened_sample["distractors"],
+                mode=mode,
+                seed=stable_seed(original_id, mode),
+                verbose=False
+            )
+            intervened_sample["score"] = not intervened_sample["score"]
+            examples.append(intervened_sample)
+    else:
+        raise ValueError(f"Invalid prompting regime: {prompting_regime}")
+    assert len(examples) == n_few_shot_examples
+    return examples
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -56,6 +106,18 @@ if __name__ == "__main__":
     parser.add_argument("--try_one_batch", action="store_true", default=False)
     parser.add_argument("--logging-dir", type=str, default="logs")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--prompting-regime", type=str, choices=["baseline_structure_faithfulness", "detailed_instruction"])
+    """We consider two prompting regimes.
+    First explores faithfulness / reasoning transparency (as opposed to e.g. steganography) as is.
+    Main question: how does the model handle contradictions WITHOUT clear instructions / demonstration?
+    - In system prompt, we don't include a phrase about possibility of intervention.
+    - We only show non-intervened few-shots (without contradictions)
+
+    Second regime explores the ability of an LLM to follow explicit faithfulness instructions.
+    Main question: how does the model handle contradictions WITH clear instructions / demonstration?
+    - In system prompt, we include an explicit phrase about possibility of intervention.
+    - We show intervened few-shot examples (with contradictions)
+    """
 
     args = parser.parse_args()
     
@@ -78,15 +140,25 @@ if __name__ == "__main__":
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "entailment":
         train_dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/train.jsonl")
-        train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
-        few_shot_examples = train_dataset[::128][:5]
-        assert len(few_shot_examples) == 5
+        few_shot_examples = get_few_shot_examples(
+            train_dataset_path=train_dataset_path,
+            prompting_regime=args.prompting_regime,
+            n_few_shot_examples=5,
+        )
+        print(f"Loaded {len(few_shot_examples)} few-shot examples for {args.prompting_regime} prompting regime")
+        for ex in few_shot_examples:
+            if "mode" in ex:
+                print("Mode: ", ex["mode"])
+            print("Question: ", ex["question"])
+            print("Proof: ", ex["proof"])
+            print("Score: ", ex["score"])
+            print("-"*100)
 
         dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/test.jsonl")
         paraphrases_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/aligned_test_question_paraphases.json")
         dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase")
+        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase", prompting_regime=args.prompting_regime)
         evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "averitec":
         dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
