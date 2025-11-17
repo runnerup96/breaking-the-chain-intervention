@@ -28,7 +28,7 @@ class LLMModel:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device_map,
-            dtype=dtype
+            torch_dtype=dtype
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.padding_side = 'left'
