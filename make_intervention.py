@@ -62,7 +62,8 @@ def get_few_shot_examples(train_dataset_path: str, prompting_regime: str, n_few_
             digest = hashlib.sha256(f"{sample_id}::{mode}".encode("utf-8")).digest()
             return int.from_bytes(digest[:4], "big")
 
-        intervention_modes = ["delete", "replace", "rewire", "global"]
+        # intervention_modes = ["delete", "replace", "rewire", "global"]
+        intervention_modes = ["rewire", "global", "delete", "replace"]
         mode_idx = 0
         examples = []
         n_pairs = (n_few_shot_examples + 1) // 2
