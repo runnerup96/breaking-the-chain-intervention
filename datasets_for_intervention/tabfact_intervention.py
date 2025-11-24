@@ -22,7 +22,6 @@ class TabFactIntervention:
         return all_intervention_prompts
     
     def clean_llm_output(self, text):
-<<<<<<< HEAD
         tokens_to_remove = ['<|im_end|>',
                             '<|endoftext|>',
                             '<|im_start|>',
@@ -35,9 +34,6 @@ class TabFactIntervention:
                             '\u2060',
                             '\ufeff']
 
-=======
-        tokens_to_remove = ['<|im_end|>', '<|endoftext|>', '<|im_start|>', '<|eot_id|>', '<|pad|>']
->>>>>>> 3a38ad34434ba95365113821b270e431105f32de
         for token in tokens_to_remove:
             text = text.replace(token, '')
         return text.strip()
