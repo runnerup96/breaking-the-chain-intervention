@@ -31,12 +31,15 @@ def fix_seed(seed=42):
 model_name2simple_model_name = {
         "Qwen/Qwen3-4B": "qwen3-4B",
         "Qwen/Qwen3-8B": "qwen3-8B",
+        "Qwen/Qwen3-1.7B": "qwen3-1.7B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
         "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
+        "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
         "google/gemma-2-2b-it": "gemma2-2B",
         "google/gemma-2-9b-it": "gemma2-9B",
+        "Openai/Gpt-oss-120b": "gpt-oss-120b"
     }
 
 
@@ -47,14 +50,34 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--try_one_batch", type=bool, default=False)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--prompting_regime", type=str,
+                        choices=["baseline_structure_faithfulness", "detailed_instruction"], default="baseline_structure_faithfulness")
+    parser.add_argument("--use_api", action="store_true")
+    parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
+    parser.add_argument("--tokenizer_name", type=str, default=None)
+    """We consider two prompting regimes.
+    First explores faithfulness / reasoning transparency (as opposed to e.g. steganography) as is.
+    Main question: how does the model handle contradictions WITHOUT clear instructions / demonstration?
+    - In system prompt, we don't include a phrase about possibility of intervention.
+    - We only show non-intervened few-shots (without contradictions)
 
+    Second regime explores the ability of an LLM to follow explicit faithfulness instructions.
+    Main question: how does the model handle contradictions WITH clear instructions / demonstration?
+    - In system prompt, we include an explicit phrase about possibility of intervention.
+    - We show intervened few-shot examples (with contradictions)
+    """
     args = parser.parse_args()
     
     fix_seed(args.seed)
 
     torch._dynamo.config.cache_size_limit = 8192
 
-    llm_model = llm_model.LLMModel(args.model_name)
+    llm_model = llm_model.LLMModel(
+        args.model_name,
+        use_api=args.use_api,
+        api_base_url=args.api_base_url,
+        tokenizer_name=args.tokenizer_name,
+    )
 
     project_path = os.environ["PROJECT_PATH"]
 
@@ -78,7 +101,7 @@ if __name__ == "__main__":
         dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap/bootstrap_full.json',
                                                  f'{dataset_path}/data/all_csv')
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model)
+        intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model, args.prompting_regime)
         evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
