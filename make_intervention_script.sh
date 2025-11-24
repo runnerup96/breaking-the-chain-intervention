@@ -2,7 +2,7 @@
 
 # make sure to do
 # sudo chmod -R 755 intervention_predictions/{evaluation_dataset}
-# sudo chown -R somov intervention_predictions/{evaluation_dataset}
+# sudo chown -R user_name intervention_predictions/{evaluation_dataset}
 
 model_name2simple_model_name() {
     echo "${1##*/}"
@@ -27,10 +27,10 @@ get_batch_size() {
     esac
 }
 
-project_path="/home/chaichuk/frontdoor_llm_causality"
+project_path=""
 CUDA_DEVICE_NUMBER=0
 
-datasets=("tabfact")
+datasets=("averitec" "ricechem" "entailment")
 
 models=(
     # "Qwen/Qwen3-1.7B"
@@ -58,10 +58,10 @@ for model_name in "${models[@]}"; do
     for evaluation_dataset in "${datasets[@]}"; do
         batch_size=$(get_batch_size "$model_name")
         simple_model_name=$(model_name2simple_model_name "$model_name")
-        
+
         echo "Running: $simple_model_name on $evaluation_dataset with batch_size=$batch_size"
 
-        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_intervention.py \
+        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' '$python_path' \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
             --batch_size $batch_size \

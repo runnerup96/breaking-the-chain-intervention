@@ -98,41 +98,42 @@ class AVeriTeCEvaluation:
                 evaluation_metrics["faithfullness"]["with_predicted_structure"]["HSVT"].append(hsvt_intervention_match)
 
             # Local edits intervention
-            local_edits_intervention = structure_intervention['Local Edits']
-            for intervention_idx, local_edit_intervention in enumerate(local_edits_intervention):
-                expected_local_edit_verdict = local_edit_intervention['label']
-                local_edit_result_after_intervention = local_edit_intervention['label_after_intervention']
+            if predicted_verdict == "Supported" or len(predicted_structure) == 1:
+                local_edits_intervention = structure_intervention['Local Edits']
+                for intervention_idx, local_edit_intervention in enumerate(local_edits_intervention):
+                    expected_local_edit_verdict = local_edit_intervention['label']
+                    local_edit_result_after_intervention = local_edit_intervention['label_after_intervention']
+                    # if predicted_structure == 'Supported' or len(gold_structure) == 1:
+                    local_edit_intervention_match = self.compare_verdicts(expected_local_edit_verdict,
+                                                                        local_edit_result_after_intervention)
 
-                local_edit_intervention_match = self.compare_verdicts(expected_local_edit_verdict,
-                                                                    local_edit_result_after_intervention)
+                    if completion_type == "gold_structure":
+                        evaluation_metrics["faithfullness"]["with_gold_structure"]["Local Edits"].append(
+                            local_edit_intervention_match)
+                        if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_gold_structure"]:
+                            evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx] = []
+                        evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx].append(local_edit_intervention_match)
 
-                if completion_type == "gold_structure":
-                    evaluation_metrics["faithfullness"]["with_gold_structure"]["Local Edits"].append(
-                        local_edit_intervention_match)
-                    if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_gold_structure"]:
-                        evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx] = []
-                    evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx].append(local_edit_intervention_match)
+                    elif completion_type == "structure_prediction":
+                        evaluation_metrics["faithfullness"]["with_predicted_structure"]["Local Edits"].append(
+                            local_edit_intervention_match)
+                        if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_predicted_structure"]:
+                            evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx] = []
+                        evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx].append(local_edit_intervention_match)
 
-                elif completion_type == "structure_prediction":
-                    evaluation_metrics["faithfullness"]["with_predicted_structure"]["Local Edits"].append(
-                        local_edit_intervention_match)
-                    if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_predicted_structure"]:
-                        evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx] = []
-                    evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx].append(local_edit_intervention_match)
+                # Global intervention (we do it only if more then one local edit and we look only at Supported class) 
+                if len(local_edits_intervention) > 1:
+                    global_intervention = structure_intervention['Global'][0]
+                    expected_global_verdict = global_intervention['label']
+                    global_result_after_intervention = global_intervention['label_after_intervention']
+                    global_intervention_match = self.compare_verdicts(expected_global_verdict, global_result_after_intervention)
 
-            # Global intervention (we do it only if more then one local edit)
-            if len(local_edits_intervention) > 1:
-                global_intervention = structure_intervention['Global'][0]
-                expected_global_verdict = global_intervention['label']
-                global_result_after_intervention = global_intervention['label_after_intervention']
-                global_intervention_match = self.compare_verdicts(expected_global_verdict, global_result_after_intervention)
-
-                if completion_type == "gold_structure":
-                    evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
-                        global_intervention_match)
-                elif completion_type == "structure_prediction":
-                    evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
-                        global_intervention_match)
+                    if completion_type == "gold_structure":
+                        evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
+                            global_intervention_match)
+                    elif completion_type == "structure_prediction":
+                        evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
+                            global_intervention_match)
 
         aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
         self.print_evaluation_metrics(aggregated_evaluation_metrics)
@@ -172,4 +173,3 @@ class AVeriTeCEvaluation:
                     print(f"  Edit {edit_id}: mean = {value['mean']}, std = {value['std']}")
                 else:
                     print(f"  Edit {edit_id}: mean = No, std = No")
-
