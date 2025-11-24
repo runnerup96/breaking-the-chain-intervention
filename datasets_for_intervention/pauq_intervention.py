@@ -2,7 +2,7 @@ import copy
 import json
 import random
 import re
-import pauq_dataset
+from utils import extract_tables_and_columns
 
 
 def extract_json_from_model_response(model_response: str) -> dict | None:
@@ -36,30 +36,40 @@ class PAUQIntervention:
                 table_columns.append(col_name)
         return table_columns
 
-    def make_intervention(self, sample: dict, json_model_response: dict):
-        intervention = copy.deepcopy(json_model_response)
-        random_link = random.choice(intervention["schema_links"])
-        table_element = random_link[1]
+    def make_intervention(self, sample: dict, json_model_response: dict, intervention_type: str = "column"):
+        intervened_schema = copy.deepcopy(json_model_response)
+        random_link = random.choice(intervened_schema["schema_links"])
         # check the output correctness
         # global intervention: change the full db schema
         # HSVT: change the text question
         # SQL Parse
-        if '.' in table_element:
-            # Column name
-            table_name, column_name = table_element.split(".")
+        table_name = random_link["table"]
+        intervention = None
+        if intervention_type == "column":
+            # Column intervention
+            if not random_link["columns"]:
+                raise RuntimeError("No columns for table in schema linking!")
+            column_idx = random.randint(0, len(random_link["columns"]) - 1)
+            column_name = random_link["columns"][column_idx]
             table_columns = self.get_table_columns(sample["db"], table_name)
             table_columns.remove(column_name)
             other_column = random.choice(table_columns)
-            random_link[1] = f"{table_name}.{other_column}"
-        else:
+            intervention = {"type": "column", "before": column_name, "after": other_column}
+            random_link["columns"][column_idx] = other_column
+        elif intervention_type == "table":
             # Table name
-            table_name = table_element
             table_names = sample["db"]["table_names_original"]
             table_names.remove(table_name)
             if table_names:
                 other_table_name = random.choice(table_names)
-                random_link[1] = other_table_name
-        return intervention
+                intervention = {"type": "table", "before": random_link["table"], "after": other_table_name}
+                random_link["table"] = other_table_name
+
+        return {"intervened_schema": intervened_schema, "intervention": intervention}
+
+
+    def make_hsvt_intervention(self, sample: dict):
+        pass
 
     def make_prompt(self, sample: dict):
         question = sample["question"]["en"]
@@ -73,7 +83,6 @@ class PAUQIntervention:
                     db_schema += f"{col_name[1]}, "
             db_schema = db_schema[:-2]
             db_schema += "\n"
-        #TODO fix schema linking: filter db schema
         user_prompt = f"""
         You are an expert in natural language understanding and SQL queries generation.
         Given a natural language question and a database schema, perform two steps:
@@ -103,10 +112,10 @@ class PAUQIntervention:
         Output:
         {{
           "schema_links": [
-            ["heads", "head"],
-            ["departments", "department"],
-            ["older", "head.age"],
-            ["56", "head.age"]
+            {{
+              "table": "head",
+              "columns": ["age"]
+            }}
           ],
           "sql": "SELECT COUNT(*) FROM head WHERE age > 56;"
         }}
@@ -123,10 +132,10 @@ class PAUQIntervention:
         Output:
         {{
           "schema_links": [
-            ["names", "department.name"],
-            ["departments", "department"],
-            ["budget", "department.budget"],
-            ["1 million", "department.budget"]
+            {{
+              "table": "department",
+              "columns": ["name", "budget"]
+            }}
           ],
           "sql": "SELECT name FROM department WHERE budget > 1000000;"
         }}
@@ -141,10 +150,10 @@ class PAUQIntervention:
         Output:
         {{
           "schema_links": [
-            ["salary", "employee.salary"],
-            ["employees", "employee"],
-            ["hired", "employee.hire_date"],
-            ["2020", "employee.hire_date"]
+            {{
+              "table": "employee",
+              "columns": ["salary", "hire_date"]
+            }}
           ],
           "sql": "SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';"
         }}
@@ -181,18 +190,26 @@ if __name__ == "__main__":
         Output:
         {
           "schema_links": [
-            ["heads", "head"],
-            ["departments", "department"],
-            ["older", "head.age"],
-            ["56", "head.age"]
+            {
+              "table": "head",
+              "columns": ["age"]
+            }
           ],
           "sql": "SELECT COUNT(*) FROM head WHERE age > 56;"
         }
     '''
-    json_model_response = extract_json_from_model_response(response)
-    dataset = pauq_dataset.PAUQDataset("./pauq")
-    intervention = PAUQIntervention(dataset, None)
-    sample = dataset[0]
-    intervened = intervention.make_intervention(sample, json_model_response)
-    print(json_model_response)
-    print(intervened)
+    # json_model_response = extract_json_from_model_response(response)
+    # dataset = pauq_dataset.PAUQDataset("./pauq")
+    # intervention = PAUQIntervention(dataset, None)
+    # sample = dataset[0]
+    # intervened = intervention.make_intervention(sample, json_model_response)
+    # print(json_model_response)
+    # print(intervened)
+    sql_before = "SELECT name FROM students WHERE age > 20"
+    sql_after = "SELECT full_name FROM students WHERE age > 20"
+
+    info_before = extract_tables_and_columns(sql_before)
+    info_after = extract_tables_and_columns(sql_after)
+
+    print("Before:", info_before)
+    print("After:", info_after)

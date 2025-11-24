@@ -33,7 +33,13 @@ class PAUQDataset:
             self.databases[db["db_id"]] = {key: db[key] for key in db_keys}
         for row in train_data:
             row["db"] = self.databases[row["db_id"]]
-        self.data = train_data
+        self.data = []
+        for sample in train_data:
+            self.data.append({
+                "query": sample["query"]["en"],
+                "question": sample["question"]["en"],
+                "db": sample["db"]
+            })
 
     def __len__(self):
         return len(self.data)
