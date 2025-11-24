@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Optional
 import re
 import os
 
@@ -29,11 +29,11 @@ class LLMModel:
         Args:
             model_name: Name or path of the model
             device_map: Device mapping for the model
-            torch_dtype: Torch data type for the model
+            dtype: Torch data type for the model
         """
         self.model_name = model_name
         self.device_map = device_map
-        self.torch_dtype = torch_dtype
+        self.dtype = torch_dtype
 
         self.use_api = use_api
         self.api_base_url = api_base_url
@@ -148,7 +148,7 @@ class LLMModel:
     def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
                               skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
-        Generate text for multiple prompts using Qwen3 model in batch.
+        Generate text for multiple prompts or messages using Qwen3 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
         

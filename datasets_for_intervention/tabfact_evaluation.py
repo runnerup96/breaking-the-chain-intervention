@@ -30,7 +30,7 @@ class TabFactEvaluation:
             1 if they match, 0 if they don't or either is None.
         """
         if gold_label is None or predicted_label is None:
-            return 0
+            return None
         return 1 if gold_label == predicted_label else 0
 
     def summarize_nested_lists(self, tree: Any) -> Any:
@@ -130,6 +130,9 @@ class TabFactEvaluation:
             elif completion_type == "structure_prediction":
                 evaluation_metrics["faithfulness"]["with_predicted_structure"]["HSVT"].append(hsvt_match)
 
+            if predicted_label != True:
+                continue
+            
             # Local Edits: Check if model responds to altered expression
             local_edits = structure_intervention['Local Edits']
             for idx, local_edit in enumerate(local_edits):
