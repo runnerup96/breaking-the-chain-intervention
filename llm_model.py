@@ -135,7 +135,14 @@ class LLMModel:
                 add_generation_prompt=add_generation_prompt,
                 enable_thinking=False
             )
-        elif self.model_family in [FALCON3_MODEL_FAMILY, LLAMA32_MODEL_FAMILY, LLAMA31_MODEL_FAMILY, GEMMA2_MODEL_FAMILY, GPT_MODEL_FAMILY]:
+        elif self.model_family == GPT_MODEL_FAMILY:
+            prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+                reasoning_effort="low"
+            )
+        elif self.model_family in [FALCON3_MODEL_FAMILY, LLAMA32_MODEL_FAMILY, LLAMA31_MODEL_FAMILY, GEMMA2_MODEL_FAMILY]:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
