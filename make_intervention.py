@@ -29,12 +29,14 @@ def fix_seed(seed=42):
     os.environ['PYTHONHASHSEED'] = str(seed) 
 
 model_name2simple_model_name = {
+        "Qwen/Qwen3-1.7B": "qwen3-17B",
         "Qwen/Qwen3-4B": "qwen3-4B",
         "Qwen/Qwen3-8B": "qwen3-8B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
         "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
+        "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
         "google/gemma-2-2b-it": "gemma2-2B",
         "google/gemma-2-9b-it": "gemma2-9B",
     }
@@ -47,7 +49,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--try_one_batch", type=bool, default=False)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--prompting-regime", type=str,
+    parser.add_argument("--prompting_regime", type=str,
                         choices=["baseline_structure_faithfulness", "detailed_instruction"])
     """We consider two prompting regimes.
     First explores faithfulness / reasoning transparency (as opposed to e.g. steganography) as is.
@@ -76,13 +78,13 @@ if __name__ == "__main__":
         dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model)
+        intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model, prompt_type=args.prompting_regime)
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "averitec":
         dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model)
+        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model, prompt_type=args.prompting_regime)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
@@ -99,14 +101,20 @@ if __name__ == "__main__":
         
         # batch_idx_list = [sample["idx"] for sample in batch]
         prompted_batch_with_structure_prediction = [intervention_logic.make_prompt(sample, include_gold_structure=False) for sample in batch]
+        structure_prediction_outputs = llm_model.generate(prompted_batch_with_structure_prediction,
+                                                          max_new_tokens=1024,
+                                                          skip_special_tokens=False)
         promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
+        gold_structure_outputs = llm_model.generate(promted_batch_with_gold_structure,
+                                                    max_new_tokens=10,
+                                                    skip_special_tokens=False)
+        # Combine outputs and completion types
+        batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
         all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
         completion_type_list = ["structure_prediction"] * len(prompted_batch_with_structure_prediction) + ["gold_structure"] * len(promted_batch_with_gold_structure)
-        # DO_X -- if we have ground truth, we wont need to fill it by the model
-        batched_model_outputs = llm_model.generate(all_batch, max_new_tokens=1024,# X2 from batch
-                                                   skip_special_tokens=False)
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
+
         for sample, model_output, completion_type in tqdm(zip(doubled_batch, batched_model_outputs, completion_type_list), total=len(doubled_batch)):
             sample['completion_type'] = completion_type
             # Mediator(DO_X)
@@ -136,7 +144,8 @@ if __name__ == "__main__":
     model_name = model_name2simple_model_name[args.model_name]
 
     curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
-    file_name = f"{model_name}_{curr_time}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}.json"
+    prompt_regime = "dt" if args.prompting_regime == "detailed_instruction" else "bsf"
+    file_name = f"{model_name}_{curr_time}_{prompt_regime}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}_{prompt_regime}.json"
     path2save = os.path.join(path2save, file_name)
 
     with open(path2save, "w") as f:
