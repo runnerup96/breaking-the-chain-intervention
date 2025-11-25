@@ -18,7 +18,7 @@ get_batch_size() {
         *"4b"*)
             echo "24"
             ;;
-        *"7b"*|*"9b"*|*"120b"*)
+        *"7b"*|*"9b"*|*"120b"*|*"235b"*)
             echo "8"
             ;;
         *)
@@ -43,7 +43,8 @@ models=(
     # "unsloth/Meta-Llama-3.1-8B-Instruct"
     # "google/gemma-2-2b-it"
     # "google/gemma-2-9b-it"
-    "Openai/Gpt-oss-120b"
+    # "Openai/Gpt-oss-120b"
+    'qwen/qwen3-235b-a22b'
 )
 
 run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)"
@@ -59,15 +60,17 @@ for model_name in "${models[@]}"; do
         batch_size=$(get_batch_size "$model_name")
         simple_model_name=$(model_name2simple_model_name "$model_name")
         
-        echo "Running: $simple_model_name on $evaluation_dataset with batch_size=$batch_size"
+        echo "Running: $simple_model_name on $evaluation_dataset with batch_size=64"
 
         tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_intervention.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
-            --batch_size $batch_size \
+            --batch_size 64 \
             --use_api \
-            --tokenizer_name openai/gpt-oss-120b \
-            --prompting_regime detailed_instruction" ENTER
+            --tokenizer_name Qwen/Qwen3-235B-A22B \
+            --api_base_url https://openrouter.ai/api/v1 \
+            --try_one_batch true\
+            --prompting_regime baseline_structure_faithfulness" ENTER
 
         tmux send-keys "echo '----------------------------------------'" ENTER
     done
