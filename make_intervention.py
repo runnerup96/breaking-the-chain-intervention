@@ -1,26 +1,21 @@
 
 import argparse
-import json
-from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
-import os
-import time
-import random
-from tqdm import tqdm
-from datetime import datetime
-from copy import deepcopy
-
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
-from transformers.utils import logging
-
 import llm_model
-from datasets_for_intervention import entailment_intervention, entailment_dataset, entailment_evaluation
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
+from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
+import os
+from tqdm import tqdm
+from datetime import datetime
+import json
+from torch.utils.data import DataLoader
+from copy import deepcopy
+from transformers.utils import logging
+import random
+import numpy as np
+import torch
 
 logging.set_verbosity_error()
-torch._dynamo.config.accumulated_cache_size_limit = 2048
 
 def fix_seed(seed=42):
     """Fix random seeds for reproducibility"""
@@ -34,19 +29,18 @@ def fix_seed(seed=42):
     os.environ['PYTHONHASHSEED'] = str(seed) 
 
 model_name2simple_model_name = {
-        "Qwen/Qwen3-1.7B": "qwen3-1.7B",
         "Qwen/Qwen3-4B": "qwen3-4B",
         "Qwen/Qwen3-8B": "qwen3-8B",
         "Qwen/Qwen3-1.7B": "qwen3-1.7B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
-        "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
         "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
         "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
         "google/gemma-2-2b-it": "gemma2-2B",
         "google/gemma-2-9b-it": "gemma2-9B",
-        "Openai/Gpt-oss-120b": "gpt-oss-120b"
+        "Openai/Gpt-oss-120b": "gpt-oss-120b",
+        "qwen/qwen3-235b-a22b": "qwen3-235b-a22b"
     }
 
 
@@ -54,9 +48,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--evaluation_dataset", type=str, required=True)
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--try_one_batch", action="store_true", default=False)
-    parser.add_argument("--logging-dir", type=str, default="logs")
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--try_one_batch", type=bool, default=False)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--prompting_regime", type=str,
                         choices=["baseline_structure_faithfulness", "detailed_instruction"], default="baseline_structure_faithfulness")
@@ -75,6 +68,9 @@ if __name__ == "__main__":
     - We show intervened few-shot examples (with contradictions)
     """
     args = parser.parse_args()
+
+    if args.model_name not in model_name2simple_model_name:
+        raise ValueError(f'Unknown model: {args.model_name}. Check model_name2simple_model_name dict in make_intervention.py')
     
     fix_seed(args.seed)
 
@@ -98,18 +94,6 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model)
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
-    elif args.evaluation_dataset == "entailment":
-        train_dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/train.jsonl")
-        train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
-        few_shot_examples = train_dataset[::128][:5]
-        assert len(few_shot_examples) == 5
-
-        dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/test.jsonl")
-        paraphrases_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/aligned_test_question_paraphases.json")
-        dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase")
-        evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "averitec":
         dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
@@ -133,30 +117,20 @@ if __name__ == "__main__":
         dataloader = [next(iter(dataloader))]
         # dataloader = [list(dataloader)[-1]]
 
-
     processed_samples_list, fails_list = [], []
-    for batch_idx, batch in enumerate(tqdm(dataloader, desc="Running inference")):
-        batch_ids = [sample["id"] for sample in batch]
-        print(f"Processing batch {batch_idx}: {len(batch)} samples, IDs: {batch_ids}")
-
-        # Process structure prediction separately (1024 tokens)
+    for batch in tqdm(dataloader, desc="Running inference", total=len(dataloader)):
+        
+        # batch_idx_list = [sample["idx"] for sample in batch]
         prompted_batch_with_structure_prediction = [intervention_logic.make_prompt(sample, include_gold_structure=False) for sample in batch]
-        structure_prediction_outputs = llm_model.generate(prompted_batch_with_structure_prediction,
-                                                         max_new_tokens=1024,
-                                                         skip_special_tokens=False)
-
-        # Process gold structure separately with smaller max_new_tokens
-        prompted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
-        gold_structure_outputs = llm_model.generate(prompted_batch_with_gold_structure, 
-                                                   max_new_tokens=10,
+        promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
+        all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
+        completion_type_list = ["structure_prediction"] * len(prompted_batch_with_structure_prediction) + ["gold_structure"] * len(promted_batch_with_gold_structure)
+        # DO_X -- if we have ground truth, we wont need to fill it by the model
+        batched_model_outputs = llm_model.generate(all_batch, max_new_tokens=1024,# X2 from batch
                                                    skip_special_tokens=False)
-        # Combine outputs and completion types
-        batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
-        completion_type_list = ["structure_prediction"] * len(structure_prediction_outputs) + ["gold_structure"] * len(gold_structure_outputs)
-
         # here we have just generation, we do the intervention independent from the gold/predicted structure
         doubled_batch = batch + [deepcopy(s) for s in batch]
-        for sample, model_output, completion_type in tqdm(zip(doubled_batch, batched_model_outputs, completion_type_list), total=len(doubled_batch)):
+        for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
             sample['completion_type'] = completion_type
             # Mediator(DO_X)
             try:
@@ -183,6 +157,7 @@ if __name__ == "__main__":
     os.makedirs(path2save, exist_ok=True)
 
     model_name = model_name2simple_model_name[args.model_name]
+
     curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
     file_name = f"{model_name}_{curr_time}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}.json"
     path2save = os.path.join(path2save, file_name)

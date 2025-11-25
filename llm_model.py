@@ -1,11 +1,16 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union
 import re
 import os
 
 from openai import OpenAI
 from openai import DefaultHttpxClient
+
+import asyncio
+import aiohttp
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 QWEN3_MODEL_FAMILY = "Qwen3"
@@ -29,11 +34,11 @@ class LLMModel:
         Args:
             model_name: Name or path of the model
             device_map: Device mapping for the model
-            dtype: Torch data type for the model
+            torch_dtype: Torch data type for the model
         """
         self.model_name = model_name
         self.device_map = device_map
-        self.dtype = torch_dtype
+        self.torch_dtype = torch_dtype
 
         self.use_api = use_api
         self.api_base_url = api_base_url
@@ -81,6 +86,8 @@ class LLMModel:
         if self.use_api:
             if 'gpt' in self.model_name.lower():
                 return GPT_MODEL_FAMILY
+            elif 'qwen3' in self.model_name.lower():
+                return QWEN3_MODEL_FAMILY
 
         if (hasattr(self.model.config, 'architectures') and 
                          self.model.config.architectures and 
@@ -155,7 +162,7 @@ class LLMModel:
     def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
                               skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
-        Generate text for multiple prompts or messages using Qwen3 model in batch.
+        Generate text for multiple prompts using Qwen3 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
         
@@ -261,32 +268,156 @@ class LLMModel:
         
         return results
     
+    # def _generate_api_batch(
+    #     self,
+    #     prompts: List[str],
+    #     max_new_tokens: int,
+    #     skip_special_tokens: bool) -> List[Dict[str, str]]:
+
+    #     print('!!!!!!!!!!!!!!!!!!!!', len(prompts))
+    #     resp = self.client.completions.create(
+    #         model=self.model_name,
+    #         prompt=prompts,
+    #         max_tokens=max_new_tokens,
+    #         temperature=0.0,
+    #     )
+
+    #     index2choice = {c.index: c for c in resp.choices}
+
+    #     results = []
+    #     for i, prompt in enumerate(prompts):
+    #         choice = index2choice[i]
+    #         completion_text = choice.text
+
+    #         results.append({
+    #             "prompt": prompt,
+    #             "completion": completion_text,
+    #         })
+
+    #     return results
+
+    # def _generate_api_batch(
+    #     self,
+    #     prompts: List[str],
+    #     max_new_tokens: int,
+    #     skip_special_tokens: bool
+    # ) -> List[Dict[str, str]]:
+
+    #     results = []
+
+    #     for prompt in prompts:
+    #         # Один API-запрос на один prompt
+    #         resp = self.client.completions.create(
+    #             model=self.model_name,
+    #             prompt=prompt,
+    #             max_tokens=max_new_tokens,
+    #             temperature=0.0,
+    #         )
+
+    #         # Берём первую (и единственную) completion
+    #         completion_text = resp.choices[0].text
+
+    #         results.append({
+    #             "prompt": prompt,
+    #             "completion": completion_text,
+    #         })
+
+    #     return results
+
+
+    # def _generate_api_batch(
+    #     self,
+    #     prompts: List[str],
+    #     max_new_tokens: int,
+    #     skip_special_tokens: bool
+    # ) -> List[Dict[str, str]]:
+
+    #     """
+    #     Асинхронная параллельная генерация через OpenRouter API.
+    #     Снаружи функция выглядит синхронной, но внутри использует asyncio.
+    #     """
+        
+    #     async def fetch_one(session, prompt, idx):
+    #         url = f"{self.api_base_url}/completions"
+    #         payload = {
+    #             "model": self.model_name,
+    #             "prompt": prompt,
+    #             "max_tokens": max_new_tokens,
+    #             "temperature": 0.0,
+    #         }
+    #         headers = {
+    #             "Authorization": f"Bearer {os.getenv('OPENAI_KEY')}",
+    #             "Content-Type": "application/json",
+    #         }
+
+    #         # Ограничение параллелизма
+    #         async with semaphore:
+    #             async with session.post(url, json=payload, headers=headers, ssl=False) as resp:
+    #                 data = await resp.json()
+    #                 text = data["choices"][0]["text"]
+    #                 return idx, prompt, text
+
+    #     async def run_all():
+    #         async with aiohttp.ClientSession() as session:
+    #             tasks = [
+    #                 fetch_one(session, prompt, idx)
+    #                 for idx, prompt in enumerate(prompts)
+    #             ]
+    #             return await asyncio.gather(*tasks)
+
+    #     # Ограничиваем количество одновременных запросов
+    #     semaphore = asyncio.Semaphore(16)  # можно 4–16 в зависимости от скорости сервера
+
+    #     # Запускаем асинхронный event loop синхронно
+    #     loop = asyncio.new_event_loop()
+    #     asyncio.set_event_loop(loop)
+    #     results = loop.run_until_complete(run_all())
+    #     loop.close()
+
+    #     # Собираем в правильном порядке
+    #     results.sort(key=lambda x: x[0])
+    #     final = []
+    #     for idx, prompt, completion in results:
+    #         final.append({
+    #             "prompt": prompt,
+    #             "completion": completion,
+    #         })
+
+    #     return final
+
     def _generate_api_batch(
         self,
         prompts: List[str],
         max_new_tokens: int,
-        skip_special_tokens: bool) -> List[Dict[str, str]]:
+        skip_special_tokens: bool
+    ) -> List[Dict[str, str]]:
 
-        resp = self.client.completions.create(
-            model=self.model_name,
-            prompt=prompts,
-            max_tokens=max_new_tokens,
-            temperature=0.0,
-        )
+        def worker(prompt):
+            resp = self.client.completions.create(
+                model=self.model_name,
+                prompt=prompt,
+                max_tokens=max_new_tokens,
+                temperature=0.0,
+            )
+            completion_text = resp.choices[0].text
+            return prompt, completion_text
 
-        index2choice = {c.index: c for c in resp.choices}
+        max_workers = 16
 
-        results = []
-        for i, prompt in enumerate(prompts):
-            choice = index2choice[i]
-            completion_text = choice.text
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(worker, p): i for i, p in enumerate(prompts)}
 
-            results.append({
-                "prompt": prompt,
-                "completion": completion_text,
-            })
+            outputs = [None] * len(prompts)
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                prompt, completion = future.result()
+                outputs[idx] = {
+                    "prompt": prompt,
+                    "completion": completion,
+                }
 
-        return results
+        return outputs
+
 
     def clean_model_specific_completion(self, output: str) -> str:
         if self.model_family == QWEN3_MODEL_FAMILY:
@@ -309,4 +440,3 @@ class LLMModel:
         else:
             raise NotImplementedError(f"Model family for {self.model_name} not yet implemented")
         return output
-
