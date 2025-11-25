@@ -18,7 +18,11 @@ get_batch_size() {
         *"4b"*)
             echo "24"
             ;;
+<<<<<<< HEAD
         *"7b"*|*"9b"*|*"120b"*|*"235b"*)
+=======
+        *"7b"*|*"8b"*|*"9b"*)
+>>>>>>> origin/main
             echo "8"
             ;;
         *)
@@ -31,6 +35,8 @@ project_path="/home/chaichuk/frontdoor_llm_causality"
 CUDA_DEVICE_NUMBER=0
 
 datasets=("tabfact")
+
+prompt_regime="detailed_instruction"
 
 models=(
     # "Qwen/Qwen3-1.7B"
