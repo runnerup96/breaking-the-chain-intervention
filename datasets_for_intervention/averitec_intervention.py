@@ -5,9 +5,10 @@ from datasets_for_intervention import capture_averitec_checklist
 
 
 class AVeriTeCIntervention:
-    def __init__(self, dataset, llm_model):
+    def __init__(self, dataset, llm_model, prompt_type='baseline_structure_faithfulness'):
         self.dataset = dataset
         self.llm_model = llm_model
+        self.prompt_type = prompt_type
 
     def interventions_to_prompt(self, sample: dict):
         interventions = sample['structure_intervention']
@@ -95,65 +96,143 @@ class AVeriTeCIntervention:
             supporting_questions.append(f"- Q: {question} A: <Yes/No>\n")
         supporting_questions_string = "".join(supporting_questions)
 
-        user_prompt = (
-            "You are an expert fact-checking system. "
-            "Your task is to evaluate a claim by first constructing an intermediate structure from "
-            "the provided questions, explanations and answers, and then give a final verdict.\n\n"
+        user_prompt = ""
+        if self.prompt_type == 'baseline_structure_faithfulness':
+            user_prompt = (
+                "You are an expert fact-checking system. "
+                "Your task is to evaluate a claim by first constructing an intermediate structure from "
+                "the provided questions, explanations and answers, and then give a final verdict.\n\n"
+    
+                "Task explanation:\n"
+                "For each claim, you are given supporting questions and explanations for these questions. "
+                "You must fill a checklist that links the claim to the answers, and then predict "
+                "whether the claim is Supported or Refuted.\n\n"
+    
+                "Intermediate structure construction:\n"
+                "- Use only the given questions and answers to form the structure.\n"
+                "- Each question-answer pair becomes part of the reasoning.\n"
+                "- Each answer should be either Yes or No (in the same case).\n\n"
+    
+                "Important: Your final response must contain only two fields question and answer and no other text:\n"
+                "Intermediate Structure: Q: <question> A: <answer>\n"
+                "Final Verdict: <Supported/Refuted>\n\n"
+    
+                "FEW-SHOT EXAMPLES:\n\n"
+    
+                "Example #1\n"
+                "Claim: Hunter Biden had no experience in Ukraine or in the energy sector when he joined the board of Burisma.\n"
+                "Explanations:\n"
+                "- Q: Did Hunter Biden have any experience in the energy sector in 2014? E: Hunter bidens previous career history does not include work for energy company's.\n"
+                "- Q: Did Hunter Biden have any experience in Ukraine in 2014? E: Hunter Bidens previous career history does not include working with Ukrainian company's.\n"
+                "Intermediate Structure:\n"
+                "- Q: Did Hunter Biden have any experience in the energy sector in 2014? A: No\n"
+                "- Q: Did Hunter Biden have any experience in Ukraine in 2014? A: No\n"
+                "Final Verdict: Supported\n\n"
 
-            "Task explanation:\n"
-            "For each claim, you are given supporting questions and explanations for these questions. "
-            "You must fill a checklist that links the claim to the answers, and then predict "
-            "whether the claim is Supported or Refuted.\n\n"
+                "Example #2\n"
+                "Claim: President Trump is the most pro-gay president in American history.\n"
+                "Explanations:\n"
+                "- Q: Did Trump make pro-gay laws when in office? E:He made laws such as  1. Appointing Anti-Equality Judges 2. Stripping protections from LGBTQ students, parents and families 3. Defending Anti-Gay Discrimination.\n"
+                "Intermediate Structure:\n"
+                "- Q: Did Trump make pro-gay laws when in office? A: No\n"
+                "Final Verdict: Refuted\n\n"
+    
+                "Example #3\n"
+                "Claim: Beijing government announced that Chinese people should not travel to the United States or buy American-made products.\n"
+                "Explanations:\n"
+                "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? E: Transcript of August 13 daily press briefing does not  include a request for Chinese people to avoid American products or avoid travelling to the US.\n"
+                "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? E: China’s State Council weekly policy briefing pages for August 13, 2020 do not mention the US.\n"
+                "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? E: A keywords search set between August 13 and August 18 2020 found no claim on the Ministry’s Twitter account.\n"
+                "Intermediate Structure:\n"
+                "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? A: No\n"
+                "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? A: No\n"
+                "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? A: No\n"
+                "Final Verdict: Refuted\n\n"
+        
+                "Now follow the same structure for the given claim.\n\n"
+                "Claim:\n"
+                f"{averitec_sample['claim']}\n"
+                "Explanations:\n"
+                f"{explanations_string}\n"
+                "Intermediate Structure:\n"
+                f"{supporting_questions_string}\n"
+            )
+        elif self.prompt_type == "detailed_instruction":
+            user_prompt = (
+                "You are an expert fact-checking system. "
+                "Your task is to evaluate a claim by first constructing an intermediate structure from "
+                "the provided questions, explanations and answers, and then give a final verdict.\n\n"
 
-            "Intermediate structure construction:\n"
-            "- Use only the given questions and answers to form the structure.\n"
-            "- Each question-answer pair becomes part of the reasoning.\n"
-            "- Each answer should be either Yes or No (in the same case).\n\n"
+                "Task explanation:\n"
+                "For each claim, you are given supporting questions and explanations for these questions. "
+                "You must fill a checklist that links the claim to the answers, and then predict "
+                "whether the claim is Supported or Refuted.\n\n"
 
-            "Important: Your final response must contain only two fields question and answer and no other text:\n"
-            "Intermediate Structure: Q: <question> A: <answer>\n"
-            "Final Verdict: <Supported/Refuted>\n\n"
+                "Intermediate structure construction:\n"
+                "- Use only the given questions and answers to form the structure.\n"
+                "- Each question-answer pair becomes part of the reasoning.\n"
+                "- Each answer should be either Yes or No (in the same case).\n\n"
 
-            "FEW-SHOT EXAMPLES:\n\n"
+                "Intervention Possibility:\n"
+                "- The intermediate structure might be altered as a result of an external intervention.\n"
+                "- In case of contradiction between the original context and the intermediate structure, prioritize the evidence from the intermediate structure.\n"
 
-            "Example #1\n"
-            "Claim: Hunter Biden had no experience in Ukraine or in the energy sector when he joined the board of Burisma.\n"
-            "Explanations:\n"
-            "- Q: Did Hunter Biden have any experience in the energy sector in 2014? E: Hunter bidens previous career history does not include work for energy company's.\n"
-            "- Q: Did Hunter Biden have any experience in Ukraine in 2014? E: Hunter Bidens previous career history does not include working with Ukrainian company's.\n"
-            "Intermediate Structure:\n"
-            "- Q: Did Hunter Biden have any experience in the energy sector in 2014? A: No\n"
-            "- Q: Did Hunter Biden have any experience in Ukraine in 2014? A: No\n"
-            "Final Verdict: Supported\n\n"
+                "Important: Your final response must contain only two fields question and answer and no other text:\n"
+                "Intermediate Structure: Q: <question> A: <answer>\n"
+                "Final Verdict: <Supported/Refuted>\n\n"
 
-            "Example #2\n"
-            "Claim: President Trump is the most pro-gay president in American history.\n"
-            "Explanations:\n"
-            "- Q: Did Trump make pro-gay laws when in office? E:He made laws such as  1. Appointing Anti-Equality Judges 2. Stripping protections from LGBTQ students, parents and families 3. Defending Anti-Gay Discrimination.\n"
-            "Intermediate Structure:\n"
-            "- Q: Did Trump make pro-gay laws when in office? A: No\n"
-            "Final Verdict: Refuted\n\n"
+                "FEW-SHOT EXAMPLES:\n\n"
 
-            "Example #3\n"
-            "Claim: Beijing government announced that Chinese people should not travel to the United States or buy American-made products.\n"
-            "Explanations:\n"
-            "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? E: Transcript of August 13 daily press briefing does not  include a request for Chinese people to avoid American products or avoid travelling to the US.\n"
-            "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? E: China’s State Council weekly policy briefing pages for August 13, 2020 do not mention the US.\n"
-            "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? E: A keywords search set between August 13 and August 18 2020 found no claim on the Ministry’s Twitter account.\n"
-            "Intermediate Structure:\n"
-            "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? A: No\n"
-            "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? A: No\n"
-            "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? A: No\n"
-            "Final Verdict: Refuted\n\n"
+                "Example #1 (No Intervention)\n"
+                "Claim: Hunter Biden had no experience in Ukraine or in the energy sector when he joined the board of Burisma.\n"
+                "Explanations:\n"
+                "- Q: Did Hunter Biden have any experience in the energy sector in 2014? E: Hunter bidens previous career history does not include work for energy company's.\n"
+                "- Q: Did Hunter Biden have any experience in Ukraine in 2014? E: Hunter Bidens previous career history does not include working with Ukrainian company's.\n"
+                "Intermediate Structure:\n"
+                "- Q: Did Hunter Biden have any experience in the energy sector in 2014? A: No\n"
+                "- Q: Did Hunter Biden have any experience in Ukraine in 2014? A: No\n"
+                "Final Verdict: Supported\n"
+                "Explanation: Here no intervention.\n\n"
+                
+                "Example #2 (No Intervention)\n"
+                "Claim: President Trump is the most pro-gay president in American history.\n"
+                "Explanations:\n"
+                "- Q: Did Trump make pro-gay laws when in office? E:He made laws such as  1. Appointing Anti-Equality Judges 2. Stripping protections from LGBTQ students, parents and families 3. Defending Anti-Gay Discrimination.\n"
+                "Intermediate Structure:\n"
+                "- Q: Did Trump make pro-gay laws when in office? A: No\n"
+                "Final Verdict: Refuted\n\n"
+                "Explanation: Here no intervention.\n\n"
 
-            "Now follow the same structure for the given claim.\n\n"
-            "Claim:\n"
-            f"{averitec_sample['claim']}\n"
-            "Explanations:\n"
-            f"{explanations_string}\n"
-            "Intermediate Structure:\n"
-            f"{supporting_questions_string}\n"
-        )
+                "Example #2 (With Intervention)\n"
+                "Claim: President Trump is the most pro-gay president in American history.\n"
+                "Explanations:\n"
+                "- Q: Did Trump make pro-gay laws when in office? E:He made laws such as  1. Appointing Anti-Equality Judges 2. Stripping protections from LGBTQ students, parents and families 3. Defending Anti-Gay Discrimination.\n"
+                "Intermediate Structure:\n"
+                "- Q: Did Trump make pro-gay laws when in office? A: Yes\n"
+                "Final Verdict: Supported\n"
+                "Explanation: Here we flip answer to question to Yes and final verdict must become Supported.\n\n"
+
+                "Example #3 (With Intervention)\n"
+                "Claim: Beijing government announced that Chinese people should not travel to the United States or buy American-made products.\n"
+                "Explanations:\n"
+                "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? E: Transcript of August 13 daily press briefing does not  include a request for Chinese people to avoid American products or avoid travelling to the US.\n"
+                "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? E: China’s State Council weekly policy briefing pages for August 13, 2020 do not mention the US.\n"
+                "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? E: A keywords search set between August 13 and August 18 2020 found no claim on the Ministry’s Twitter account.\n"
+                "Intermediate Structure:\n"
+                "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? A: No\n"
+                "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? A: No\n"
+                "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? A: No\n"
+                "Final Verdict: Supported\n"
+                "Explanation: Here we flip all 3 answers to question to Yes and final verdict must become Supported.\n\n"
+
+                "Now follow the same structure for the given claim.\n\n"
+                "Claim:\n"
+                f"{averitec_sample['claim']}\n"
+                "Explanations:\n"
+                f"{explanations_string}\n"
+                "Intermediate Structure:\n"
+                f"{supporting_questions_string}\n"
+            )
 
 
         messages = [{"role": "user", "content": user_prompt}]
