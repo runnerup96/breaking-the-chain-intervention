@@ -1,68 +1,107 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union
 import re
+import os
 
+from openai import OpenAI
+from openai import DefaultHttpxClient
+
+import asyncio
+import aiohttp
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 QWEN3_MODEL_FAMILY = "Qwen3"
 FALCON3_MODEL_FAMILY = "Falcon3"
 LLAMA32_MODEL_FAMILY = "Llama3.2"
 LLAMA31_MODEL_FAMILY = "Llama3.1"
 GEMMA2_MODEL_FAMILY = "Gemma2"
-
+GPT_MODEL_FAMILY = "GPT"
 
 class LLMModel:
-    def __init__(self, model_name: str, device_map: str = "auto", dtype: torch.dtype = torch.bfloat16):
+    def __init__(self, model_name: str,
+                 device_map: str = "auto",
+                 torch_dtype: torch.dtype = torch.bfloat16,
+                 use_api: bool = False,
+                 api_base_url: str | None = None,
+                 tokenizer_name: str | None = None,
+                 ):
         """
         Initialize the LLM model.
-        
+
         Args:
             model_name: Name or path of the model
             device_map: Device mapping for the model
-            dtype: Torch data type for the model
+            torch_dtype: Torch data type for the model
         """
         self.model_name = model_name
         self.device_map = device_map
-        self.dtype = dtype
+        self.torch_dtype = torch_dtype
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map=device_map,
-            torch_dtype=dtype
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.use_api = use_api
+        self.api_base_url = api_base_url
+
+        self.tokenizer_name = tokenizer_name if tokenizer_name else model_name
+
+        self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
         self.tokenizer.padding_side = 'left'
         if self.tokenizer.pad_token == None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
+
+        if not self.use_api:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map=device_map,
+                torch_dtype=torch_dtype
+            )
+            
+            self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
+        else:
+            if api_base_url is None:
+                raise ValueError("api_base_url must be provided when use_api=True")
+            
+            api_key = os.getenv("OPENAI_KEY")
+            if api_key is None:
+                raise ValueError(
+                    "Environment variable OPENAI_KEY is not set, "
+                    "but use_api=True. Please export OPENAI_KEY."
+                )
+            
+            self.client = OpenAI(
+                base_url=api_base_url,
+                api_key=api_key,
+                http_client=DefaultHttpxClient(verify=False)
+            )
 
         self.model_family = self.identify_model_family(model_name)
         
-        print(f"Model {model_name} initialized")
+        print("Local" if not self.use_api else "API", f"model {model_name} initialized")
 
     def identify_model_family(self, model_name: str) -> str:
         """
         Identify the type of the model.
         """
+        if self.use_api:
+            if 'gpt' in self.model_name.lower():
+                return GPT_MODEL_FAMILY
+            elif 'qwen3' in self.model_name.lower():
+                return QWEN3_MODEL_FAMILY
+
         if (hasattr(self.model.config, 'architectures') and 
                          self.model.config.architectures and 
                          self.model.config.architectures[0] == "Qwen3ForCausalLM"):
             return QWEN3_MODEL_FAMILY
-        elif (hasattr(self.model.config, 'architectures') and 
-              self.model.config.architectures and 
+        elif (hasattr(self.model.config, 'architectures') and
+              self.model.config.architectures and
               self.model.config.architectures[0] == "LlamaForCausalLM" and
               "falcon3" in model_name.lower()):
             return FALCON3_MODEL_FAMILY
-        elif (hasattr(self.model.config, 'architectures') and 
-              self.model.config.architectures and 
+        elif (hasattr(self.model.config, 'architectures') and
+              self.model.config.architectures and
               self.model.config.architectures[0] == "LlamaForCausalLM" and
               "llama-3.2" in model_name.lower()):
             return LLAMA32_MODEL_FAMILY
-        elif (hasattr(self.model.config, 'architectures') and 
-              self.model.config.architectures and 
-              self.model.config.architectures[0] == "LlamaForCausalLM" and
-              "llama-3.1" in model_name.lower()):
-            return LLAMA31_MODEL_FAMILY
         elif (hasattr(self.model.config, 'architectures') and 
               self.model.config.architectures and 
               self.model.config.architectures[0] == "LlamaForCausalLM" and
@@ -74,9 +113,12 @@ class LLMModel:
             return GEMMA2_MODEL_FAMILY
         else:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
-    
-    def generate(self, prompts:  List[str], max_new_tokens: int,
+
+    def generate(self, prompts: List[str], max_new_tokens: int,
                  skip_special_tokens: bool) -> List[Dict[str, str]]:
+        if self.use_api:
+            return self._generate_api_batch(prompts, max_new_tokens, skip_special_tokens)
+        
         if self.model_family == QWEN3_MODEL_FAMILY:
             return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens)
         elif self.model_family == FALCON3_MODEL_FAMILY:
@@ -90,7 +132,6 @@ class LLMModel:
             # TODO: Add other model generation functions
             raise NotImplementedError(f"Generation for model type {type(self.model).__name__} not yet implemented")
 
-    
     def apply_chat_template(self, messages: List[Dict], add_generation_prompt: bool) -> str:
         if self.model_family == QWEN3_MODEL_FAMILY:
             prompt = self.tokenizer.apply_chat_template(
@@ -99,31 +140,14 @@ class LLMModel:
                 add_generation_prompt=add_generation_prompt,
                 enable_thinking=False
             )
-        elif self.model_family == FALCON3_MODEL_FAMILY:
+        elif self.model_family == GPT_MODEL_FAMILY:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=add_generation_prompt,
+                reasoning_effort="low"
             )
-        elif self.model_family == LLAMA32_MODEL_FAMILY:
-            prompt = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=add_generation_prompt,
-            )
-        elif self.model_family == LLAMA31_MODEL_FAMILY:
-            prompt = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=add_generation_prompt,
-            )
-        elif self.model_family == LLAMA31_MODEL_FAMILY:
-            prompt = self.tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=add_generation_prompt,
-            )
-        elif self.model_family == GEMMA2_MODEL_FAMILY:
+        elif self.model_family in [FALCON3_MODEL_FAMILY, LLAMA32_MODEL_FAMILY, LLAMA31_MODEL_FAMILY, GEMMA2_MODEL_FAMILY]:
             prompt = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -132,58 +156,58 @@ class LLMModel:
         else:
             raise NotImplementedError(f"Chat template for model type {type(self.model).__name__} not yet implemented")
         return prompt
-    
+
     def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
                               skip_special_tokens: bool) -> List[Dict[str, str]]:
         """
-        Generate text for multiple prompts or messages using Qwen3 model in batch.
+        Generate text for multiple prompts using Qwen3 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
-        
+
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
             num_beams=1
         )
-        
+
         results = []
         for i in range(len(prompts)):
             input_length = model_inputs.input_ids[i].shape[0]
 
             prompt_ids = generated_ids[i][:input_length].tolist()
             completion_ids = generated_ids[i][input_length:].tolist()
-            
+
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
             results.append({"prompt": prompt, "completion": completion})
-        
+
         return results
 
     def _generate_falcon3_batch(self, prompts: List[str], max_new_tokens: int,
-                               skip_special_tokens: bool) -> List[Dict[str, str]]:
+                                skip_special_tokens: bool) -> List[Dict[str, str]]:
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
-        
+
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
             num_beams=1
         )
-        
+
         results = []
         for i in range(len(prompts)):
             input_length = model_inputs.input_ids[i].shape[0]
 
             prompt_ids = generated_ids[i][:input_length].tolist()
             completion_ids = generated_ids[i][input_length:].tolist()
-            
+
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
             results.append({"prompt": prompt, "completion": completion})
-        
+
         return results
 
     def _generate_llama_batch(self, prompts: List[str], max_new_tokens: int,
@@ -192,26 +216,26 @@ class LLMModel:
         Generate text for multiple prompts using Llama3.2 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
-        
+
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
             num_beams=1
         )
-        
+
         results = []
         for i in range(len(prompts)):
             input_length = model_inputs.input_ids[i].shape[0]
 
             prompt_ids = generated_ids[i][:input_length].tolist()
             completion_ids = generated_ids[i][input_length:].tolist()
-            
+
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
             results.append({"prompt": prompt, "completion": completion})
-        
+
         return results
 
     def _generate_gemma2_batch(self, prompts: List[str], max_new_tokens: int,
@@ -220,27 +244,178 @@ class LLMModel:
         Generate text for multiple prompts using Gemma2 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
-        
+
         generated_ids = self.model.generate(
             **model_inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
             num_beams=1
         )
-        
+
         results = []
         for i in range(len(prompts)):
             input_length = model_inputs.input_ids[i].shape[0]
 
             prompt_ids = generated_ids[i][:input_length].tolist()
             completion_ids = generated_ids[i][input_length:].tolist()
-            
+
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
             results.append({"prompt": prompt, "completion": completion})
-        
+
         return results
+    
+    # def _generate_api_batch(
+    #     self,
+    #     prompts: List[str],
+    #     max_new_tokens: int,
+    #     skip_special_tokens: bool) -> List[Dict[str, str]]:
+
+    #     print('!!!!!!!!!!!!!!!!!!!!', len(prompts))
+    #     resp = self.client.completions.create(
+    #         model=self.model_name,
+    #         prompt=prompts,
+    #         max_tokens=max_new_tokens,
+    #         temperature=0.0,
+    #     )
+
+    #     index2choice = {c.index: c for c in resp.choices}
+
+    #     results = []
+    #     for i, prompt in enumerate(prompts):
+    #         choice = index2choice[i]
+    #         completion_text = choice.text
+
+    #         results.append({
+    #             "prompt": prompt,
+    #             "completion": completion_text,
+    #         })
+
+    #     return results
+
+    # def _generate_api_batch(
+    #     self,
+    #     prompts: List[str],
+    #     max_new_tokens: int,
+    #     skip_special_tokens: bool
+    # ) -> List[Dict[str, str]]:
+
+    #     results = []
+
+    #     for prompt in prompts:
+    #         # Один API-запрос на один prompt
+    #         resp = self.client.completions.create(
+    #             model=self.model_name,
+    #             prompt=prompt,
+    #             max_tokens=max_new_tokens,
+    #             temperature=0.0,
+    #         )
+
+    #         # Берём первую (и единственную) completion
+    #         completion_text = resp.choices[0].text
+
+    #         results.append({
+    #             "prompt": prompt,
+    #             "completion": completion_text,
+    #         })
+
+    #     return results
+
+
+    # def _generate_api_batch(
+    #     self,
+    #     prompts: List[str],
+    #     max_new_tokens: int,
+    #     skip_special_tokens: bool
+    # ) -> List[Dict[str, str]]:
+
+    #     """
+    #     Асинхронная параллельная генерация через OpenRouter API.
+    #     Снаружи функция выглядит синхронной, но внутри использует asyncio.
+    #     """
+        
+    #     async def fetch_one(session, prompt, idx):
+    #         url = f"{self.api_base_url}/completions"
+    #         payload = {
+    #             "model": self.model_name,
+    #             "prompt": prompt,
+    #             "max_tokens": max_new_tokens,
+    #             "temperature": 0.0,
+    #         }
+    #         headers = {
+    #             "Authorization": f"Bearer {os.getenv('OPENAI_KEY')}",
+    #             "Content-Type": "application/json",
+    #         }
+
+    #         # Ограничение параллелизма
+    #         async with semaphore:
+    #             async with session.post(url, json=payload, headers=headers, ssl=False) as resp:
+    #                 data = await resp.json()
+    #                 text = data["choices"][0]["text"]
+    #                 return idx, prompt, text
+
+    #     async def run_all():
+    #         async with aiohttp.ClientSession() as session:
+    #             tasks = [
+    #                 fetch_one(session, prompt, idx)
+    #                 for idx, prompt in enumerate(prompts)
+    #             ]
+    #             return await asyncio.gather(*tasks)
+
+    #     # Ограничиваем количество одновременных запросов
+    #     semaphore = asyncio.Semaphore(16)  # можно 4–16 в зависимости от скорости сервера
+
+    #     # Запускаем асинхронный event loop синхронно
+    #     loop = asyncio.new_event_loop()
+    #     asyncio.set_event_loop(loop)
+    #     results = loop.run_until_complete(run_all())
+    #     loop.close()
+
+    #     # Собираем в правильном порядке
+    #     results.sort(key=lambda x: x[0])
+    #     final = []
+    #     for idx, prompt, completion in results:
+    #         final.append({
+    #             "prompt": prompt,
+    #             "completion": completion,
+    #         })
+
+    #     return final
+
+    def _generate_api_batch(
+        self,
+        prompts: List[str],
+        max_new_tokens: int,
+        skip_special_tokens: bool
+    ) -> List[Dict[str, str]]:
+
+        def worker(prompt):
+            resp = self.client.completions.create(
+                model=self.model_name,
+                prompt=prompt,
+                max_tokens=max_new_tokens,
+                temperature=0.0,
+            )
+            completion_text = resp.choices[0].text
+            return prompt, completion_text
+
+        max_workers = 16
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(worker, p): i for i, p in enumerate(prompts)}
+
+            outputs = [None] * len(prompts)
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                prompt, completion = future.result()
+                outputs[idx] = {
+                    "prompt": prompt,
+                    "completion": completion,
+                }
+
+        return outputs
+
 
     def clean_model_specific_completion(self, output: str) -> str:
         if self.model_family == QWEN3_MODEL_FAMILY:
@@ -256,7 +431,10 @@ class LLMModel:
             last_end_of_turn = output.rfind('<end_of_turn>')
             if last_end_of_turn != -1:
                 output = output[:last_end_of_turn]
+        elif self.model_family == GPT_MODEL_FAMILY:
+            last_return = output.rfind('<|return|>')
+            if last_return != -1:
+                output = output[:last_return]
         else:
             raise NotImplementedError(f"Model family for {self.model_name} not yet implemented")
         return output
-

@@ -30,7 +30,7 @@ class TabFactEvaluation:
             1 if they match, 0 if they don't or either is None.
         """
         if gold_label is None or predicted_label is None:
-            return None
+            return 0 # None
         return 1 if gold_label == predicted_label else 0
 
     def summarize_nested_lists(self, tree: Any) -> Any:
@@ -45,12 +45,22 @@ class TabFactEvaluation:
         """
         if isinstance(tree, dict):
             return {k: self.summarize_nested_lists(v) for k, v in tree.items()}
+        # elif isinstance(tree, list):
+        #     if not all(isinstance(x, (int, float)) for x in tree):
+        #         raise TypeError("All list elements must be int or float.")
+        #     if len(tree) == 0:
+        #         return {"mean": None, "std": None}
+        #     return {"mean": mean(tree), "std": pstdev(tree)}
         elif isinstance(tree, list):
-            if not all(isinstance(x, (int, float)) for x in tree):
-                raise TypeError("All list elements must be int or float.")
-            if len(tree) == 0:
+            cleaned = []
+            for x in tree:
+                if isinstance(x, (int, float)):
+                    cleaned.append(x)
+                else:
+                    cleaned.append(0)
+            if len(cleaned) == 0:
                 return {"mean": None, "std": None}
-            return {"mean": mean(tree), "std": pstdev(tree)}
+            return {"mean": mean(cleaned), "std": pstdev(cleaned)}
         else:
             raise TypeError("Leaf values must be lists; found non-list leaf instead.")
 
