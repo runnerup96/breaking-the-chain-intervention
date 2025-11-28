@@ -18,11 +18,7 @@ get_batch_size() {
         *"4b"*)
             echo "24"
             ;;
-<<<<<<< HEAD
         *"7b"*|*"9b"*|*"120b"*|*"235b"*)
-=======
-        *"7b"*|*"8b"*|*"9b"*)
->>>>>>> origin/main
             echo "8"
             ;;
         *)
@@ -34,7 +30,7 @@ get_batch_size() {
 project_path="/home/chaichuk/frontdoor_llm_causality"
 CUDA_DEVICE_NUMBER=0
 
-datasets=("tabfact")
+datasets=("ricechem")
 
 prompt_regime="detailed_instruction"
 
@@ -66,16 +62,15 @@ for model_name in "${models[@]}"; do
         batch_size=$(get_batch_size "$model_name")
         simple_model_name=$(model_name2simple_model_name "$model_name")
         
-        echo "Running: $simple_model_name on $evaluation_dataset with batch_size=64"
+        echo "Running: $simple_model_name on $evaluation_dataset with batch_size=8"
 
         tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_intervention.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
-            --batch_size 64 \
+            --batch_size 8 \
             --use_api \
             --tokenizer_name Qwen/Qwen3-235B-A22B \
             --api_base_url https://openrouter.ai/api/v1 \
-            --try_one_batch true\
             --prompting_regime baseline_structure_faithfulness" ENTER
 
         tmux send-keys "echo '----------------------------------------'" ENTER

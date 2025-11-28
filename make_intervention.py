@@ -152,8 +152,15 @@ if __name__ == "__main__":
                 error_string = f"{error_type}: {error_message}"
                 fails_list.append([sample, error_string])
 
-
-    evaluation_metrics = evaluator.evaluate(processed_samples_list)
+    evaluation_metrics = None
+    try:
+        evaluation_metrics = evaluator.evaluate(processed_samples_list)
+    except Exception as e:
+        error_type, error_message = type(e).__name__, str(e)
+        print(f"[WARNING] Evaluation failed with {error_type}: {error_message}")
+        evaluation_metrics = {
+            "error": f"{error_type}: {error_message}"
+        }
 
     final_dataset_dict = {"metrics": evaluation_metrics, "result": processed_samples_list, "fails": fails_list}
     print('Processed: ', len(processed_samples_list))
