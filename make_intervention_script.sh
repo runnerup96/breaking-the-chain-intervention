@@ -27,10 +27,11 @@ get_batch_size() {
     esac
 }
 
-project_path=""
-CUDA_DEVICE_NUMBER=0
+project_path="/mnt/extremessd10tb/seleznev/breaking-the-chain-intervention"
+CUDA_DEVICE_NUMBER=1
 
-datasets=("averitec" "ricechem" "entailment")
+# datasets=("averitec" "ricechem" "entailment")
+datasets=("entailment")
 
 models=(
     "Qwen/Qwen3-1.7B"
@@ -46,7 +47,8 @@ models=(
 )
 
 run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)"
-python_path=""
+# run_name="debug_$(date +%Y%m%d_%H%M%S)"
+python_path="/mnt/extremessd10tb/seleznev/miniforge3/envs/break/bin/python"
 tmux new-session -d -s $run_name
 
 echo "Starting intervention runs in tmux session: $run_name"
@@ -60,9 +62,10 @@ for model_name in "${models[@]}"; do
 
         echo "Running: $simple_model_name on $evaluation_dataset with batch_size=$batch_size"
 
-        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' '$python_path' \
+        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' '$python_path' make_intervention.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
+            --prompting-regime 'detailed_instruction' \
             --batch_size $batch_size" ENTER
 
         tmux send-keys "echo '----------------------------------------'" ENTER
