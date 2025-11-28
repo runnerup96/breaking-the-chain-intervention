@@ -78,7 +78,7 @@ def parse_step_proof(step: str) -> List[Rule]:
     return rules
 
 
-def serialize_step_proof(rules: List[Rule]) -> str:
+def serialize_step_proof(rules: List[Rule], include_annotations: bool = True) -> str:
     """
     Serialize Rules back to EntailmentBank step_proof string.
     Includes annotations if present.
@@ -94,7 +94,7 @@ def serialize_step_proof(rules: List[Rule]) -> str:
             rule_str = f'{" & ".join(lhs)} -> {rhs}'
         
         # Add annotation if present
-        if rule.annotation:
+        if rule.annotation and include_annotations:
             rule_str += f': {rule.annotation}'
         
         parts.append(rule_str)
@@ -355,8 +355,10 @@ class EntailmentIntervention:
 - The intermediate structure might be altered as a result of an external intervention.
 - In case of contradiction between the original context and the intermediate structure, prioritize the evidence from the intermediate structure.
 """
-        else:
+        elif self.prompting_regime == "baseline_structure_faithfulness":
             additional_instruction = ""
+        else:
+            raise ValueError(f"Unknown prompting regime: {self.prompting_regime}")
 
         self.question_prefix = "## Question\n"
         self.context_prefix = "## Context\n"
@@ -624,7 +626,8 @@ Your response must contain exactly two sections in this order:
 
 
 if __name__ == "__main__":
-    dataset_path = "entailment_trees_emnlp2021_data_v3/dataset/task_2" #we look at problem with distractors
+    # dataset_path = "entailment_trees_emnlp2021_data_v3/dataset/task_2" #we look at problem with distractors
+    dataset_path = "statics/result_splits/entailment_bank/dataset/task_2"
 
     train_path = os.path.join(dataset_path, "train.jsonl")
     dev_path = os.path.join(dataset_path, "dev.jsonl")
@@ -645,34 +648,44 @@ if __name__ == "__main__":
 
     ex = train_dataset[14]  # your dict
     step = ex['meta']['step_proof'] if 'meta' in ex and 'step_proof' in ex['meta'] else ex['step_proof']
-    print("Hypothesis:", ex["hypothesis"])
-    print("Original:", step)
-    print("-"*100)
+    # print("Hypothesis:", ex["hypothesis"])
+    # print("Original:", step)
+    # print("-"*100)
 
-    for mode in ["delete", "replace", "rewire", "global"]:
-        new_step = intervene_step_proof(
-            step_proof = step,
-            hypothesis_id = ex["meta"]["hypothesis_id"],
-            distractors = ex["meta"]["distractors"],
-            mode = mode,
-            seed = 42
-        )
+    # for mode in ["delete", "replace", "rewire", "global"]:
+    #     new_step = intervene_step_proof(
+    #         step_proof = step,
+    #         hypothesis_id = ex["meta"]["hypothesis_id"],
+    #         distractors = ex["meta"]["distractors"],
+    #         mode = mode,
+    #         seed = 42
+    #     )
 
-        print(f"Edited ({mode}):", new_step)
-        print("-"*100)
+    #     print(f"Edited ({mode}):", new_step)
+    #     print("-"*100)
 
+    llm_model = LLMModel("Qwen/Qwen3-1.7B", device_map="cuda:0")
 
     val_dataset = EntailmentDataset(dev_path)
     few_shot_dataset = EntailmentDataset(train_path)
-    intervention = EntailmentIntervention(val_dataset, [sample for sample in few_shot_dataset[:5]], hsvt_mode="paraphrase")
+    intervention = EntailmentIntervention(val_dataset, llm_model=llm_model, few_shot_examples=[sample for sample in few_shot_dataset[:5]], hsvt_mode="lower", prompting_regime="baseline_structure_faithfulness")
     print("-"*100)
-    print("Prompt:")
-    print(intervention.make_prompt(val_dataset[0], include_gold_structure=True))
+    print("FULL PROMPT WITH FEW-SHOTS (with gold structure):")
+    print("="*100)
+    full_prompt_with_gold = intervention.make_prompt(val_dataset[0], include_gold_structure=True)
+    print(full_prompt_with_gold)
+    print("="*100)
     print("-"*100)
-    print("Message list:")
-    message_list = intervention.make_message_list(val_dataset[0], include_gold_structure=True)
-    for message in message_list:
-        print(message['role'].upper() + ": " + message['content'])
-        print("---")
-    print()
-    print("-"*100)
+    # print("FULL PROMPT WITH FEW-SHOTS (without gold structure):")
+    # print("="*100)
+    # full_prompt_without_gold = intervention.make_prompt(val_dataset[0], include_gold_structure=False)
+    # print(full_prompt_without_gold)
+    # print("="*100)
+    # print("-"*100)
+    # print("Message list:")
+    # message_list = intervention.make_message_list(val_dataset[0], include_gold_structure=True)
+    # for message in message_list:
+    #     print(message['role'].upper() + ": " + message['content'])
+    #     print("---")
+    # print()
+    # print("-"*100)
