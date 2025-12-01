@@ -47,6 +47,19 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--try_one_batch", type=bool, default=False)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--prompting-regime", type=str,
+                        choices=["baseline_structure_faithfulness", "detailed_instruction"])
+    """We consider two prompting regimes.
+    First explores faithfulness / reasoning transparency (as opposed to e.g. steganography) as is.
+    Main question: how does the model handle contradictions WITHOUT clear instructions / demonstration?
+    - In system prompt, we don't include a phrase about possibility of intervention.
+    - We only show non-intervened few-shots (without contradictions)
+
+    Second regime explores the ability of an LLM to follow explicit faithfulness instructions.
+    Main question: how does the model handle contradictions WITH clear instructions / demonstration?
+    - In system prompt, we include an explicit phrase about possibility of intervention.
+    - We show intervened few-shot examples (with contradictions)
+    """
 
     args = parser.parse_args()
     
