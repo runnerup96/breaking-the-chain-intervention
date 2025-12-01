@@ -1,6 +1,74 @@
 import sqlparse
 from sqlparse.sql import IdentifierList, Identifier, Function, Where
 from sqlparse.tokens import Keyword, DML
+import re
+import json
+
+
+def extract_data_from_response(model_response: str):
+    """
+    Извлекает SQL запрос и schema links из ответа модели.
+    
+    Args:
+        model_response: Ответ модели в формате:
+            Schema links: [{...}]
+            SQL: SELECT ...;
+    
+    Returns:
+        Словарь с ключами (sql_query, schema_links_list)
+    """
+    # Найти начало Schema links
+    schema_start = model_response.find("Schema links:")
+    if schema_start == -1:
+        raise ValueError("Schema links not found in the response")
+    
+    # Найти начало SQL
+    sql_start = model_response.find("SQL:")
+    if sql_start == -1:
+        raise ValueError("SQL query not found in the response")
+    
+    # Извлечь текст между "Schema links:" и "SQL:"
+    schema_json_str = model_response[schema_start + len("Schema links:"):sql_start].strip()
+    
+    # Теперь попробуем распарсить как JSON
+    try:
+        schema_links_list = json.loads(schema_json_str)
+    except json.JSONDecodeError:
+        # Попытка исправить одинарные кавычки
+        try:
+            schema_json_str = schema_json_str.replace("'", '"')
+            schema_links_list = json.loads(schema_json_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse schema links as JSON: {e}")
+
+    # Извлечь SQL
+    sql_part = model_response[sql_start + len("SQL:"):]
+    sql_query = sql_part.strip()
+    # Удалить возможный завершающий ; и/или лишние пробелы — по желанию
+    # Но обычно оставляем как есть
+
+    return {
+        "sql": sql_query,
+        "schema_links": schema_links_list
+    }
+
+
+def extract_json_from_model_response(model_response: str) -> dict | None:
+    json_match = re.search(r"```(?:json)?\s*({.*?})\s*```", model_response, re.DOTALL)
+    if json_match:
+        json_str = json_match.group(1)
+    else:
+        json_match = re.search(r"({.*})", model_response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            return None
+
+    try:
+        data = json.loads(json_str)
+        return data
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def _is_subselect(parsed):

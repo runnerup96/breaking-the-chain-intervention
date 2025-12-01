@@ -1,26 +1,10 @@
 import copy
+from copy import deepcopy
 import json
 import random
 import re
-from utils import extract_tables_and_columns
-
-
-def extract_json_from_model_response(model_response: str) -> dict | None:
-    json_match = re.search(r"```(?:json)?\s*({.*?})\s*```", model_response, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-    else:
-        json_match = re.search(r"({.*})", model_response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            return None
-
-    try:
-        data = json.loads(json_str)
-        return data
-    except (json.JSONDecodeError, TypeError):
-        return None
+from utils import extract_tables_and_columns, extract_data_from_response
+import pauq_dataset
 
 
 class PAUQIntervention:
@@ -28,21 +12,26 @@ class PAUQIntervention:
         self.dataset = dataset
         self.llm_model = llm_model
 
-    def get_table_columns(self, db, table_name):
-        table_db_idx = db["table_names_original"].index(table_name)
-        table_columns = []
-        for i, col_name in db["column_names_original"][1:]:
-            if i == table_db_idx:
-                table_columns.append(col_name)
-        return table_columns
+    def interventions_to_prompt(self, sample:dict):
+        interventions = sample['structure_intervention']
+        hsvt_intervention_prompt = [self.make_prompt(interventions['HSVT'][0], include_gold_structure=True)]
+        local_edits_intervention_prompt = [ self.make_prompt(edit, include_gold_structure=True) for edit in interventions['Local Edits']]
+        global_intervention_prompt = [self.make_prompt(interventions['Global'][0], include_gold_structure=True)]
+        all_intervention_prompts = hsvt_intervention_prompt + local_edits_intervention_prompt + global_intervention_prompt
+        return all_intervention_prompts
 
-    def make_intervention(self, sample: dict, json_model_response: dict, intervention_type: str = "column"):
-        intervened_schema = copy.deepcopy(json_model_response)
-        random_link = random.choice(intervened_schema["schema_links"])
-        # check the output correctness
-        # global intervention: change the full db schema
-        # HSVT: change the text question
-        # SQL Parse
+    def collect_intervention_completion(self, sample: dict, generated_output: list):
+        completion_list = [generation['completion'] for generation in generated_output]
+        intervention = sample['structure_intervention']
+        intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
+        intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
+        for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
+            extracted = extract_data_from_response(completion)
+            sample['structure_intervention'][intervention_type][idx]['generated_sql'] = extracted["sql"]
+        return sample
+    
+    def make_local_intervention(self, sample: dict, intervention_type: str = "column"):
+        random_link = random.choice(sample["schema_links"])
         table_name = random_link["table"]
         intervention = None
         if intervention_type == "column":
@@ -51,7 +40,7 @@ class PAUQIntervention:
                 raise RuntimeError("No columns for table in schema linking!")
             column_idx = random.randint(0, len(random_link["columns"]) - 1)
             column_name = random_link["columns"][column_idx]
-            table_columns = self.get_table_columns(sample["db"], table_name)
+            table_columns = self.dataset.get_table_columns(sample["db"], table_name)
             table_columns.remove(column_name)
             other_column = random.choice(table_columns)
             intervention = {"type": "column", "before": column_name, "after": other_column}
@@ -65,13 +54,65 @@ class PAUQIntervention:
                 intervention = {"type": "table", "before": random_link["table"], "after": other_table_name}
                 random_link["table"] = other_table_name
 
-        return {"intervened_schema": intervened_schema, "intervention": intervention}
+        sample["local_intervention"] = intervention
 
+    def _get_random_table(self) -> str:
+        return random.choice(list(self.dataset.tables.keys()))
+    
+    def _get_random_column(self, table_name: str) -> str:
+        return random.choice(self.dataset.tables[table_name])
+    
+    def _get_random_columns(self, table_name: str, n_columns: int) -> str:
+        return random.sample(self.dataset.tables[table_name], n_columns)
+    
+    def make_global_intervention(self, sample: dict):
+        intervention = []
+        for link in sample["schema_links"]:
+            old_table = link["table"]
+            new_table = self._get_random_table()
+            old_columns = link["columns"].copy()
+            new_columns = self._get_random_columns(new_table, len(old_columns))
 
-    def make_hsvt_intervention(self, sample: dict):
-        pass
+            link["table"] = new_table
+            intervention.append({"type": "table", "before": old_table, "after": new_table})
+            link["columns"] = []
+            for old_column, new_column in zip(old_columns, new_columns):
+                link["columns"].append(new_column)
+                intervention.append({"type": "column", "before": old_column, "after": new_column})
 
-    def make_prompt(self, sample: dict):
+        sample["global_intervention"] = intervention
+    
+    def make_intervention(self, sample: dict, generated_output: dict):
+        completion = generated_output['completion']
+        assert isinstance(completion, str)
+        json_completion = extract_data_from_response(completion)
+        sample["schema_links"] = json_completion["schema_links"]
+        sample["generated_sql"] = json_completion["sql"]
+        interventions = self.make_structure_intervention(sample)
+        sample["structure_intervention"] = interventions
+        return sample
+
+    def make_structure_intervention(self, sample: dict):
+        # HSVT 
+        hsvt_sample = deepcopy(sample)
+        intervened_question = self.dataset[sample["index"]].get("paraphrase", "This is paraphrased question")
+        hsvt_sample["question"] = intervened_question
+
+        # Local Edits
+        local_edits = []
+        local_intervention_types = ["column", "table"]
+        for intervention_type in local_intervention_types:
+          local_sample = deepcopy(sample)
+          self.make_local_intervention(local_sample, intervention_type=intervention_type)
+          local_edits.append(local_sample)
+
+        # Global intervention
+        global_sample = deepcopy(sample)
+        self.make_global_intervention(global_sample)
+        
+        return {"HSVT": [hsvt_sample], "Local Edits": local_edits, "Global": [global_sample]}
+
+    def make_prompt(self, sample: dict, include_gold_structure: bool = False):
         question = sample["question"]["en"]
         db_schema = ""
         db = sample["db"]
@@ -86,78 +127,80 @@ class PAUQIntervention:
         user_prompt = f"""
         You are an expert in natural language understanding and SQL queries generation.
         Given a natural language question and a database schema, perform two steps:
-        
-        1. Schema Linking: Identify which words or phrases in the question refer to which tables or columns in the schema.
+
+        1. Schema Linking: Identify which tables and columns in the schema are relevant to answer the question.
         2. SQL Generation: Write a correct, executable SQL query that answers the question, using the linked schema elements.
-        
+
         Output Format
-        Return a JSON object with two keys:
-        - "schema_links": a list of [question_token, schema_element] pairs.
-        Use "table" for table references.
-        Use "table.column" for column references.
-        Link values (numbers, dates, etc.) to the column they constrain.
-        - "sql": a valid SQL query string (without markdown, without extra text).
-        Only output valid JSON. Do not add explanations.
+        Return the answer in the exact following format:
+
+        Output:
+        Schema links: [
+                    {{
+                      "table": "table_name",
+                      "columns": ["column1", "column2", ...]
+                    }}
+                  ]
+        SQL: SELECT ... FROM ... WHERE ...;
+
+        Rules:
+        - List all relevant tables and their columns in schema links
+        - Write a valid SQL query string without markdown, without extra text
+        - Only output in the specified format. Do not add explanations.
 
         Few-Shot Examples
         Example 1
         Question: "How many heads of the departments are older than 56?"
-        
+
         Schema:
         Table: head
         Columns: head_id, name, age
         Table: department
         Columns: dept_id, name, budget
-        
+
         Output:
-        {{
-          "schema_links": [
-            {{
-              "table": "head",
-              "columns": ["age"]
-            }}
-          ],
-          "sql": "SELECT COUNT(*) FROM head WHERE age > 56;"
-        }}
-        
+        Schema links: [
+                    {{
+                      "table": "head",
+                      "columns": ["age"]
+                    }}
+                  ]
+        SQL: SELECT COUNT(*) FROM head WHERE age > 56;
+
         Example 2
         Question: "List the names of departments with budget over 1 million."
-        
+
         Schema:
         Table: department
         Columns: dept_id, name, budget
         Table: employee
         Columns: emp_id, name, salary
-        
+
         Output:
-        {{
-          "schema_links": [
-            {{
-              "table": "department",
-              "columns": ["name", "budget"]
-            }}
-          ],
-          "sql": "SELECT name FROM department WHERE budget > 1000000;"
-        }}
-        
+        Schema links: [
+                    {{
+                      "table": "department",
+                      "columns": ["name", "budget"]
+                    }}
+                  ]
+        SQL: SELECT name FROM department WHERE budget > 1000000;
+
         Example 3
         Question: "What is the average salary of employees hired in 2020?"
-        
+
         Schema:
         Table: employee
         Columns: emp_id, name, salary, hire_date
-        
+
         Output:
-        {{
-          "schema_links": [
-            {{
-              "table": "employee",
-              "columns": ["salary", "hire_date"]
-            }}
-          ],
-          "sql": "SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';"
-        }}
-        
+        Schema links: [
+                    {{
+                      "table": "employee",
+                      "columns": ["salary", "hire_date"]
+                    }}
+                  ]
+        SQL: SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';
+
         Now process the following:
         Question: "{question}"
         Schema:
@@ -165,51 +208,60 @@ class PAUQIntervention:
         Output:
         """
 
+        if not "schema_links" in sample:
+            include_gold_structure = False
+
         messages = [{"role": "user", "content": user_prompt}]
         add_generation_prompt_status = True
+
+        if include_gold_structure:
+            schema_links_string = f"Schema links: {sample["schema_links"]}\n"
+            schema_links_string += "SQL: "
+            messages.append({"role": "assistant", "content": schema_links_string})
+            add_generation_prompt_status = False
 
         prompt = self.llm_model.apply_chat_template(
             messages,
             add_generation_prompt=add_generation_prompt_status
         )
 
+        if add_generation_prompt_status == False:
+            prompt = self.llm_model.clean_model_specific_completion(prompt)
+
         return prompt
 
+def print_dict(d):
+    for k, v in d.items():
+        print(k, end=": ")
+        print(v)
+        print()
 
 if __name__ == "__main__":
-    response = '''
-    Example 1
-        Question: "How many heads of the departments are older than 56?"
-
-        Schema:
-        Table: head
-        Columns: head_id, name, age
-        Table: department
-        Columns: dept_id, name, budget
-
-        Output:
-        {
-          "schema_links": [
+    text_response = '''
+        Schema links: [
             {
               "table": "head",
               "columns": ["age"]
             }
-          ],
-          "sql": "SELECT COUNT(*) FROM head WHERE age > 56;"
-        }
+          ]
+        SQL: SELECT COUNT(*) FROM head WHERE age > 56;
     '''
+    response = {"completion": text_response}
     # json_model_response = extract_json_from_model_response(response)
-    # dataset = pauq_dataset.PAUQDataset("./pauq")
-    # intervention = PAUQIntervention(dataset, None)
-    # sample = dataset[0]
-    # intervened = intervention.make_intervention(sample, json_model_response)
-    # print(json_model_response)
-    # print(intervened)
-    sql_before = "SELECT name FROM students WHERE age > 20"
-    sql_after = "SELECT full_name FROM students WHERE age > 20"
+    dataset = pauq_dataset.PAUQDataset("./pauq", train=True)
+    intervention_logic = PAUQIntervention(dataset, None)
+    sample = dataset[0]
+    # print_dict(sample)
+    intervention = intervention_logic.make_intervention(sample, response)
+    print_dict(intervention["structure_intervention"])
 
-    info_before = extract_tables_and_columns(sql_before)
-    info_after = extract_tables_and_columns(sql_after)
+    for local_edit in intervention["structure_intervention"]["Local Edits"]:
+        print_dict(local_edit)
+    # sql_before = "SELECT name FROM students WHERE age > 20"
+    # sql_after = "SELECT full_name FROM students WHERE age > 20"
 
-    print("Before:", info_before)
-    print("After:", info_after)
+    # info_before = extract_tables_and_columns(sql_before)
+    # info_after = extract_tables_and_columns(sql_after)
+
+    # print("Before:", info_before)
+    # print("After:", info_after)
