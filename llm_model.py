@@ -87,6 +87,8 @@ class LLMModel:
                 return GPT_MODEL_FAMILY
             elif 'qwen3' in self.model_name.lower():
                 return QWEN3_MODEL_FAMILY
+            elif 'llama-3.1' in self.model_name.lower():
+                return LLAMA31_MODEL_FAMILY
 
         if (hasattr(self.model.config, 'architectures') and 
                          self.model.config.architectures and 
@@ -266,33 +268,32 @@ class LLMModel:
 
         return results
     
-    # def _generate_api_batch(
-    #     self,
-    #     prompts: List[str],
-    #     max_new_tokens: int,
-    #     skip_special_tokens: bool) -> List[Dict[str, str]]:
+    def _generate_api_batch(
+        self,
+        prompts: List[str],
+        max_new_tokens: int,
+        skip_special_tokens: bool) -> List[Dict[str, str]]:
 
-    #     print('!!!!!!!!!!!!!!!!!!!!', len(prompts))
-    #     resp = self.client.completions.create(
-    #         model=self.model_name,
-    #         prompt=prompts,
-    #         max_tokens=max_new_tokens,
-    #         temperature=0.0,
-    #     )
+        resp = self.client.completions.create(
+            model=self.model_name,
+            prompt=prompts,
+            max_tokens=max_new_tokens,
+            temperature=0.0,
+        )
 
-    #     index2choice = {c.index: c for c in resp.choices}
+        index2choice = {c.index: c for c in resp.choices}
 
-    #     results = []
-    #     for i, prompt in enumerate(prompts):
-    #         choice = index2choice[i]
-    #         completion_text = choice.text
+        results = []
+        for i, prompt in enumerate(prompts):
+            choice = index2choice[i]
+            completion_text = choice.text
 
-    #         results.append({
-    #             "prompt": prompt,
-    #             "completion": completion_text,
-    #         })
+            results.append({
+                "prompt": prompt,
+                "completion": completion_text,
+            })
 
-    #     return results
+        return results
 
     # def _generate_api_batch(
     #     self,
@@ -322,66 +323,6 @@ class LLMModel:
 
     #     return results
 
-
-    # def _generate_api_batch(
-    #     self,
-    #     prompts: List[str],
-    #     max_new_tokens: int,
-    #     skip_special_tokens: bool
-    # ) -> List[Dict[str, str]]:
-
-    #     """
-    #     Асинхронная параллельная генерация через OpenRouter API.
-    #     Снаружи функция выглядит синхронной, но внутри использует asyncio.
-    #     """
-        
-    #     async def fetch_one(session, prompt, idx):
-    #         url = f"{self.api_base_url}/completions"
-    #         payload = {
-    #             "model": self.model_name,
-    #             "prompt": prompt,
-    #             "max_tokens": max_new_tokens,
-    #             "temperature": 0.0,
-    #         }
-    #         headers = {
-    #             "Authorization": f"Bearer {os.getenv('OPENAI_KEY')}",
-    #             "Content-Type": "application/json",
-    #         }
-
-    #         # Ограничение параллелизма
-    #         async with semaphore:
-    #             async with session.post(url, json=payload, headers=headers, ssl=False) as resp:
-    #                 data = await resp.json()
-    #                 text = data["choices"][0]["text"]
-    #                 return idx, prompt, text
-
-    #     async def run_all():
-    #         async with aiohttp.ClientSession() as session:
-    #             tasks = [
-    #                 fetch_one(session, prompt, idx)
-    #                 for idx, prompt in enumerate(prompts)
-    #             ]
-    #             return await asyncio.gather(*tasks)
-
-    #     # Ограничиваем количество одновременных запросов
-    #     semaphore = asyncio.Semaphore(16)  # можно 4–16 в зависимости от скорости сервера
-
-    #     # Запускаем асинхронный event loop синхронно
-    #     loop = asyncio.new_event_loop()
-    #     asyncio.set_event_loop(loop)
-    #     results = loop.run_until_complete(run_all())
-    #     loop.close()
-
-    #     # Собираем в правильном порядке
-    #     results.sort(key=lambda x: x[0])
-    #     final = []
-    #     for idx, prompt, completion in results:
-    #         final.append({
-    #             "prompt": prompt,
-    #             "completion": completion,
-    #         })
-
-    #     return final
 
     def _generate_api_batch(
         self,
