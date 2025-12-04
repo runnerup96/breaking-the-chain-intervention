@@ -24,8 +24,8 @@ class LLMModel:
                  device_map: str = "auto",
                  torch_dtype: torch.dtype = torch.bfloat16,
                  use_api: bool = False,
-                 api_base_url: str | None = None,
-                 tokenizer_name: str | None = None,
+                 api_base_url: Union[str, None] = None,
+                 tokenizer_name: Union[str, None] = None,
                  ):
         """
         Initialize the LLM model.
