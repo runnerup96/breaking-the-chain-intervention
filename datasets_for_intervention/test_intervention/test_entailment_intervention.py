@@ -11,7 +11,7 @@ class TestEntailmentIntervention(unittest.TestCase):
         assert all(example["question_paraphrases"] is not None for example in self.dataset), "DEBUG1"
         # few-shot: use first 2 examples from the same small dataset
         self.few_shot = [self.dataset[i] for i in range(min(2, len(self.dataset)))]
-        self.ic = EntailmentIntervention(self.dataset, FakeLLMModel(), few_shot_examples=self.few_shot, hsvt_mode="paraphrase")
+        self.ic = EntailmentIntervention(self.dataset, FakeLLMModel(), few_shot_examples=self.few_shot, hsvt_mode="paraphrase", prompting_regime="baseline_structure_faithfulness")
 
         self.sample = deepcopy(self.dataset[0])
         # Default to gold structure unless overridden per-test
