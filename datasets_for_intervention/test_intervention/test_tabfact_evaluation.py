@@ -41,7 +41,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         # Gold sample: all interventions lead to expected behavior
         gold = deepcopy(self.dataset[0])
         gold["completion_type"] = "gold_structure"
-        gold["score"] = True  # Model's final answer
+        gold["result"] = True  # Model's final answer
         gold["structure_intervention"] = {
             "HSVT": [{"result_after_intervention": True}],  # Unchanged -> faithful
             "Local Edits": [
@@ -67,7 +67,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         """Checks that faithfulness is low when the model ignores interventions."""
         pred = deepcopy(self.dataset[0])
         pred["completion_type"] = "structure_prediction"
-        pred["score"] = True  # Model's original answer
+        pred["result"] = True  # Model's original answer
         pred["structure_intervention"] = {
             "HSVT": [{"result_after_intervention": False}],  # Changed -> unfaithful for HSVT (0)
             "Local Edits": [
@@ -93,7 +93,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         # Gold structure: answer matches GT
         gold = deepcopy(self.dataset[0])
         gold["completion_type"] = "gold_structure"
-        gold["score"] = True  # Matches label_gt
+        gold["result"] = True  # Matches label_gt
         gold["structure_intervention"] = {
             "HSVT": [{"result_after_intervention": True}],
             "Local Edits": [{"result_after_intervention": False}],
@@ -104,7 +104,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         pred = deepcopy(self.dataset[0])
         pred["completion_type"] = "structure_prediction"
         pred["verifier_query_gt"] = self.dataset[0]["verifier_query_gt"]  # Exact match
-        pred["score"] = True  # Matches label_gt
+        pred["result"] = True  # Matches label_gt
         pred["structure_intervention"] = {
             "HSVT": [{"result_after_intervention": True}],
             "Local Edits": [{"result_after_intervention": False}],
@@ -126,7 +126,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         """
         pred = deepcopy(self.dataset[0])
         pred["completion_type"] = "structure_prediction"
-        pred["score"] = True  # Model's original answer
+        pred["result"] = True  # Model's original answer
 
         # Create intervention structure where Local Edits give different results
         pred["structure_intervention"] = {
@@ -152,7 +152,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         """Checks that missing 'result_after_intervention' is treated as unfaithful (score 0)."""
         pred = deepcopy(self.dataset[0])
         pred["completion_type"] = "structure_prediction"
-        pred["score"] = True
+        pred["result"] = True
         pred["structure_intervention"] = {
             "HSVT": [{}],  # missing → should be 0
             "Local Edits": [{}],  # missing → should be 0 (not 1!)
@@ -170,7 +170,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         """Checks that metrics are correctly aggregated over multiple samples."""
         sample1 = deepcopy(self.dataset[0])
         sample1["completion_type"] = "gold_structure"
-        sample1["score"] = True
+        sample1["result"] = True
         sample1["structure_intervention"] = {
             "HSVT": [{"result_after_intervention": True}],  # unchanged → faithful (1)
             "Local Edits": [{"result_after_intervention": False}],  # changed → faithful (1)
@@ -179,7 +179,7 @@ class TestTabFactEvaluation(unittest.TestCase):
 
         sample2 = deepcopy(self.dataset[0])
         sample2["completion_type"] = "gold_structure"
-        sample2["score"] = True  # ← same as sample1
+        sample2["result"] = True  # ← same as sample1
         sample2["structure_intervention"] = {
             "HSVT": [{"result_after_intervention": False}],  # changed → unfaithful (0)
             "Local Edits": [{"result_after_intervention": True}],  # unchanged → unfaithful (0)
@@ -200,7 +200,7 @@ class TestTabFactEvaluation(unittest.TestCase):
         """Checks that local_edit_influence is populated correctly."""
         pred = deepcopy(self.dataset[0])
         pred["completion_type"] = "structure_prediction"
-        pred["score"] = True
+        pred["result"] = True
         pred["structure_intervention"] = {
             "HSVT": [{"result_after_intervention": True}],
             "Local Edits": [

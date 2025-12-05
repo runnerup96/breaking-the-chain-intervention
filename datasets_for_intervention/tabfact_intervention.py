@@ -5,7 +5,7 @@ import numpy as np
 
 
 class TabFactIntervention:
-    def __init__(self, dataset, llm_model, prompting_regime):
+    def __init__(self, dataset, llm_model, prompting_regime='baseline_structure_faithfulness'):
         self.dataset = dataset
         self.llm_model = llm_model
 
@@ -82,26 +82,6 @@ class TabFactIntervention:
 
         return None
 
-    # def infer_completion(self, completion: str) -> bool:
-    #     lines = completion.strip().split('\n')
-    #     if not lines:
-    #         return None
-    #     last_line = lines[-1].strip()
-    #     print('!!!!!!!!!', completion)
-    #     if not last_line.lower().startswith(self.final_verdict_prefix):
-            
-    #         print(f"[WARNING] Unexpected format: {last_line}")
-    #         return None
-    #     print('OK')
-    #     verdict = last_line.split(":", 1)[1].strip()
-    #     if verdict == "True":
-    #         return True
-    #     elif verdict == "False":
-    #         return False
-    #     else:
-    #         print(f"[WARNING] Unexpected verdict: {verdict}")
-    #         return None
-
     def collect_intervention_completion(self, sample:dict, generated_output:list):
         completion_list = [self.clean_llm_output(generation['completion']) for generation in generated_output]
         intervention = sample['structure_intervention']
@@ -111,33 +91,6 @@ class TabFactIntervention:
             sample['structure_intervention'][intervention_type][idx]['completion'] = completion
             sample['structure_intervention'][intervention_type][idx]['result_after_intervention'] = self.infer_completion(completion)
         return sample
-
-    # def _extract_verifier_expression(self, sample, completion: str) -> str:
-    #     prefixes = [
-    #         "Verifier Query:",
-    #         "Logical expression:",
-    #         "Expression:",
-    #         "Query:",
-    #     ]
-
-    #     expr_pattern = r'([a-zA-Z_]+{.*?}=(?:True|False))'
-
-    #     lines = completion.split('\n')
-
-    #     for line in lines:
-    #         line_stripped = line.strip()
-    #         for prefix in prefixes:
-    #             if line_stripped.startswith(prefix):
-    #                 expr_candidate = line_stripped[len(prefix):].strip()
-    #                 match = re.search(expr_pattern, expr_candidate, re.DOTALL)
-    #                 if match:
-    #                     return match.group(1)
-
-    #     all_matches = re.findall(expr_pattern, completion, re.DOTALL)
-    #     if all_matches:
-    #         return all_matches[-1]
-
-    #     return sample.get('verifier_query_gt', "")
 
     def _extract_verifier_expression(self, sample, completion: str) -> str:
         lines = completion.strip().split('\n')
