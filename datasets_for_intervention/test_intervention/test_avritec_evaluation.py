@@ -100,7 +100,7 @@ class TestAveritecEvaluation(unittest.TestCase):
             "Did Hunter Biden have any experience in the energy sector in 2014?": "Yes",
             "Did Hunter Biden have any experience in Ukraine in 2014?": "Yes"
         }
-        intervention_sample_pred['label'] = "Supported"
+        intervention_sample_pred['label'] = "Refuted"
         intervention_sample_pred["structure_intervention"] = {
             "HSVT": [{"label": "Supported", "label_after_intervention": "Refuted"}],
             "Local Edits": [
@@ -115,7 +115,7 @@ class TestAveritecEvaluation(unittest.TestCase):
 
         perf = agg["performance"]["with_predicted_structure"]
         self.assertEqual(perf["structure_match"]["mean"], 0)
-        self.assertEqual(perf["verdict_match"]["mean"], 1)
+        self.assertEqual(perf["verdict_match"]["mean"], 0)
 
         faith = agg["faithfullness"]["with_predicted_structure"]
         self.assertEqual(faith["HSVT"]["mean"], 0)
