@@ -1,4 +1,4 @@
-## Breaking the Chain ⛓️‍💥: A Causal Analysis of Faithful Reasoning in LLMs
+## Breaking the Chain ⛓️‍💥: A Causal Test of LLM Faithfulness to Intermediate Structures
 
 
 ## Code Structure Overview
@@ -25,13 +25,14 @@ A unified interface for different language models:
   - Batch text generation with configurable parameters
   - Chat template handling for conversational models
   - Device management and memory optimization
-- **Supported Models**: Qwen3-4B (extensible to other families)
+- **Supported Models**: Qwen, Gemma, Llama, Falcon
 
 ### 3. `datasets_for_intervention/` - Dataset and Intervention Logic
 Contains dataset-specific implementations for different domains:
 - **`ricechem_dataset.py`**: Chemistry question dataset loader  
-- **`ricechem_intervention.py`**: Intervention logic for chemistry reasoning chains
-- **Other datasets**: Averitec, TabFact, EntailmentBank (framework-ready)
+- **`ricechem_intervention.py`**: Intervention logic for chemistry intermediate structure chains
+- **`ricechem_evaluation.py`**: Evaluation script to eval the model faithfulness and performance
+- **Other datasets**: Averitec, TabFact, EntailmentBank
 
 Each dataset implementation provides:
 - **Dataset Loading**: JSON/CSV parsing and preprocessing
@@ -46,6 +47,46 @@ Each dataset implementation provides:
 4. **Analysis**: Causal effects of reasoning changes on final predictions are measured
 
 This framework enables researchers to study how different reasoning patterns influence LLM decision-making through controlled interventions.
+
+## Generated Figures
+
+The `analysis/` folder contains visualization scripts and generated figures from the paper that illustrate the results of the intervention experiments and overall model performance. 
+
+
+## Environment Setup
+
+### Prerequisites
+- Python 3.8 or higher
+- CUDA-compatible GPU (recommended for faster inference)
+
+### Installation Steps
+
+
+1. **Create a virtual environment**:
+```bash
+# Using venv
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Or using conda
+conda create -n intervention_analysis python=3.9
+conda activate intervention_analysis
+```
+
+3. **Install dependencies**:
+```bash
+# Install using pip
+pip install -r requirements.txt
+
+# Or using uv (faster, if available)
+uv pip install -r requirements.txt
+```
+
+4. **Verify installation**:
+```bash
+python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+python -c "import transformers; print(f'Transformers version: {transformers.__version__}')"
+```
 
 ## How to Run
 
@@ -62,6 +103,7 @@ chmod +x make_intervention_script.sh
 
 **Before running, modify the script to match your setup:**
 - **`project_path`**: Set to your project directory path
+- **`python_path`**: Path to project interpreter
 - **`evaluation_dataset`**: Choose from `"ricechem"` or `"amazon_reviews"`
 - **`model_name`**: Specify the LLM model (e.g., `"Qwen/Qwen3-4B"`)
 - **`batch_size`**: Adjust based on your GPU memory (default: 32)

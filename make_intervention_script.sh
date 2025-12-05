@@ -18,7 +18,7 @@ get_batch_size() {
         *"4b"*)
             echo "24"
             ;;
-        *"7b"*|*"8b"*|*"9b"*)
+        *"7b"*|*"9b"*|*"120b"*|*"235b"*)
             echo "8"
             ;;
         *)
@@ -27,49 +27,61 @@ get_batch_size() {
     esac
 }
 
-project_path="/home/somov/frontdoor_llm_causality"
-CUDA_DEVICE_NUMBER=0
+project_path="/mnt/extremessd10tb/seleznev/breaking-the-chain-intervention"
+CUDA_DEVICE_NUMBER=1
 
-datasets=("averitec" "ricechem")
+datasets=("tabfact")
 
 prompt_regime="detailed_instruction"
 
 models=(
-#    "Qwen/Qwen3-4B"
-#    "Qwen/Qwen3-8B"
-#    "tiiuae/Falcon3-3B-Instruct"
-#    "tiiuae/Falcon3-7B-Instruct"
-#    "alpindale/Llama-3.2-3B-Instruct"
-#    "alpindale/Llama-3.2-1B-Instruct"
-    "unsloth/Meta-Llama-3.1-8B-Instruct"
-#    "google/gemma-2-2b-it"
-#    "Qwen/Qwen3-1.7B"
-#    "google/gemma-2-9b-it"
+    # "Qwen/Qwen3-1.7B"
+    # "Qwen/Qwen3-4B"
+    # "Qwen/Qwen3-8B"
+    # "tiiuae/Falcon3-3B-Instruct"
+    # "tiiuae/Falcon3-7B-Instruct"
+    # "alpindale/Llama-3.2-3B-Instruct"
+    # "alpindale/Llama-3.2-1B-Instruct"
+    # "unsloth/Meta-Llama-3.1-8B-Instruct"
+    # "google/gemma-2-2b-it"
+    # "google/gemma-2-9b-it"
+    # "Openai/Gpt-oss-120b"
+    # 'qwen/qwen3-235b-a22b'
+    'Meta-llama/Llama-3.1-70B-Instruct'
 )
 
-run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)_dt_llama"
+run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)"
+# run_name="debug_$(date +%Y%m%d_%H%M%S)"
+python_path="/mnt/extremessd10tb/seleznev/miniforge3/envs/break/bin/python"
+# TODO: Add openai key
 tmux new-session -d -s $run_name
 
 echo "Starting intervention runs in tmux session: $run_name"
 echo "Datasets: ${datasets[*]}"
 echo "Models: ${models[*]}"
 
+
 for model_name in "${models[@]}"; do
     for evaluation_dataset in "${datasets[@]}"; do
         batch_size=$(get_batch_size "$model_name")
         simple_model_name=$(model_name2simple_model_name "$model_name")
         
-        echo "Running: $simple_model_name on $evaluation_dataset with batch_size=$batch_size"
+        echo "Running: $simple_model_name on $evaluation_dataset with batch_size=8"
 
-        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/somov/miniconda3/envs/llm_tuning/bin/python make_intervention.py \
+        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_intervention.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
-            --batch_size $batch_size \
-            --prompting_regime '$prompt_regime'" ENTER
+            --batch_size 8 \
+            --use_api \
+            --tokenizer_name meta-llama/Llama-3.1-70B-Instruct \
+            --api_base_url https://inference.airi.net:46783/v1 \
+            --prompting_regime baseline_structure_faithfulness" ENTER
 
         tmux send-keys "echo '----------------------------------------'" ENTER
     done
 done
+
+# --api_base_url https://openrouter.ai/api/v1 \
 
 echo "All runs queued. Attaching to tmux session..."
 tmux attach-session -t $run_name
