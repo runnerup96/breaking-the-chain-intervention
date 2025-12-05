@@ -5,18 +5,22 @@ import copy
 import pandas as pd
 import json
 from typing import Callable, List, Dict, Any
-
+import os
 
 class OpenrouterBatchApiClass:
-    def __init__(self, model: str, api_link: str, token: str, max_tokens: int = 4096, num_threads: int = 20):
+    def __init__(self, model: str, api_link: str, token: str, max_tokens: int = 4096, num_threads: int = 20, http_client: str = None):
         self.model = model
         self.api_link = api_link
         self.token = token
         self.max_tokens = max_tokens
         self.num_threads = num_threads
+        self.http_client = http_client
     
     def _send_question(self, messages: List[Dict[str, str]], max_retries: int = 10) -> Dict[str, Any]:
-        client = openai.OpenAI(api_key=self.token, base_url=self.api_link)
+        if self.http_client:
+            client = openai.OpenAI(api_key=self.token, base_url=self.api_link, http_client=self.http_client)
+        else:
+            client = openai.OpenAI(api_key=self.token, base_url=self.api_link)
 
         for attempt in range(max_retries):
             try:
@@ -94,19 +98,33 @@ class OpenrouterBatchApiClass:
         return results
 
 
+def load_jsonl(file_path):
+    with open(file_path, "r") as file:
+        return [json.loads(line) for line in file]
+
+def load_entailment(data_path):
+    samples = load_jsonl(data_path)
+
+    samples_for_evaluation = []
+    for sample in samples:
+        samples_for_evaluation.append({"sample_idx": sample["id"], "text": sample["meta"]["question_text"]})
+
+    return samples_for_evaluation
+
 if __name__ == "__main__":
 
     # load samples
-    samples = json.load(open("/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/AVeriTeC/data/onlyboolean_samples.json", "r"))
+    data_path = ""
+    output_path = ""
 
-    samples_for_evaluation = []
-    for idx, sample in enumerate(samples):
-        samples_for_evaluation.append({"sample_idx": idx, "text": sample['claim']})
+    samples_for_evaluation = load_entailment(data_path)
+
+    print(f"Loaded {len(samples_for_evaluation)} samples for evaluation")
 
     api_client = OpenrouterBatchApiClass(
         model="google/gemini-2.5-pro-preview",
         api_link="https://openrouter.ai/api/v1", 
-        token=""
+        token=os.getenv("OPENROUTER_API_KEY")
     )
 
     def my_prompt_func(sample):
@@ -116,11 +134,11 @@ if __name__ == "__main__":
         "In terms of semantic meaning, they should be maximally close to the original claim." 
         "Write down all paraphrases separated by the '|' symbol.")
         return prompt
-
+    
     results = api_client.call(
         samples=samples_for_evaluation,
         prompt_func=my_prompt_func,
         sample_idx_key="sample_idx"
     )
 
-    json.dump(results, open("/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/AVeriTeC/data/onlyboolean_paraphrases.json", "w"), ensure_ascii=False, indent=4)
+    json.dump(results, open(output_path, "w"), ensure_ascii=False, indent=4)
