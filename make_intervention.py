@@ -41,7 +41,8 @@ model_name2simple_model_name = {
         "google/gemma-2-2b-it": "gemma2-2B",
         "google/gemma-2-9b-it": "gemma2-9B",
         "Openai/Gpt-oss-120b": "gpt-oss-120b",
-        "qwen/qwen3-235b-a22b": "qwen3-235b-a22b"
+        "qwen/qwen3-235b-a22b": "qwen3-235b-a22b",
+        "Meta-llama/Llama-3.1-70B-Instruct": "llama-3.1-70b"
     }
 
 
