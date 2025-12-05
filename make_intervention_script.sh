@@ -27,8 +27,8 @@ get_batch_size() {
     esac
 }
 
-project_path="/home/chaichuk/frontdoor_llm_causality"
-CUDA_DEVICE_NUMBER=0
+project_path="/mnt/extremessd10tb/seleznev/breaking-the-chain-intervention"
+CUDA_DEVICE_NUMBER=1
 
 datasets=("tabfact")
 
@@ -51,7 +51,10 @@ models=(
 )
 
 run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)"
-tmux new-session -d -s $run_name "export OPENAI_KEY='$OPENAI_KEY'; bash"
+# run_name="debug_$(date +%Y%m%d_%H%M%S)"
+python_path="/mnt/extremessd10tb/seleznev/miniforge3/envs/break/bin/python"
+# TODO: Add openai key
+tmux new-session -d -s $run_name
 
 echo "Starting intervention runs in tmux session: $run_name"
 echo "Datasets: ${datasets[*]}"

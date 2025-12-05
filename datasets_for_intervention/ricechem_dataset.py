@@ -179,12 +179,3 @@ class RiceChemDataset:
     
     
 
-if __name__ == "__main__":
-    import json
-    data_path = "/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/RiceChem"
-    dataset = RiceChemDataset(data_path=data_path)
-    counter_dict = {1: 0, 2: 0, 3: 0, 4: 0}
-    for i in range(len(dataset)):
-        if counter_dict[dataset[i]['task_idx']] < 1:
-            print(dataset[i])
-            counter_dict[dataset[i]['task_idx']] += 1

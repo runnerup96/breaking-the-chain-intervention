@@ -48,6 +48,11 @@ Each dataset implementation provides:
 
 This framework enables researchers to study how different reasoning patterns influence LLM decision-making through controlled interventions.
 
+## Generated Figures
+
+The `analysis/` folder contains visualization scripts and generated figures from the paper that illustrate the results of the intervention experiments and overall model performance. 
+
+
 ## Environment Setup
 
 ### Prerequisites
