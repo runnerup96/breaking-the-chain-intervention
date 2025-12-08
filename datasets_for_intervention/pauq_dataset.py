@@ -55,8 +55,7 @@ class PAUQDataset:
         paraphrase_train_path = os.path.join(data_path, "pauq_dev_paraphrase.json")
         paraphrase_train = json.load(open(paraphrase_train_path))
         for sample in paraphrase_train:
-            if sample["sample_idx"] in self.data:
-                self.data[sample["sample_idx"]]["paraphrase"] = sample["paraphrase"]
+            self.data[sample["sample_idx"]]["paraphrase"] = sample["paraphrase"]
 
     @staticmethod
     def get_table_columns(db, table_name):
