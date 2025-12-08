@@ -52,10 +52,10 @@ class PAUQDataset:
                 "db": sample["db"]
             })
 
-        # paraphrase_train_path = os.path.join(data_path, "pauq_train_paraphrase.json")
-        # paraphrase_train = json.load(open(paraphrase_train_path))
-        # for sample in paraphrase_train:
-        #     self.data[sample["sample_idx"]]["paraphrase"] = sample["paraphrase"]
+        paraphrase_train_path = os.path.join(data_path, "pauq_dev_paraphrase.json")
+        paraphrase_train = json.load(open(paraphrase_train_path))
+        for sample in paraphrase_train:
+            self.data[sample["sample_idx"]]["paraphrase"] = sample["paraphrase"]
 
     @staticmethod
     def get_table_columns(db, table_name):
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     dataset = PAUQDataset("./pauq")
     print(dataset[0])
     i = 0
-    for k, v in dataset.tables.items():
+    for k, v in dataset[0].items():
         print(k, ":", v)
         i += 1
         if i > 25:

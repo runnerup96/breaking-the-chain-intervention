@@ -3,8 +3,8 @@ from copy import deepcopy
 import json
 import random
 import re
-from utils import extract_tables_and_columns, extract_data_from_response
-import pauq_dataset
+from .utils import extract_tables_and_columns, extract_data_from_response
+# import pauq_dataset
 
 
 class PAUQIntervention:
@@ -26,8 +26,10 @@ class PAUQIntervention:
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
         for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
-            extracted = extract_data_from_response(completion)
-            sample['structure_intervention'][intervention_type][idx]['generated_sql'] = extracted["sql"]
+            print("Completion:")
+            print(completion)
+            extracted = completion.strip()
+            sample['structure_intervention'][intervention_type][idx]['generated_sql'] = extracted
         return sample
     
     def make_local_intervention(self, sample: dict, intervention_type: str = "column"):
@@ -69,11 +71,13 @@ class PAUQIntervention:
         intervention = []
         for link in sample["schema_links"]:
             old_table = link["table"]
-            new_table = self._get_random_table()
             old_columns = link["columns"].copy()
-            new_columns = self._get_random_columns(new_table, len(old_columns))
+            new_columns = []
+            while len(new_columns) < len(old_columns):
+                new_table = self._get_random_table()
+                new_columns.extend(self._get_random_columns(new_table, 1))
 
-            link["table"] = new_table
+            link["table"] = self._get_random_table()
             intervention.append({"type": "table", "before": old_table, "after": new_table})
             link["columns"] = []
             for old_column, new_column in zip(old_columns, new_columns):
@@ -95,7 +99,7 @@ class PAUQIntervention:
     def make_structure_intervention(self, sample: dict):
         # HSVT 
         hsvt_sample = deepcopy(sample)
-        intervened_question = self.dataset[sample["index"]].get("paraphrase", "This is paraphrased question")
+        intervened_question = self.dataset[sample["index"]]["paraphrase"]
         hsvt_sample["question"] = intervened_question
 
         # Local Edits
@@ -113,7 +117,7 @@ class PAUQIntervention:
         return {"HSVT": [hsvt_sample], "Local Edits": local_edits, "Global": [global_sample]}
 
     def make_prompt(self, sample: dict, include_gold_structure: bool = False):
-        question = sample["question"]["en"]
+        question = sample["question"]
         db_schema = ""
         db = sample["db"]
         for i, table_name in enumerate(db["table_names_original"]):
@@ -215,7 +219,7 @@ class PAUQIntervention:
         add_generation_prompt_status = True
 
         if include_gold_structure:
-            schema_links_string = f"Schema links: {sample["schema_links"]}\n"
+            schema_links_string = f"Schema links: {sample['schema_links']}\n"
             schema_links_string += "SQL: "
             messages.append({"role": "assistant", "content": schema_links_string})
             add_generation_prompt_status = False
@@ -248,14 +252,14 @@ if __name__ == "__main__":
     '''
     response = {"completion": text_response}
     # json_model_response = extract_json_from_model_response(response)
-    dataset = pauq_dataset.PAUQDataset("./pauq", train=True)
+    # dataset = pauq_dataset.PAUQDataset("./pauq", train=True)
     intervention_logic = PAUQIntervention(dataset, None)
     sample = dataset[0]
     # print_dict(sample)
     intervention = intervention_logic.make_intervention(sample, response)
     print_dict(intervention["structure_intervention"])
 
-    for local_edit in intervention["structure_intervention"]["Local Edits"]:
+    for local_edit in intervention["structure_intervention"]["HSVT"]:
         print_dict(local_edit)
     # sql_before = "SELECT name FROM students WHERE age > 20"
     # sql_after = "SELECT full_name FROM students WHERE age > 20"

@@ -3,6 +3,7 @@ import argparse
 import llm_model
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
+from datasets_for_intervention import pauq_intervention, pauq_dataset, pauq_evaluation
 import os
 from tqdm import tqdm
 from datetime import datetime
@@ -84,6 +85,12 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
+    elif args.evaluation_dataset == "pauq":
+        dataset_path = os.path.join("datasets_for_intervention/pauq")
+        dataset = pauq_dataset.PAUQDataset(dataset_path)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
+        intervention_logic = pauq_intervention.PAUQIntervention(dataset, llm_model)
+        evaluator = pauq_evaluation.PAUQEvaluation(dataset)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [ricechem, averitec]")
@@ -113,7 +120,7 @@ if __name__ == "__main__":
             try:
                 sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
                 prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
-                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
+                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=100,
                                                                 skip_special_tokens=True)
                 # parse completions to final structure
                 final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)

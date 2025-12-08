@@ -3,54 +3,71 @@ from sqlparse.sql import IdentifierList, Identifier, Function, Where
 from sqlparse.tokens import Keyword, DML
 import re
 import json
+from typing import List, Dict, Any
 
 
-def extract_data_from_response(model_response: str):
+def extract_data_from_response(model_response: str) -> Dict[str, Any]:
     """
-    Извлекает SQL запрос и schema links из ответа модели.
-    
-    Args:
-        model_response: Ответ модели в формате:
-            Schema links: [{...}]
-            SQL: SELECT ...;
-    
-    Returns:
-        Словарь с ключами (sql_query, schema_links_list)
+    Надёжно извлекает SQL и Schema links из ответа модели.
     """
-    # Найти начало Schema links
-    schema_start = model_response.find("Schema links:")
-    if schema_start == -1:
-        raise ValueError("Schema links not found in the response")
-    
-    # Найти начало SQL
-    sql_start = model_response.find("SQL:")
-    if sql_start == -1:
-        raise ValueError("SQL query not found in the response")
-    
-    # Извлечь текст между "Schema links:" и "SQL:"
-    schema_json_str = model_response[schema_start + len("Schema links:"):sql_start].strip()
-    
-    # Теперь попробуем распарсить как JSON
+
+    # ----------------------------
+    # 1. Извлекаем блок Schema links
+    # ----------------------------
+    schema_pattern = r"Schema links:\s*(\[[\s\S]*?\])"
+    schema_match = re.search(schema_pattern, model_response)
+
+    raw_schema = schema_match.group(1) if schema_match else "[]"
+
+    # Попытка №1 — стандартный JSON
     try:
-        schema_links_list = json.loads(schema_json_str)
-    except json.JSONDecodeError:
-        # Попытка исправить одинарные кавычки
-        try:
-            schema_json_str = schema_json_str.replace("'", '"')
-            schema_links_list = json.loads(schema_json_str)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse schema links as JSON: {e}")
+        schema_links = json.loads(raw_schema)
+    except Exception:
+        # Попытка №2 — заменить одинарные/кривые кавычки на стандартные
+        cleaned = raw_schema
+        cleaned = cleaned.replace("'", '"')
+        cleaned = cleaned.replace("“", '"').replace("”", '"')
+        cleaned = cleaned.replace("‘", '"').replace("’", '"')
 
-    # Извлечь SQL
-    sql_part = model_response[sql_start + len("SQL:"):]
-    sql_query = sql_part.strip()
-    # Удалить возможный завершающий ; и/или лишние пробелы — по желанию
-    # Но обычно оставляем как есть
+        # Удалить trailing commas
+        cleaned = re.sub(r",\s*}", "}", cleaned)
+        cleaned = re.sub(r",\s*]", "]", cleaned)
+
+        try:
+            schema_links = json.loads(cleaned)
+        except Exception:
+            # Попытка №3 — ручной парсинг как fallback
+            schema_links = fallback_extract_schema_links(cleaned)
+
+    # ----------------------------
+    # 2. Извлекаем SQL
+    # ----------------------------
+    sql_pattern = r"SQL:\s*(SELECT[\s\S]*?;)"
+    sql_match = re.search(sql_pattern, model_response, re.IGNORECASE)
+    sql_query = sql_match.group(1).strip() if sql_match else ""
 
     return {
         "sql": sql_query,
-        "schema_links": schema_links_list
+        "schema_links": schema_links,
     }
+
+
+def fallback_extract_schema_links(text: str) -> List[Dict[str, Any]]:
+    """
+    Если JSON полностью сломан — пытаемся вытащить таблицы и колонки регулярками.
+    """
+    results = []
+
+    # Примерно ищем объекты вида {"table": "...", "columns": [...]}
+    entry_pattern = r'table"\s*:\s*"([^"]+)"[\s\S]*?columns"\s*:\s*\[([^\]]*)\]'
+    for match in re.finditer(entry_pattern, text):
+        table = match.group(1)
+        cols_raw = match.group(2).strip()
+
+        cols = re.findall(r'"([^"]+)"', cols_raw)
+        results.append({"table": table, "columns": cols})
+
+    return results
 
 
 def extract_json_from_model_response(model_response: str) -> dict | None:
@@ -207,7 +224,7 @@ def extract_tables_and_columns(sql: str):
     Парсит SQL-запрос и возвращает словарь вида:
     {
         "tables": [...],
-        "columns": [...],
+        "column": [...],
     }
 
     Таблицы берутся из FROM / JOIN.
@@ -215,7 +232,7 @@ def extract_tables_and_columns(sql: str):
     """
     parsed = sqlparse.parse(sql)
     if not parsed:
-        return {"tables": [], "columns": []}
+        return {"tables": [], "column": []}
 
     statement = parsed[0]
 
@@ -228,5 +245,5 @@ def extract_tables_and_columns(sql: str):
 
     return {
         "tables": sorted(tables),
-        "columns": sorted(columns),
+        "column": sorted(columns),
     }
