@@ -26,8 +26,6 @@ class PAUQIntervention:
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
         for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
-            print("Completion:")
-            print(completion)
             extracted = completion.strip()
             sample['structure_intervention'][intervention_type][idx]['generated_sql'] = extracted
         return sample
