@@ -48,6 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--try_one_batch", type=bool, default=False)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--prompting-regime", type=str,
                         choices=["baseline_structure_faithfulness", "detailed_instruction"])
     """We consider two prompting regimes.
@@ -86,8 +87,7 @@ if __name__ == "__main__":
         intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "pauq":
-        dataset_path = os.path.join("datasets_for_intervention/pauq")
-        dataset = pauq_dataset.PAUQDataset(dataset_path)
+        dataset = pauq_dataset.PAUQDataset(args.data_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = pauq_intervention.PAUQIntervention(dataset, llm_model)
         evaluator = pauq_evaluation.PAUQEvaluation(dataset)
