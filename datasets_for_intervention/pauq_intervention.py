@@ -3,7 +3,7 @@ from copy import deepcopy
 import json
 import random
 import re
-from .utils import extract_tables_and_columns, extract_data_from_response
+from .utils import extract_data_from_response
 # import pauq_dataset
 
 
@@ -31,28 +31,31 @@ class PAUQIntervention:
         return sample
     
     def make_local_intervention(self, sample: dict, intervention_type: str = "column"):
-        random_link = random.choice(sample["schema_links"])
-        table_name = random_link["table"]
+        # random_link = random.choice(sample["schema_links"])
+        table_name = random.choice(list(sample["schema_links"].keys()))
+        columns = sample["schema_links"][table_name]
         intervention = None
         if intervention_type == "column":
             # Column intervention
-            if not random_link["columns"]:
+            if not columns:
                 raise RuntimeError("No columns for table in schema linking!")
-            column_idx = random.randint(0, len(random_link["columns"]) - 1)
-            column_name = random_link["columns"][column_idx]
-            table_columns = self.dataset.get_table_columns(sample["db"], table_name)
+            column_idx = random.randint(0, len(columns) - 1)
+            column_name = columns[column_idx]
+            table_columns = self.dataset.get_table_columns(sample["db"], table_name, True)
             table_columns.remove(column_name)
             other_column = random.choice(table_columns)
             intervention = {"type": "column", "before": column_name, "after": other_column}
-            random_link["columns"][column_idx] = other_column
+            columns[column_idx] = other_column
         elif intervention_type == "table":
             # Table name
             table_names = sample["db"]["table_names_original"]
             table_names.remove(table_name)
             if table_names:
                 other_table_name = random.choice(table_names)
-                intervention = {"type": "table", "before": random_link["table"], "after": other_table_name}
-                random_link["table"] = other_table_name
+                intervention = {"type": "table", "before": table_name, "after": other_table_name}
+                columns = sample["schema_links"][table_name][:]
+                del sample["schema_links"][table_name]
+                sample["schema_links"][other_table_name] = columns
 
         sample["local_intervention"] = intervention
 
@@ -67,7 +70,8 @@ class PAUQIntervention:
     
     def make_global_intervention(self, sample: dict):
         intervention = []
-        for link in sample["schema_links"]:
+        schema_links = [{"table": key, "columns": value.copy()} for key, value in sample["schema_links"].items()]
+        for link in schema_links:
             old_table = link["table"]
             old_columns = link["columns"].copy()
             new_columns = []
@@ -82,13 +86,18 @@ class PAUQIntervention:
                 link["columns"].append(new_column)
                 intervention.append({"type": "column", "before": old_column, "after": new_column})
 
+        sample["schema_links"] = {item["table"]: item["columns"] for item in schema_links}
         sample["global_intervention"] = intervention
     
     def make_intervention(self, sample: dict, generated_output: dict):
         completion = generated_output['completion']
         assert isinstance(completion, str)
         json_completion = extract_data_from_response(completion)
-        sample["schema_links"] = json_completion["schema_links"]
+        schema_links_json = json_completion["schema_links"]
+        schema_links = {}
+        for item in schema_links_json:
+            schema_links[item["table"]] = item["columns"]
+        sample["schema_links"] = schema_links
         sample["generated_sql"] = json_completion["sql"]
         interventions = self.make_structure_intervention(sample)
         sample["structure_intervention"] = interventions
@@ -210,14 +219,14 @@ class PAUQIntervention:
         Output:
         """
 
-        if not "schema_links" in sample:
+        if not "true_schema_links" in sample:
             include_gold_structure = False
 
         messages = [{"role": "user", "content": user_prompt}]
         add_generation_prompt_status = True
 
         if include_gold_structure:
-            schema_links_string = f"Schema links: {sample['schema_links']}\n"
+            schema_links_string = f"Schema links: {sample['true_schema_links']}\n"
             schema_links_string += "SQL: "
             messages.append({"role": "assistant", "content": schema_links_string})
             add_generation_prompt_status = False
