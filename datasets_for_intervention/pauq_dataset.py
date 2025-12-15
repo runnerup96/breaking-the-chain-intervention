@@ -1,5 +1,6 @@
 import json
 import os
+from .utils import extract_schema_links, parse_sql
 
 
 class PAUQDataset:
@@ -29,42 +30,67 @@ class PAUQDataset:
             "foreign_keys",
             "primary_keys",
             "table_names",
-            "table_names_original"
+            "table_names_original",
         ]
         self.databases = {}
         self.tables = {}
         for db in db_data:
             self.databases[db["db_id"]] = {key: db[key] for key in db_keys}
-            for table_name in db["table_names_original"]:
+            for table_name in db["table_names"]:
                 if table_name in self.tables:
                     continue
-                columns = PAUQDataset.get_table_columns(db, table_name)
+                columns = PAUQDataset.get_table_columns(db, table_name, False)
                 self.tables[table_name] = columns
                 
         for row in train_data:
             row["db"] = self.databases[row["db_id"]]
         self.data = []
+        self.sample_idx2idx = {}
+        i = 0
         for idx, sample in enumerate(train_data):
-            self.data.append({
+            row = {
                 "index": idx,
                 "query": sample["query"]["en"],
                 "question": sample["question"]["en"],
-                "db": sample["db"]
-            })
+                "db": sample["db"],
+                "db_schema": PAUQDataset.get_db_schema(sample["db"]),
+            }
+            parsed_sql = parse_sql(row["query"], row["db_schema"])
+            row["true_schema_links"] = extract_schema_links(parsed_sql)
+            if row["true_schema_links"]:
+                self.data.append(row)
+                self.sample_idx2idx[idx] = i
+                i += 1
 
         paraphrase_train_path = os.path.join(data_path, "pauq_dev_paraphrase.json")
         paraphrase_train = json.load(open(paraphrase_train_path))
         for sample in paraphrase_train:
-            self.data[sample["sample_idx"]]["paraphrase"] = sample["paraphrase"]
+            if sample["sample_idx"] in self.sample_idx2idx:
+                self.data[self.sample_idx2idx[sample["sample_idx"]]]["paraphrase"] = sample["paraphrase"]
 
     @staticmethod
-    def get_table_columns(db, table_name):
-        table_db_idx = db["table_names_original"].index(table_name)
+    def get_table_columns(db, table_name, original: bool):
+        table_key = "table_names_original" if original else "table_names"
+        column_key = "column_names_original" if original else "column_names"
+        table_db_idx = db[table_key].index(table_name)
         table_columns = []
-        for i, col_name in db["column_names_original"][1:]:
+        for i, col_name in db[column_key][1:]:
             if i == table_db_idx:
                 table_columns.append(col_name)
         return table_columns
+    
+    @staticmethod
+    def get_db_schema(db):
+        schema = {}
+        for table_name in db['table_names']:
+            schema[table_name] = PAUQDataset.get_table_columns(db, table_name, False)
+        for table_name in db['table_names_original']:
+            columns = PAUQDataset.get_table_columns(db, table_name, True)
+            if table_name in schema:
+                schema[table_name].extend(columns)
+            else:
+                schema[table_name] = columns
+        return schema
     
     def __len__(self):
         return len(self.data)
@@ -76,10 +102,18 @@ class PAUQDataset:
 
 if __name__ == "__main__":
     dataset = PAUQDataset("./pauq")
-    print(dataset[0])
+    empty = 0
+    total = 0
+    for sample in dataset:
+        if not sample["schema_links"]:
+            empty += 1
+        total += 1
+    print(empty, total)
+    # print(dataset[0])
     i = 0
-    for k, v in dataset[0].items():
+    for k, v in dataset[210].items():
         print(k, ":", v)
         i += 1
-        if i > 25:
-            break
+        # if i > 1:
+        #     break
+    # print(dataset[0])
