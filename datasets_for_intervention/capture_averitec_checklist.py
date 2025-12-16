@@ -61,26 +61,3 @@ def extract_final_verdict(text: str) -> Optional[str]:
     return None
 
 
-if __name__ == "__main__":
-    sample = """
-    Intermediate Structure:
-    - Q: Did MFA announce this on August 13, 2020 press briefing? A: No
-    - Q: Did China’s State Council briefing include this? A: No
-    - Q: Did MFA Twitter account post this between Aug 13–18, 2020? A: No
-    Q: Is drinking cold water in any way harmful? A: No
-    Final Verdict: Refuted
-    """
-
-    structure = extract_intermediate_structure(sample)
-    verdict = extract_final_verdict(sample)
-
-    print(structure)
-    print(verdict)
-
-    sample = "Intermediate Structure \n---Q: Is drinking cold water in any way harmful? A: No"
-
-    structure = extract_intermediate_structure(sample)
-    verdict = extract_final_verdict(sample)
-
-    print(structure)
-    print(verdict)
