@@ -38,7 +38,6 @@ model_name2simple_model_name = {
         "Qwen/Qwen3-1.7B": "qwen3-17B",
         "Qwen/Qwen3-4B": "qwen3-4B",
         "Qwen/Qwen3-8B": "qwen3-8B",
-        "Qwen/Qwen3-1.7B": "qwen3-1.7B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
@@ -159,15 +158,6 @@ if __name__ == "__main__":
             prompting_regime=args.prompting_regime,
             n_few_shot_examples=5,
         )
-        print(f"Loaded {len(few_shot_examples)} few-shot examples for {args.prompting_regime} prompting regime")
-        for ex in few_shot_examples:
-            if "mode" in ex:
-                print("Mode: ", ex["mode"])
-            print("Question: ", ex["question"])
-            print("Proof: ", ex["proof"])
-            print("Score: ", ex["score"])
-            print("-"*100)
-
         dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/test.jsonl")
         paraphrases_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/aligned_test_question_paraphases.json")
         dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
@@ -189,7 +179,7 @@ if __name__ == "__main__":
         evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, averitec]")
+                                  f"Currently -- [ricechem, entailment, averitec, tabfact]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 

@@ -73,21 +73,3 @@ def extract_checklist_entries(text: str) -> List[Dict]:
     return checklist
 
 
-if __name__ == "__main__":
-    sample = """
-    Checklist:
-    correctly cites decreased electron electron repulsion (weight: 1) (True/False): True
-    relates decreased electron electron repulsion to decreased potential energy (weight: 1) (True/False): True
-    3rd and 4th electrons ionized feel same core charge (weight: 1) (True/False): True
-    3rd and 4th electrons ionized from n=3 shell and have same radius (weight: 1) (True/False): True
-    5th electron ionized from n=2 shell and feels higher core charge (weight: 1) (True/False): True
-    5th electron ionized from n=2 shell and has smaller radius (weight: 1) (True/False): True
-    correctly explains relationship of potential energy to ionization energy (weight: 1.5) (True/False): True
-    partially explains relationship between potential energy and ionization energy (weight: 0.5) (True/False): False
-    Final grade (0-8): 7.5
-    """
-
-    checklist = extract_checklist_entries(sample)
-    final_grade = extract_final_grade(sample)
-    print(checklist)
-    print(final_grade)

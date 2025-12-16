@@ -49,11 +49,3 @@ class EntailmentDataset:
 
     def __getitem__(self, idx):
         return self.data[idx]
-
-
-if __name__ == "__main__":
-    path = "entailment_trees_emnlp2021_data_v3/dataset/task_1/train.jsonl"
-    dataset = EntailmentDataset(file_path=path)
-    for i in range(3):
-        print(json.dumps(dataset[i], indent=2))
-        print("--------------------------------")
