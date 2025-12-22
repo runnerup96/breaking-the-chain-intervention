@@ -3,7 +3,7 @@ import json
 from typing import List, Dict, Any
 import sys
 
-sys.path.append("/Users/kmvafin/research/test-suite-sql-eval")
+sys.path.append("/home/jovyan/kmvafin/research/test-suite-sql-eval")
 import evaluation
 
 def parse_sql(query, db_schema):
@@ -77,67 +77,101 @@ def extract_schema_links(parsed_sql: dict) -> dict:
 
 
 def extract_data_from_response(model_response: str) -> Dict[str, Any]:
-    schema_pattern = r"Schema links:\s*(\[[\s\S]*?\])"
-    schema_match = re.search(schema_pattern, model_response)
+    """
+    Извлекает schema-links и SQL из ответа модели.
+    Возвращает:
+        {
+          "sql": "SELECT ...",
+          "schema_links": {"table1": ["col1", "col2"], ...}
+        }
+    """
+    m = re.search(
+        r'===SCHEMA_LINKS===(.*?)===SQL===(.+)',
+        model_response,
+        flags=re.S
+    )
+    if not m:
+        raise ValueError("Не найдены блоки SCHEMA_LINKS / SQL")
 
-    raw_schema = schema_match.group(1) if schema_match else "[]"
+    links_raw = m.group(1).strip()
+    sql = m.group(2).strip()
 
-    try:
-        schema_links = json.loads(raw_schema)
-    except Exception:
-        cleaned = raw_schema
-        cleaned = cleaned.replace("'", '"')
-        cleaned = cleaned.replace("“", '"').replace("”", '"')
-        cleaned = cleaned.replace("‘", '"').replace("’", '"')
+    schema_links: Dict[str, Any] = {}
+    for line in links_raw.splitlines():
+        line = line.strip()
+        if not line or ':' not in line:
+            continue
+        table, cols = line.split(':', 1)
+        cols_list = [c.strip() for c in cols.split(',') if c.strip()]
+        if table.strip():
+            schema_links[table.strip()] = cols_list
+    schema_links_list = [{"table": table_name, "columns": columns} for table_name, columns in schema_links.items()]
 
-        cleaned = re.sub(r",\s*}", "}", cleaned)
-        cleaned = re.sub(r",\s*]", "]", cleaned)
+    return {"sql": sql, "schema_links": schema_links_list}
 
-        try:
-            schema_links = json.loads(cleaned)
-        except Exception:
-            schema_links = fallback_extract_schema_links(cleaned)
+    
+# def extract_data_from_response(model_response: str) -> Dict[str, Any]:
+#     schema_pattern = r"Schema links:\s*(\[[\s\S]*?\])"
+#     schema_match = re.search(schema_pattern, model_response)
 
-    sql_pattern = r"SQL:\s*(SELECT[\s\S]*?;)"
-    sql_match = re.search(sql_pattern, model_response, re.IGNORECASE)
-    sql_query = sql_match.group(1).strip() if sql_match else ""
+#     raw_schema = schema_match.group(1) if schema_match else "[]"
 
-    return {
-        "sql": sql_query,
-        "schema_links": schema_links,
-    }
+#     try:
+#         schema_links = json.loads(raw_schema)
+#     except Exception:
+#         cleaned = raw_schema
+#         cleaned = cleaned.replace("'", '"')
+#         cleaned = cleaned.replace("“", '"').replace("”", '"')
+#         cleaned = cleaned.replace("‘", '"').replace("’", '"')
+
+#         cleaned = re.sub(r",\s*}", "}", cleaned)
+#         cleaned = re.sub(r",\s*]", "]", cleaned)
+
+#         try:
+#             schema_links = json.loads(cleaned)
+#         except Exception:
+#             schema_links = fallback_extract_schema_links(cleaned)
+
+#     sql_pattern = r"SQL:\s*(SELECT[\s\S]*?;)"
+#     sql_match = re.search(sql_pattern, model_response, re.IGNORECASE)
+#     sql_query = sql_match.group(1).strip() if sql_match else ""
+
+#     return {
+#         "sql": sql_query,
+#         "schema_links": schema_links,
+#     }
 
 
-def fallback_extract_schema_links(text: str) -> List[Dict[str, Any]]:
-    results = []
+# def fallback_extract_schema_links(text: str) -> List[Dict[str, Any]]:
+#     results = []
 
-    entry_pattern = r'table"\s*:\s*"([^"]+)"[\s\S]*?columns"\s*:\s*\[([^\]]*)\]'
-    for match in re.finditer(entry_pattern, text):
-        table = match.group(1)
-        cols_raw = match.group(2).strip()
+#     entry_pattern = r'table"\s*:\s*"([^"]+)"[\s\S]*?columns"\s*:\s*\[([^\]]*)\]'
+#     for match in re.finditer(entry_pattern, text):
+#         table = match.group(1)
+#         cols_raw = match.group(2).strip()
 
-        cols = re.findall(r'"([^"]+)"', cols_raw)
-        results.append({"table": table, "columns": cols})
+#         cols = re.findall(r'"([^"]+)"', cols_raw)
+#         results.append({"table": table, "columns": cols})
 
-    return results
+#     return results
 
 
-def extract_json_from_model_response(model_response: str) -> dict | None:
-    json_match = re.search(r"```(?:json)?\s*({.*?})\s*```", model_response, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-    else:
-        json_match = re.search(r"({.*})", model_response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            return None
+# def extract_json_from_model_response(model_response: str) -> dict | None:
+#     json_match = re.search(r"```(?:json)?\s*({.*?})\s*```", model_response, re.DOTALL)
+#     if json_match:
+#         json_str = json_match.group(1)
+#     else:
+#         json_match = re.search(r"({.*})", model_response, re.DOTALL)
+#         if json_match:
+#             json_str = json_match.group(1)
+#         else:
+#             return None
 
-    try:
-        data = json.loads(json_str)
-        return data
-    except (json.JSONDecodeError, TypeError):
-        return None
+#     try:
+#         data = json.loads(json_str)
+#         return data
+#     except (json.JSONDecodeError, TypeError):
+#         return None
 
 
 # from process_sql import get_sql, Schema

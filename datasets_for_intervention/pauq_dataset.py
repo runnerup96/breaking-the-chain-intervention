@@ -1,6 +1,7 @@
 import json
 import os
 from .utils import extract_schema_links, parse_sql
+import copy
 
 
 class PAUQDataset:
@@ -39,7 +40,7 @@ class PAUQDataset:
             for table_name in db["table_names"]:
                 if table_name in self.tables:
                     continue
-                columns = PAUQDataset.get_table_columns(db, table_name, False)
+                columns = PAUQDataset.get_table_columns(db, table_name)
                 self.tables[table_name] = columns
                 
         for row in train_data:
@@ -69,27 +70,27 @@ class PAUQDataset:
                 self.data[self.sample_idx2idx[sample["sample_idx"]]]["paraphrase"] = sample["paraphrase"]
 
     @staticmethod
-    def get_table_columns(db, table_name, original: bool):
+    def get_table_columns(db, table_name, original: bool = False):
         table_key = "table_names_original" if original else "table_names"
         column_key = "column_names_original" if original else "column_names"
         table_db_idx = db[table_key].index(table_name)
         table_columns = []
         for i, col_name in db[column_key][1:]:
             if i == table_db_idx:
-                table_columns.append(col_name)
+                table_columns.append(col_name.lower())
         return table_columns
     
     @staticmethod
     def get_db_schema(db):
         schema = {}
         for table_name in db['table_names']:
-            schema[table_name] = PAUQDataset.get_table_columns(db, table_name, False)
-        for table_name in db['table_names_original']:
-            columns = PAUQDataset.get_table_columns(db, table_name, True)
-            if table_name in schema:
-                schema[table_name].extend(columns)
-            else:
-                schema[table_name] = columns
+            schema[table_name] = PAUQDataset.get_table_columns(db, table_name)
+        # for table_name in db['table_names_original']:
+        #     columns = PAUQDataset.get_table_columns(db, table_name)
+        #     if table_name in schema:
+        #         schema[table_name].extend(columns)
+        #     else:
+        #         schema[table_name] = columns
         return schema
     
     def __len__(self):
@@ -102,18 +103,5 @@ class PAUQDataset:
 
 if __name__ == "__main__":
     dataset = PAUQDataset("./pauq")
-    empty = 0
-    total = 0
-    for sample in dataset:
-        if not sample["schema_links"]:
-            empty += 1
-        total += 1
-    print(empty, total)
-    # print(dataset[0])
-    i = 0
-    for k, v in dataset[210].items():
-        print(k, ":", v)
-        i += 1
-        # if i > 1:
-        #     break
-    # print(dataset[0])
+    print(dataset[10]["paraphrase"])
+    print(dataset[10]["question"])

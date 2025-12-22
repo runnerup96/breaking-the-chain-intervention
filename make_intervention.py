@@ -93,7 +93,7 @@ if __name__ == "__main__":
         evaluator = pauq_evaluation.PAUQEvaluation(dataset)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, averitec]")
+                                  f"Currently -- [ricechem, averitec, pauq]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 
