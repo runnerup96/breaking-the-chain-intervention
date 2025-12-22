@@ -173,4 +173,3 @@ class AVeriTeCEvaluation:
                     print(f"  Edit {edit_id}: mean = {value['mean']}, std = {value['std']}")
                 else:
                     print(f"  Edit {edit_id}: mean = No, std = No")
-

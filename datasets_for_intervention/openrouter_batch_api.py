@@ -5,18 +5,22 @@ import copy
 import pandas as pd
 import json
 from typing import Callable, List, Dict, Any
-
+import os
 
 class OpenrouterBatchApiClass:
-    def __init__(self, model: str, api_link: str, token: str, max_tokens: int = 4096, num_threads: int = 20):
+    def __init__(self, model: str, api_link: str, token: str, max_tokens: int = 4096, num_threads: int = 20, http_client: str = None):
         self.model = model
         self.api_link = api_link
         self.token = token
         self.max_tokens = max_tokens
         self.num_threads = num_threads
+        self.http_client = http_client
     
     def _send_question(self, messages: List[Dict[str, str]], max_retries: int = 10) -> Dict[str, Any]:
-        client = openai.OpenAI(api_key=self.token, base_url=self.api_link)
+        if self.http_client:
+            client = openai.OpenAI(api_key=self.token, base_url=self.api_link, http_client=self.http_client)
+        else:
+            client = openai.OpenAI(api_key=self.token, base_url=self.api_link)
 
         for attempt in range(max_retries):
             try:
@@ -94,19 +98,33 @@ class OpenrouterBatchApiClass:
         return results
 
 
+def load_jsonl(file_path):
+    with open(file_path, "r") as file:
+        return [json.loads(line) for line in file]
+
+def load_entailment(data_path):
+    samples = load_jsonl(data_path)
+
+    samples_for_evaluation = []
+    for sample in samples:
+        samples_for_evaluation.append({"sample_idx": sample["id"], "text": sample["meta"]["question_text"]})
+
+    return samples_for_evaluation
+
 if __name__ == "__main__":
 
     # load samples
-    samples = json.load(open("./pauq/pauq_dev_compressed.json", "r"))
+    data_path = ""
+    output_path = ""
 
-    samples_for_evaluation = []
-    for idx, sample in enumerate(samples):
-        samples_for_evaluation.append({"sample_idx": idx, "text": sample["question"]["en"]})
+    samples_for_evaluation = load_entailment(data_path)
+
+    print(f"Loaded {len(samples_for_evaluation)} samples for evaluation")
 
     api_client = OpenrouterBatchApiClass(
         model="meta-llama/llama-3.1-8b-instruct",
         api_link="https://openrouter.ai/api/v1", 
-        token="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"
+        token=os.getenv("OPENROUTER_API_KEY")
     )
 
     def my_prompt_func(sample):
@@ -120,26 +138,11 @@ if __name__ == "__main__":
             f"Original question: {sample['text']}"
         )
         return prompt
-
-    raw_results = api_client.call(
+    
+    results = api_client.call(
         samples=samples_for_evaluation,
         prompt_func=my_prompt_func,
         sample_idx_key="sample_idx"
     )
 
-    results = [
-        {
-            "sample_idx": element["sample_idx"], 
-            "text": samples_for_evaluation[element["sample_idx"]]['text'],
-            "paraphrase": element["response"]["response"]
-        } for element in raw_results
-    ]
-    # for res in results:
-    #     print(res["text"])
-    #     print(res["paraphrase"])
-    #     print("-"*100)
-
-    # for res in results:
-    #     print(res)
-
-    json.dump(results, open("./pauq/pauq_dev_compressed_paraphrase.json", "w"), ensure_ascii=False, indent=4)
+    json.dump(results, open(output_path, "w"), ensure_ascii=False, indent=4)

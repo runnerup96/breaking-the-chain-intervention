@@ -104,10 +104,10 @@ class TestAveritecEvaluation(unittest.TestCase):
         intervention_sample_pred["structure_intervention"] = {
             "HSVT": [{"label": "Supported", "label_after_intervention": "Refuted"}],
             "Local Edits": [
-                {"label": "Refuted", "label_after_intervention": "Supported"},
-                {"label": "Refuted", "label_after_intervention": "Supported"},
+                {"label": "Supported", "label_after_intervention": "Refuted"},
+                {"label": "Supported", "label_after_intervention": "Refuted"},
             ],
-            "Global": [{"label": "Refuted", "label_after_intervention": "Supported"}],
+            "Global": [{"label": "Supported", "label_after_intervention": "Refuted"}],
         }
 
 
@@ -119,8 +119,8 @@ class TestAveritecEvaluation(unittest.TestCase):
 
         faith = agg["faithfullness"]["with_predicted_structure"]
         self.assertEqual(faith["HSVT"]["mean"], 0)
-        self.assertTrue(isclose(faith["Local Edits"]["mean"], 0, abs_tol=1e-3))
-        self.assertEqual(faith["Global"]["mean"], 0)
+        self.assertEqual(faith["Local Edits"]["mean"], None)
+        self.assertEqual(faith["Global"]["mean"], None)
 
     def test_evaluate_local_edit_influence(self):
         averitec_sample = self.dataset[0]
