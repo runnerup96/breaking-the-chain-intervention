@@ -1,4 +1,4 @@
-## Breaking the Chain ⛓️‍💥: A Causal Analysis of Faithful Reasoning in LLMs
+## Breaking the Chain ⛓️‍💥: A Causal Analysis of LLM Faithfulness to Intermediate Structures
 
 
 ## Code Structure Overview
@@ -10,11 +10,11 @@ The central script that coordinates the entire intervention pipeline:
 - **Purpose**: Runs causal interventions on LLM reasoning chains
 - **Functionality**: 
   - Loads datasets and LLM models
-  - Generates initial predictions with reasoning steps
+  - Generates initial predictions with structured reasoning
   - Applies interventions to specific reasoning components
   - Generates new predictions under interventions
   - Saves results for analysis
-- **Supported Datasets**: Amazon reviews, RiceChem
+- **Supported Dataset with structured mediator**: [RiceChem](https://github.com/luffycodes/Automated-Long-Answer-Grading), [TabFact](https://github.com/wenhuchen/Table-Fact-Checking), [EntailmentBank](https://github.com/allenai/entailment_bank), [AVeriTeC](https://fever.ai/dataset/averitec.html)
 - **Usage**: Command-line interface with configurable model, dataset, and batch parameters
 
 ### 2. `llm_model.py` - LLM Interface
@@ -25,19 +25,26 @@ A unified interface for different language models:
   - Batch text generation with configurable parameters
   - Chat template handling for conversational models
   - Device management and memory optimization
-- **Supported Models**: Qwen3-4B (extensible to other families)
+- **Supported Models**: Qwen, Gemma, Llama, Falcon with pre-trained or API functionality
 
 ### 3. `datasets_for_intervention/` - Dataset and Intervention Logic
 Contains dataset-specific implementations for different domains:
 - **`ricechem_dataset.py`**: Chemistry question dataset loader  
-- **`ricechem_intervention.py`**: Intervention logic for chemistry reasoning chains
-- **Other datasets**: Averitec, TabFact, EntailmentBank (framework-ready)
+- **`ricechem_intervention.py`**: Intervention logic for chemistry intermediate structure chains
+- **`ricechem_evaluation.py`**: Evaluation script to eval the model faithfulness and performance
+- **Other datasets**: AVeriTeC, TabFact, EntailmentBank -- implemented with the same structure;
 
 Each dataset implementation provides:
 - **Dataset Loading**: JSON/CSV parsing and preprocessing
 - **Prompt Construction**: Structured reasoning templates
 - **Intervention Logic**: Methods to modify specific reasoning steps
 - **Validation**: Ensuring intervention quality and consistency
+
+### Generating HSVT "Soft" Paraphrases with `openrouter_batch_api`
+
+You can generate the required "soft" HSVT paraphrases by leveraging the `openrouter_batch_api.py` to batch LLM calls via OpenRouter.
+
+`FILL HERE on available files`
 
 ## How It Works
 1. **Initial Generation**: LLM generates predictions with explicit reasoning steps
@@ -46,6 +53,46 @@ Each dataset implementation provides:
 4. **Analysis**: Causal effects of reasoning changes on final predictions are measured
 
 This framework enables researchers to study how different reasoning patterns influence LLM decision-making through controlled interventions.
+
+## Generated Figures
+
+The `analysis/` folder contains visualization scripts and generated figures from the paper that illustrate the results of the intervention experiments and overall model performance. 
+
+
+## Environment Setup
+
+### Prerequisites
+- Python 3.8 or higher
+- CUDA-compatible GPU (recommended for faster inference)
+
+### Installation Steps
+
+
+1. **Create a virtual environment**:
+```bash
+# Using venv
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Or using conda
+conda create -n intervention_analysis python=3.9
+conda activate intervention_analysis
+```
+
+3. **Install dependencies**:
+```bash
+# Install using pip
+pip install -r requirements.txt
+
+# Or using uv (faster, if available)
+uv pip install -r requirements.txt
+```
+
+4. **Verify installation via testing**:
+```bash
+python -m pytest datasets_for_intervention/test_intervention"
+```
+
 
 ## How to Run
 
@@ -62,7 +109,8 @@ chmod +x make_intervention_script.sh
 
 **Before running, modify the script to match your setup:**
 - **`project_path`**: Set to your project directory path
-- **`evaluation_dataset`**: Choose from `"ricechem"` or `"amazon_reviews"`
+- **`python_path`**: Path to project interpreter
+- **`evaluation_dataset`**: Choose from `"ricechem"`, `"tabfact"`,` "entailment"`, `"averitec"`
 - **`model_name`**: Specify the LLM model (e.g., `"Qwen/Qwen3-4B"`)
 - **`batch_size`**: Adjust based on your GPU memory (default: 32)
 - **`CUDA_DEVICE_NUMBER`**: Set your GPU device number
