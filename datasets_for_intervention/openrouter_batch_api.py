@@ -97,30 +97,49 @@ class OpenrouterBatchApiClass:
 if __name__ == "__main__":
 
     # load samples
-    samples = json.load(open("/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/AVeriTeC/data/onlyboolean_samples.json", "r"))
+    samples = json.load(open("./pauq/pauq_dev_compressed.json", "r"))
 
     samples_for_evaluation = []
     for idx, sample in enumerate(samples):
-        samples_for_evaluation.append({"sample_idx": idx, "text": sample['claim']})
+        samples_for_evaluation.append({"sample_idx": idx, "text": sample["question"]["en"]})
 
     api_client = OpenrouterBatchApiClass(
-        model="google/gemini-2.5-pro-preview",
+        model="meta-llama/llama-3.1-8b-instruct",
         api_link="https://openrouter.ai/api/v1", 
-        token=""
+        token="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"
     )
 
     def my_prompt_func(sample):
-        prompt = (f"For this claim: '{sample['text']}', write down 5 meaning-preserving paraphrases"
-        "(same semantic meaning, but different words, different sentence structure, different style, different length)."
-        "The paraphrases should be maximally different from each other and from original claim."
-        "In terms of semantic meaning, they should be maximally close to the original claim." 
-        "Write down all paraphrases separated by the '|' symbol.")
+        prompt = (
+            f"Paraphrase the following Text-to-SQL question while preserving the exact same meaning and semantics.\n"
+            f"Requirements:\n"
+            f"- Keep all factual information unchanged\n" 
+            f"- Maintain the same query intent\n"
+            f"- Use different wording and sentence structure\n"
+            f"- Output only the paraphrased question, no explanations\n\n"
+            f"Original question: {sample['text']}"
+        )
         return prompt
 
-    results = api_client.call(
+    raw_results = api_client.call(
         samples=samples_for_evaluation,
         prompt_func=my_prompt_func,
         sample_idx_key="sample_idx"
     )
 
-    json.dump(results, open("/Users/somov-od/Documents/phd/projects/frontdoor_llm_causality/statics/result_splits/AVeriTeC/data/onlyboolean_paraphrases.json", "w"), ensure_ascii=False, indent=4)
+    results = [
+        {
+            "sample_idx": element["sample_idx"], 
+            "text": samples_for_evaluation[element["sample_idx"]]['text'],
+            "paraphrase": element["response"]["response"]
+        } for element in raw_results
+    ]
+    # for res in results:
+    #     print(res["text"])
+    #     print(res["paraphrase"])
+    #     print("-"*100)
+
+    # for res in results:
+    #     print(res)
+
+    json.dump(results, open("./pauq/pauq_dev_compressed_paraphrase.json", "w"), ensure_ascii=False, indent=4)
