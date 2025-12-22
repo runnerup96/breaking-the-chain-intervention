@@ -181,10 +181,10 @@ class PAUQEvaluation:
             
             if completion_type == "gold_structure":
                 evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
-                    global_intervention_match)
+                    global_intervention_score)
             elif completion_type == "structure_prediction":
                 evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
-                    global_intervention_match)
+                    global_intervention_score)
 
         aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
         self.print_evaluation_metrics(aggregated_evaluation_metrics)

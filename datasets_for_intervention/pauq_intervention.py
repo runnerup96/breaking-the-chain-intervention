@@ -12,6 +12,18 @@ class PAUQIntervention:
         self.dataset = dataset
         self.llm_model = llm_model
 
+    def remove_special_tokens(self, generated_text: str) -> str:
+        # собираем все буквальные токены
+        tok = [
+            self.llm_model.tokenizer.eos_token,
+            "<|im_end|>", "<|endoftext|>", "</s>", "<eos>",
+            "<pad>", "<|eot_id|>", "<|pad|>"
+        ]
+        # экранируем и строим «один или более повторов ЛЮБОГО из списка» с конца
+        escaped = map(re.escape, tok)
+        pattern = re.compile(r'(?:' + "|".join(escaped) + r')+$')
+        return pattern.sub("", generated_text).rstrip()
+
     def interventions_to_prompt(self, sample:dict):
         interventions = sample['structure_intervention']
         hsvt_intervention_prompt = [self.make_prompt(interventions['HSVT'][0], include_gold_structure=True)]
@@ -21,7 +33,7 @@ class PAUQIntervention:
         return all_intervention_prompts
 
     def collect_intervention_completion(self, sample: dict, generated_output: list):
-        completion_list = [generation['completion'] for generation in generated_output]
+        completion_list = [self.remove_special_tokens(generation['completion']) for generation in generated_output]
         intervention = sample['structure_intervention']
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
@@ -41,15 +53,23 @@ class PAUQIntervention:
                 raise RuntimeError("No columns for table in schema linking!")
             column_idx = random.randint(0, len(columns) - 1)
             column_name = columns[column_idx]
-            table_columns = self.dataset.get_table_columns(sample["db"], table_name, True)
-            table_columns.remove(column_name)
+            table_columns = self.dataset.get_table_columns(sample["db"], table_name)
+            # print(table_columns)
+            try:
+                table_columns.remove(column_name)
+            except Exception:
+                pass
+                # raise Exception(f"No such column: {table_columns}, {columns}")
             other_column = random.choice(table_columns)
             intervention = {"type": "column", "before": column_name, "after": other_column}
             columns[column_idx] = other_column
         elif intervention_type == "table":
             # Table name
-            table_names = sample["db"]["table_names_original"]
-            table_names.remove(table_name)
+            table_names = sample["db"]["table_names"]
+            try:
+                table_names.remove(table_name)
+            except Exception:
+                raise Exception(f"No such table: {table_names}, {list(sample['schema_links'].keys())}")
             if table_names:
                 other_table_name = random.choice(table_names)
                 intervention = {"type": "table", "before": table_name, "after": other_table_name}
@@ -90,15 +110,22 @@ class PAUQIntervention:
         sample["global_intervention"] = intervention
     
     def make_intervention(self, sample: dict, generated_output: dict):
-        completion = generated_output['completion']
+        completion = self.remove_special_tokens(generated_output['completion'])
+        sample["generated_output"] = completion
         assert isinstance(completion, str)
-        json_completion = extract_data_from_response(completion)
-        schema_links_json = json_completion["schema_links"]
-        schema_links = {}
-        for item in schema_links_json:
-            schema_links[item["table"]] = item["columns"]
-        sample["schema_links"] = schema_links
-        sample["generated_sql"] = json_completion["sql"]
+        if sample["completion_type"] == "gold_structure":
+            sample["generated_sql"] = completion.strip()
+            sample["schema_links"] = copy.deepcopy(sample["true_schema_links"])
+        elif sample["completion_type"] == "structure_prediction":
+            json_completion = extract_data_from_response(completion)
+            schema_links_json = json_completion["schema_links"]
+            schema_links = {}
+            for item in schema_links_json:
+                schema_links[item["table"]] = item["columns"]
+            sample["schema_links"] = schema_links
+            sample["generated_sql"] = json_completion["sql"]
+        else:
+            raise NotImplementedError
         interventions = self.make_structure_intervention(sample)
         sample["structure_intervention"] = interventions
         return sample
@@ -106,7 +133,7 @@ class PAUQIntervention:
     def make_structure_intervention(self, sample: dict):
         # HSVT 
         hsvt_sample = deepcopy(sample)
-        intervened_question = self.dataset[sample["index"]]["paraphrase"]
+        intervened_question = sample["paraphrase"]
         hsvt_sample["question"] = intervened_question
 
         # Local Edits
@@ -127,97 +154,115 @@ class PAUQIntervention:
         question = sample["question"]
         db_schema = ""
         db = sample["db"]
-        for i, table_name in enumerate(db["table_names_original"]):
-            db_schema += f"Table: {table_name}\n"
+        for i, table_name in enumerate(db["table_names"]):
+            db_schema += f"Table: {table_name.lower()}\n"
             db_schema += "Columns: "
-            for col_name in db["column_names_original"][1:]:
+            for col_name in db["column_names"][1:]:
                 if col_name[0] == i:
-                    db_schema += f"{col_name[1]}, "
+                    db_schema += f"{col_name[1].lower()}, "
             db_schema = db_schema[:-2]
             db_schema += "\n"
-        user_prompt = f"""
-        You are an expert in natural language understanding and SQL queries generation.
-        Given a natural language question and a database schema, perform two steps:
-
-        1. Schema Linking: Identify which tables and columns in the schema are relevant to answer the question.
-        2. SQL Generation: Write a correct, executable SQL query that answers the question, using the linked schema elements.
-
-        Output Format
-        Return the answer in the exact following format:
-
-        Output:
-        Schema links: [
-                    {{
-                      "table": "table_name",
-                      "columns": ["column1", "column2", ...]
-                    }}
-                  ]
-        SQL: SELECT ... FROM ... WHERE ...;
-
-        Rules:
-        - List all relevant tables and their columns in schema links
-        - Write a valid SQL query string without markdown, without extra text
-        - Only output in the specified format. Do not add explanations.
-
-        Few-Shot Examples
-        Example 1
-        Question: "How many heads of the departments are older than 56?"
-
-        Schema:
-        Table: head
-        Columns: head_id, name, age
-        Table: department
-        Columns: dept_id, name, budget
-
-        Output:
-        Schema links: [
-                    {{
-                      "table": "head",
-                      "columns": ["age"]
-                    }}
-                  ]
-        SQL: SELECT COUNT(*) FROM head WHERE age > 56;
-
-        Example 2
-        Question: "List the names of departments with budget over 1 million."
-
-        Schema:
-        Table: department
-        Columns: dept_id, name, budget
-        Table: employee
-        Columns: emp_id, name, salary
-
-        Output:
-        Schema links: [
-                    {{
-                      "table": "department",
-                      "columns": ["name", "budget"]
-                    }}
-                  ]
-        SQL: SELECT name FROM department WHERE budget > 1000000;
-
-        Example 3
-        Question: "What is the average salary of employees hired in 2020?"
-
-        Schema:
-        Table: employee
-        Columns: emp_id, name, salary, hire_date
-
-        Output:
-        Schema links: [
-                    {{
-                      "table": "employee",
-                      "columns": ["salary", "hire_date"]
-                    }}
-                  ]
-        SQL: SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';
-
-        Now process the following:
-        Question: "{question}"
-        Schema:
-        {db_schema}
-        Output:
-        """
+        user_prompt = (
+            f"You are an expert in natural language understanding and SQL queries generation."
+            f"Given a natural language question and a database schema, perform two steps:"
+    
+            f"1. Schema Linking: Identify which tables and columns in the schema are relevant to answer the question."
+            f"2. SQL Generation: Write a correct, executable SQL query that answers the question, using the linked schema elements."
+    
+            f"Output Format"
+            f"Return the answer in the exact following format:"
+    
+            f"Output:"
+            # f"Schema links: ["
+            # f"            {{"
+            # f'              "table": "table_name",'
+            # f'              "columns": ["column1", "column2", ...]'
+            # f"            }}"
+            # f"          ]"
+            
+            # f"SQL: SELECT ... FROM ... WHERE ...;"
+            f"===SCHEMA_LINKS==="
+            f"table1:col1,col2"
+            f"table2:col1"
+            f"===SQL==="
+            f"SELECT ... FROM ... WHERE ...;"
+    
+            f"Rules:"
+            f"- List all relevant tables and their columns in schema links"
+            f"- Write a valid SQL query string without markdown, without extra text"
+            f"- Only output in the specified format. Do not add explanations."
+    
+            f"Few-Shot Examples"
+            f"Example 1"
+            f'Question: "How many heads of the departments are older than 56?"'
+    
+            f"Schema:"
+            f"Table: head"
+            f"Columns: head_id, name, age"
+            f"Table: department"
+            f"Columns: dept_id, name, budget"
+    
+            f"Output:"
+            # f"Schema links: ["
+            # f"           {{"
+            # f'            "table": "head",'
+            # f'            "columns": ["age"]'
+            # f"          }}"
+            # f"        ]"
+            # f"SQL: SELECT COUNT(*) FROM head WHERE age > 56;"
+            f"===SCHEMA_LINKS==="
+            f"head:age"
+            f"===SQL==="
+            f"SELECT COUNT(*) FROM head WHERE age > 56;"
+    
+            f"Example 2"
+            f'Question: "List the names of departments with budget over 1 million."'
+    
+            f"Schema:"
+            f"Table: department"
+            f"Columns: dept_id, name, budget"
+            f"Table: employee"
+            f"Columns: emp_id, name, salary"
+    
+            f"Output:"
+            f"===SCHEMA_LINKS==="
+            f"department:name,budget"
+            f"===SQL==="
+            f"SELECT name FROM department WHERE budget > 1000000;"
+            # f"Schema links: ["
+            # f"            {{"
+            # f'              "table": "department",'
+            # f'              "columns": ["name", "budget"]'
+            # f"            }}"
+            # f"          ]"
+            # f"SQL: SELECT name FROM department WHERE budget > 1000000;"
+    
+            f"Example 3"
+            f'Question: "What is the average salary of employees hired in 2020?"'
+    
+            f"Schema:"
+            f"Table: employee"
+            f"Columns: emp_id, name, salary, hire_date"
+    
+            f"Output:"
+            f"===SCHEMA_LINKS==="
+            f"employee:salary,hire_date"
+            f"===SQL==="
+            f"SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';"
+            # f"Schema links: ["
+            # f'            {{'
+            # f'              "table": "employee",'
+            # f'             "columns": ["salary", "hire_date"]'
+            # f'            }}'
+            # f'          ]'
+            # f"SQL: SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';"
+    
+            f"Now process the following:"
+            f'Question: "{question}'
+            f"Schema:"
+            f"{db_schema}"
+            f"Output:\n"
+        )
 
         if not "true_schema_links" in sample:
             include_gold_structure = False
@@ -226,9 +271,20 @@ class PAUQIntervention:
         add_generation_prompt_status = True
 
         if include_gold_structure:
-            schema_links_string = f"Schema links: {sample['true_schema_links']}\n"
-            schema_links_string += "SQL: "
+            # schema_links_string = f"Schema links: {sample['true_schema_links']}\n"
+            # schema_links_string += "SQL: "
+            schema_links_string = "===SCHEMA_LINKS===\n"
+            for table_name in sample['true_schema_links']:
+                schema_links_string += table_name
+                schema_links_string += ":"
+                for column_name in sample['true_schema_links'][table_name]:
+                    schema_links_string += column_name
+                    schema_links_string += ","
+                schema_links_string = schema_links_string[:-1]
+                schema_links_string += "\n"
+            schema_links_string += "===SQL===\n"
             messages.append({"role": "assistant", "content": schema_links_string})
+            sample["schema_links_string"] = schema_links_string
             add_generation_prompt_status = False
 
         prompt = self.llm_model.apply_chat_template(
