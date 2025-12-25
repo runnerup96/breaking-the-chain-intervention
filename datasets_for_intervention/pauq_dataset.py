@@ -1,6 +1,9 @@
 import json
 import os
-from .utils import extract_schema_links, parse_sql
+if __name__ == "__main__":
+    from utils import extract_schema_links, parse_sql
+else:
+    from .utils import extract_schema_links, parse_sql
 import copy
 
 
@@ -12,6 +15,7 @@ class PAUQDataset:
             pauq_train.json
             pauq_dev.json
             tables.json
+            pauq_dev_paraphrase.json
         """
         self.data_path = data_path
         if train:
@@ -37,7 +41,7 @@ class PAUQDataset:
         self.tables = {}
         for db in db_data:
             self.databases[db["db_id"]] = {key: db[key] for key in db_keys}
-            for table_name in db["table_names"]:
+            for table_name in db["table_names_original"]:
                 if table_name in self.tables:
                     continue
                 columns = PAUQDataset.get_table_columns(db, table_name)
@@ -69,8 +73,16 @@ class PAUQDataset:
             if sample["sample_idx"] in self.sample_idx2idx:
                 self.data[self.sample_idx2idx[sample["sample_idx"]]]["paraphrase"] = sample["paraphrase"]
 
+        self.dummy_tables = {
+            "space_missions": ["id", "name", "launch_date", "country", "success", "budget_mlns"],
+            "albums": ["id", "artist_id", "title", "year", "genre", "duration_sec"],
+            "matches": ["id", "tournament_id", "team_a", "team_b", "score_a", "score_b", "match_date"],
+            "recipes": ["id", "dish_name", "cuisine", "calories", "cook_time_min", "difficulty"],
+            "air_quality": ["id", "city", "measure_date", "pm25", "pm10", "aqi"]
+        }
+        
     @staticmethod
-    def get_table_columns(db, table_name, original: bool = False):
+    def get_table_columns(db, table_name, original: bool = True):
         table_key = "table_names_original" if original else "table_names"
         column_key = "column_names_original" if original else "column_names"
         table_db_idx = db[table_key].index(table_name)
@@ -83,14 +95,8 @@ class PAUQDataset:
     @staticmethod
     def get_db_schema(db):
         schema = {}
-        for table_name in db['table_names']:
+        for table_name in db['table_names_original']:
             schema[table_name] = PAUQDataset.get_table_columns(db, table_name)
-        # for table_name in db['table_names_original']:
-        #     columns = PAUQDataset.get_table_columns(db, table_name)
-        #     if table_name in schema:
-        #         schema[table_name].extend(columns)
-        #     else:
-        #         schema[table_name] = columns
         return schema
     
     def __len__(self):
@@ -103,5 +109,18 @@ class PAUQDataset:
 
 if __name__ == "__main__":
     dataset = PAUQDataset("./pauq")
-    print(dataset[10]["paraphrase"])
-    print(dataset[10]["question"])
+    tables = {}
+    for i in range(1, 100, 20):
+        print("=" * 100)
+        for k, v in dataset[i].items():
+            if k == "db_schema":
+                for table_name in v:
+                    tables[table_name] = v[table_name]
+            print("\t"*4, end="")
+            if isinstance(v, str):
+                print(f'"{k}": "{v}",')
+            else:
+                print(f'"{k}": {v},')
+        
+    print(tables)
+    

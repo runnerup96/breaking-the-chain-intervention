@@ -207,7 +207,7 @@ if __name__ == "__main__":
                                                           skip_special_tokens=False)
         promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
         gold_structure_outputs = llm_model.generate(promted_batch_with_gold_structure,
-                                                    max_new_tokens=10,
+                                                    max_new_tokens=30,
                                                     skip_special_tokens=False)
         # Combine outputs and completion types
         batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
