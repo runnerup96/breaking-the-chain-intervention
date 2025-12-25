@@ -4,7 +4,6 @@ import json
 import random
 import re
 from .utils import extract_data_from_response
-# import pauq_dataset
 
 
 class PAUQIntervention:
@@ -13,13 +12,11 @@ class PAUQIntervention:
         self.llm_model = llm_model
 
     def remove_special_tokens(self, generated_text: str) -> str:
-        # собираем все буквальные токены
         tok = [
             self.llm_model.tokenizer.eos_token,
             "<|im_end|>", "<|endoftext|>", "</s>", "<eos>",
             "<pad>", "<|eot_id|>", "<|pad|>"
         ]
-        # экранируем и строим «один или более повторов ЛЮБОГО из списка» с конца
         escaped = map(re.escape, tok)
         pattern = re.compile(r'(?:' + "|".join(escaped) + r')+$')
         return pattern.sub("", generated_text).rstrip()
@@ -43,8 +40,8 @@ class PAUQIntervention:
         return sample
     
     def make_local_intervention(self, sample: dict, intervention_type: str = "column"):
-        # random_link = random.choice(sample["schema_links"])
         table_name = random.choice(list(sample["schema_links"].keys()))
+        db_schema = sample["db_schema"]
         columns = sample["schema_links"][table_name]
         intervention = None
         if intervention_type == "column":
@@ -54,18 +51,21 @@ class PAUQIntervention:
             column_idx = random.randint(0, len(columns) - 1)
             column_name = columns[column_idx]
             table_columns = self.dataset.get_table_columns(sample["db"], table_name)
-            # print(table_columns)
             try:
                 table_columns.remove(column_name)
             except Exception:
                 pass
-                # raise Exception(f"No such column: {table_columns}, {columns}")
             other_column = random.choice(table_columns)
             intervention = {"type": "column", "before": column_name, "after": other_column}
+            if table_name not in db_schema:
+                db_schema[table_name] = [other_column]
+            else:
+                db_schema[table_name].append(other_column)
+                db_schema[table_name] = list(set(db_schema[table_name]))
             columns[column_idx] = other_column
         elif intervention_type == "table":
             # Table name
-            table_names = sample["db"]["table_names"]
+            table_names = sample["db"]["table_names_original"]
             try:
                 table_names.remove(table_name)
             except Exception:
@@ -73,40 +73,39 @@ class PAUQIntervention:
             if table_names:
                 other_table_name = random.choice(table_names)
                 intervention = {"type": "table", "before": table_name, "after": other_table_name}
+                if other_table_name not in db_schema:
+                    db_schema[other_table_name] = db_schema[table_name][:]
+                else:
+                    db_schema[other_table_name].extend(db_schema[table_name][:])
+                    db_schema[other_table_name] = list(set(db_schema[other_table_name]))
                 columns = sample["schema_links"][table_name][:]
                 del sample["schema_links"][table_name]
                 sample["schema_links"][other_table_name] = columns
 
         sample["local_intervention"] = intervention
 
-    def _get_random_table(self) -> str:
-        return random.choice(list(self.dataset.tables.keys()))
-    
-    def _get_random_column(self, table_name: str) -> str:
-        return random.choice(self.dataset.tables[table_name])
-    
-    def _get_random_columns(self, table_name: str, n_columns: int) -> str:
-        return random.sample(self.dataset.tables[table_name], n_columns)
-    
     def make_global_intervention(self, sample: dict):
         intervention = []
-        schema_links = [{"table": key, "columns": value.copy()} for key, value in sample["schema_links"].items()]
-        for link in schema_links:
-            old_table = link["table"]
-            old_columns = link["columns"].copy()
-            new_columns = []
-            while len(new_columns) < len(old_columns):
-                new_table = self._get_random_table()
-                new_columns.extend(self._get_random_columns(new_table, 1))
-
-            link["table"] = self._get_random_table()
-            intervention.append({"type": "table", "before": old_table, "after": new_table})
-            link["columns"] = []
-            for old_column, new_column in zip(old_columns, new_columns):
-                link["columns"].append(new_column)
+        schema_links = sample["schema_links"]
+        db_schema = sample["db_schema"]
+        num_tables = len(schema_links)
+        if num_tables > len(self.dataset.dummy_tables):
+            raise Exception("Not enough dummy tables")
+        random_tables = random.sample(list(self.dataset.dummy_tables.keys()), num_tables)
+        random_schema_links = {}
+        for random_table, table_name in zip(random_tables, schema_links):
+            num_columns = len(schema_links[table_name])
+            random_columns = self.dataset.dummy_tables[random_table]
+            if num_columns <= len(random_columns):
+                random_columns_link = random.sample(random_columns, num_columns)
+            else:
+                raise Exception("Not enough columns in dummy table")
+            random_schema_links[random_table] = random_columns_link
+            for old_column, new_column in zip(schema_links[table_name], random_columns_link):
                 intervention.append({"type": "column", "before": old_column, "after": new_column})
-
-        sample["schema_links"] = {item["table"]: item["columns"] for item in schema_links}
+            intervention.append({"type": "table", "before": table_name, "after": random_table})
+            db_schema[random_table] = self.dataset.dummy_tables[random_table][:]
+        sample["schema_links"] = random_schema_links
         sample["global_intervention"] = intervention
     
     def make_intervention(self, sample: dict, generated_output: dict):
@@ -154,137 +153,109 @@ class PAUQIntervention:
         question = sample["question"]
         db_schema = ""
         db = sample["db"]
-        for i, table_name in enumerate(db["table_names"]):
+        for i, table_name in enumerate(db["table_names_original"]):
             db_schema += f"Table: {table_name.lower()}\n"
             db_schema += "Columns: "
-            for col_name in db["column_names"][1:]:
+            for col_name in db["column_names_original"][1:]:
                 if col_name[0] == i:
                     db_schema += f"{col_name[1].lower()}, "
             db_schema = db_schema[:-2]
             db_schema += "\n"
+
         user_prompt = (
-            f"You are an expert in natural language understanding and SQL queries generation."
-            f"Given a natural language question and a database schema, perform two steps:"
+            f"You are an expert in natural language understanding and SQL queries generation.\n"
+            f"Given a natural language question and a database schema, perform two steps:\n\n"
     
-            f"1. Schema Linking: Identify which tables and columns in the schema are relevant to answer the question."
-            f"2. SQL Generation: Write a correct, executable SQL query that answers the question, using the linked schema elements."
+            f"1. Schema Linking: Based on the question identify which tables and columns in the schema are relevant to answer the question.\n"
+            f"2. SQL Generation: Write a correct, executable SQL query that answers the question, using the linked schema elements.\n\n"
     
-            f"Output Format"
-            f"Return the answer in the exact following format:"
+            f"Output Format\n"
+            f"Return the answer in the exact following format:\n"
     
-            f"Output:"
-            # f"Schema links: ["
-            # f"            {{"
-            # f'              "table": "table_name",'
-            # f'              "columns": ["column1", "column2", ...]'
-            # f"            }}"
-            # f"          ]"
-            
-            # f"SQL: SELECT ... FROM ... WHERE ...;"
-            f"===SCHEMA_LINKS==="
-            f"table1:col1,col2"
-            f"table2:col1"
-            f"===SQL==="
-            f"SELECT ... FROM ... WHERE ...;"
+            f"Output:\n"
+            f"===SCHEMA_LINKS===\n"
+            f"table1:col1,col2\n"
+            f"table2:col1,col2\n"
+            f"===SQL===\n"
+            f"SELECT ... FROM ... WHERE ...;\n\n"
     
-            f"Rules:"
-            f"- List all relevant tables and their columns in schema links"
-            f"- Write a valid SQL query string without markdown, without extra text"
-            f"- Only output in the specified format. Do not add explanations."
+            f"Rules:\n"
+            f"- List all relevant tables and their columns in schema links\n"
+            f"- Write a valid SQL query string without markdown, without extra text\n"
+            f"- Only output in the specified format. Do not add explanations.\n\n"
     
-            f"Few-Shot Examples"
-            f"Example 1"
-            f'Question: "How many heads of the departments are older than 56?"'
+            f"Few-Shot Examples\n"
+            f"Example 1\n"
+            f'Question: "How many heads of the departments are older than 56?"\n\n'
     
-            f"Schema:"
-            f"Table: head"
-            f"Columns: head_id, name, age"
-            f"Table: department"
-            f"Columns: dept_id, name, budget"
+            f"Schema:\n"
+            f"Table: head\n"
+            f"Columns: head_id, name, age\n"
+            f"Table: department\n"
+            f"Columns: dept_id, name, budget\n\n"
     
-            f"Output:"
-            # f"Schema links: ["
-            # f"           {{"
-            # f'            "table": "head",'
-            # f'            "columns": ["age"]'
-            # f"          }}"
-            # f"        ]"
-            # f"SQL: SELECT COUNT(*) FROM head WHERE age > 56;"
-            f"===SCHEMA_LINKS==="
-            f"head:age"
-            f"===SQL==="
-            f"SELECT COUNT(*) FROM head WHERE age > 56;"
+            f"Output:\n"
+            f"===SCHEMA_LINKS===\n"
+            f"head:age\n"
+            f"===SQL===\n"
+            f"SELECT COUNT(*) FROM head WHERE age > 56;\n\n"
     
-            f"Example 2"
-            f'Question: "List the names of departments with budget over 1 million."'
+            f"Example 2\n"
+            f'Question: "List the names of departments with budget over 1 million."\n\n'
     
-            f"Schema:"
-            f"Table: department"
-            f"Columns: dept_id, name, budget"
-            f"Table: employee"
-            f"Columns: emp_id, name, salary"
+            f"Schema:\n"
+            f"Table: department\n"
+            f"Columns: dept_id, name, budget\n"
+            f"Table: employee\n"
+            f"Columns: emp_id, name, salary\n\n"
     
-            f"Output:"
-            f"===SCHEMA_LINKS==="
-            f"department:name,budget"
-            f"===SQL==="
-            f"SELECT name FROM department WHERE budget > 1000000;"
-            # f"Schema links: ["
-            # f"            {{"
-            # f'              "table": "department",'
-            # f'              "columns": ["name", "budget"]'
-            # f"            }}"
-            # f"          ]"
-            # f"SQL: SELECT name FROM department WHERE budget > 1000000;"
+            f"Output:\n"
+            f"===SCHEMA_LINKS===\n"
+            f"department:name,budget\n"
+            f"===SQL===\n"
+            f"SELECT name FROM department WHERE budget > 1000000;\n\n"
     
-            f"Example 3"
-            f'Question: "What is the average salary of employees hired in 2020?"'
+            f"Example 3\n"
+            f'Question: "What is the average salary of employees hired in 2020?"\n\n'
     
-            f"Schema:"
-            f"Table: employee"
-            f"Columns: emp_id, name, salary, hire_date"
+            f"Schema:\n"
+            f"Table: employee\n"
+            f"Columns: emp_id, name, salary, hire_date\n\n"
     
-            f"Output:"
-            f"===SCHEMA_LINKS==="
-            f"employee:salary,hire_date"
-            f"===SQL==="
-            f"SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';"
-            # f"Schema links: ["
-            # f'            {{'
-            # f'              "table": "employee",'
-            # f'             "columns": ["salary", "hire_date"]'
-            # f'            }}'
-            # f'          ]'
-            # f"SQL: SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';"
+            f"Output:\n"
+            f"===SCHEMA_LINKS===\n"
+            f"employee:salary,hire_date\n"
+            f"===SQL===\n"
+            f"SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';\n\n"
     
-            f"Now process the following:"
-            f'Question: "{question}'
-            f"Schema:"
-            f"{db_schema}"
+            f"Now process the following:\n"
+            f'Question: "{question}"\n'
+            f"Schema:\n"
+            f"{db_schema}\n"
             f"Output:\n"
         )
 
-        if not "true_schema_links" in sample:
-            include_gold_structure = False
-
+        # sample["prompt"] = user_prompt
+        
+        if include_gold_structure and not "schema_links" in sample:
+            sample["schema_links"] = deepcopy(sample["true_schema_links"])
+        
         messages = [{"role": "user", "content": user_prompt}]
         add_generation_prompt_status = True
 
         if include_gold_structure:
-            # schema_links_string = f"Schema links: {sample['true_schema_links']}\n"
-            # schema_links_string += "SQL: "
             schema_links_string = "===SCHEMA_LINKS===\n"
-            for table_name in sample['true_schema_links']:
+            for table_name in sample['schema_links']:
                 schema_links_string += table_name
                 schema_links_string += ":"
-                for column_name in sample['true_schema_links'][table_name]:
+                for column_name in sample['schema_links'][table_name]:
                     schema_links_string += column_name
                     schema_links_string += ","
                 schema_links_string = schema_links_string[:-1]
                 schema_links_string += "\n"
-            schema_links_string += "===SQL===\n"
+            schema_links_string += "===SQL==="
             messages.append({"role": "assistant", "content": schema_links_string})
-            sample["schema_links_string"] = schema_links_string
+            # sample["schema_links_string"] = schema_links_string
             add_generation_prompt_status = False
 
         prompt = self.llm_model.apply_chat_template(
@@ -314,21 +285,11 @@ if __name__ == "__main__":
         SQL: SELECT COUNT(*) FROM head WHERE age > 56;
     '''
     response = {"completion": text_response}
-    # json_model_response = extract_json_from_model_response(response)
-    # dataset = pauq_dataset.PAUQDataset("./pauq", train=True)
     intervention_logic = PAUQIntervention(dataset, None)
     sample = dataset[0]
-    # print_dict(sample)
     intervention = intervention_logic.make_intervention(sample, response)
     print_dict(intervention["structure_intervention"])
 
     for local_edit in intervention["structure_intervention"]["HSVT"]:
         print_dict(local_edit)
-    # sql_before = "SELECT name FROM students WHERE age > 20"
-    # sql_after = "SELECT full_name FROM students WHERE age > 20"
-
-    # info_before = extract_tables_and_columns(sql_before)
-    # info_after = extract_tables_and_columns(sql_after)
-
-    # print("Before:", info_before)
-    # print("After:", info_after)
+        

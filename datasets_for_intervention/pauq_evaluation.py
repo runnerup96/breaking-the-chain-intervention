@@ -14,25 +14,6 @@ class PAUQEvaluation:
         before = intervention["before"]
         after = intervention["after"]
 
-        # parsed_query_before = extract_tables_and_columns(query_before)
-        # parsed_query_after = extract_tables_and_columns(query_after)
-
-        # if before not in parsed_query_before[type]:
-        #     print(before)
-        #     print(parsed_query_before[type])
-        #     print(query_before)
-        #     print("aAAA" * 50)
-        #     print(query_after)
-        #     raise ValueError("Query before and intervention do not match!")
-
-        # if before in parsed_query_after[type]:
-        #     return False
-
-        # before_idx = parsed_query_before[type].index(before)
-        # parsed_query_before[type][before_idx] = after
-
-        # return set(parsed_query_after[type]) == set(parsed_query_before[type])
-
         schema_links_before = extract_schema_links(parse_sql(query_before, db_schema))
         schema_links_after = extract_schema_links(parse_sql(query_after, db_schema))
 
@@ -50,10 +31,7 @@ class PAUQEvaluation:
             schema_links_after[before] = columns
         else:
             raise NotImplementedError
-        # if before in query_after:
-        #     return False
-        
-        # return after in query_after
+            
         return self.compare_schema_links(schema_links_before, schema_links_after)
     
     def validate_generated_sql(self, true_sql: str, generated_sql: str, db_schema: dict) -> bool:
@@ -124,6 +102,12 @@ class PAUQEvaluation:
             # predicted checklist and corresponding score
             predicted_schema_links, predicted_sql = sample["schema_links"], sample['generated_sql']
 
+            if ";" in predicted_sql:
+                idx = predicted_sql.index(";")
+                predicted_sql = predicted_sql[:idx+1]
+            else:
+                predicted_sql += ";"
+
             schema_links_match = self.compare_schema_links(gold_schema_links, predicted_schema_links)
             sql_match = self.validate_generated_sql(gold_sql, predicted_sql, sample["db_schema"])
 
@@ -138,6 +122,12 @@ class PAUQEvaluation:
 
             hsvt_intervention = structure_intervention['HSVT'][0]
             hsvt_result_after_intervention = hsvt_intervention['generated_sql']
+            if ";" in hsvt_result_after_intervention:
+                idx = hsvt_result_after_intervention.index(";")
+                hsvt_result_after_intervention = hsvt_result_after_intervention[:idx+1]
+            else:
+                hsvt_result_after_intervention += ";"
+            
             hsvt_intervention_score = int(hsvt_result_after_intervention == predicted_sql)
 
             if completion_type == "gold_structure":
@@ -153,7 +143,7 @@ class PAUQEvaluation:
                 local_edit_intervention_match = self.compare_sql_queries(predicted_sql,
                                                                          local_edit_result_after_intervention,
                                                                          local_edit_intervention['local_intervention'],
-                                                                         sample["db_schema"])
+                                                                         local_edit_intervention["db_schema"])
 
                 if completion_type == "gold_structure":
 
@@ -175,7 +165,7 @@ class PAUQEvaluation:
 
             global_intervention_score = 0
             for global_int in global_intervention['global_intervention']:
-                global_intervention_match = self.compare_sql_queries(predicted_sql, global_result_after_intervention, global_int, sample["db_schema"])
+                global_intervention_match = self.compare_sql_queries(predicted_sql, global_result_after_intervention, global_int, global_intervention["db_schema"])
                 global_intervention_score += global_intervention_match
             global_intervention_score //= len(global_intervention['global_intervention'])
             
