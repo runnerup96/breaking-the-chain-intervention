@@ -186,7 +186,7 @@ if __name__ == "__main__":
         evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, entailment, averitec, tabfact]")
+                                  f"Currently -- [ricechem, entailment, averitec, tabfact, pauq]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 
