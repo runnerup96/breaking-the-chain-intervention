@@ -1,9 +1,5 @@
 
 import argparse
-import llm_model
-from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
-from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
-from datasets_for_intervention import pauq_intervention, pauq_dataset, pauq_evaluation
 import hashlib
 import json
 import os
@@ -24,6 +20,7 @@ from datasets_for_intervention import entailment_intervention, entailment_datase
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
 from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
+from datasets_for_intervention import pauq_intervention, pauq_dataset, pauq_evaluation
 
 logging.set_verbosity_error()
 
