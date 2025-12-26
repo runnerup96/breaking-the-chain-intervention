@@ -154,12 +154,6 @@ class PAUQEvaluation:
                                                                          local_edit_result_after_intervention,
                                                                          local_edit_intervention['local_intervention'],
                                                                          local_edit_intervention["db_schema"])
-                if local_edit_intervention_match == 1:
-                    print(predicted_sql)
-                    print(local_edit_result_after_intervention)
-                    print(local_edit_intervention['local_intervention'])
-                    print(local_edit_intervention["db_schema"])
-                    print('=' * 100)
 
                 if completion_type == "gold_structure":
 
@@ -183,14 +177,6 @@ class PAUQEvaluation:
             for global_int in global_intervention['global_intervention']:
                 global_intervention_match = self.compare_sql_queries(predicted_sql, global_result_after_intervention, global_int, global_intervention["db_schema"])
                 global_intervention_score += global_intervention_match
-
-            # a = global_intervention_score / len(global_intervention['global_intervention'])
-            # if a >= 0.75:
-            #     print(a)
-            #     print(global_intervention['global_intervention'])
-            #     print(predicted_sql)
-            #     print(global_result_after_intervention)
-            #     print('=' * 100)
             
             global_intervention_score //= len(global_intervention['global_intervention'])
             
