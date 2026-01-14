@@ -44,7 +44,7 @@ class RiceChemEvaluation:
                     "score_match": []
                 }
             },
-            "faithfullness": {
+            "faithfulness": {
                 "with_gold_structure": {
                     "HSVT": [],
                     "Local Edits": [],  # avg here,
@@ -85,7 +85,7 @@ class RiceChemEvaluation:
                 evaluation_metrics["performance"]["with_predicted_structure"]["checklist_match"].append(checklist_match)
                 evaluation_metrics["performance"]["with_predicted_structure"]["score_match"].append(score_match)
 
-            # faithfullness metrics
+            # faithfulness metrics
             structure_intervention = sample['structure_intervention']
 
             hsvt_intervention = structure_intervention['HSVT'][0]
@@ -94,9 +94,9 @@ class RiceChemEvaluation:
             hsvt_intervention_score = self.compare_scores(expected_hsvt_edit_score, hsvt_result_after_intervention)
 
             if completion_type == "gold_structure":
-                evaluation_metrics["faithfullness"]["with_gold_structure"]["HSVT"].append(hsvt_intervention_score)
+                evaluation_metrics["faithfulness"]["with_gold_structure"]["HSVT"].append(hsvt_intervention_score)
             elif completion_type == "structure_prediction":
-                evaluation_metrics["faithfullness"]["with_predicted_structure"]["HSVT"].append(hsvt_intervention_score)
+                evaluation_metrics["faithfulness"]["with_predicted_structure"]["HSVT"].append(hsvt_intervention_score)
 
             # Local edits intervention
             local_edits_intervention = structure_intervention['Local Edits']
@@ -109,14 +109,14 @@ class RiceChemEvaluation:
 
                 if completion_type == "gold_structure":
 
-                    evaluation_metrics["faithfullness"]["with_gold_structure"]["Local Edits"].append(
+                    evaluation_metrics["faithfulness"]["with_gold_structure"]["Local Edits"].append(
                         local_edit_intervention_match)
                     evaluation_metrics["local_edit_influence"]["with_gold_structure"][task_idx][
                         intervention_idx].append(local_edit_intervention_match)
 
                 elif completion_type == "structure_prediction":
 
-                    evaluation_metrics["faithfullness"]["with_predicted_structure"]["Local Edits"].append(
+                    evaluation_metrics["faithfulness"]["with_predicted_structure"]["Local Edits"].append(
                         local_edit_intervention_match)
                     evaluation_metrics["local_edit_influence"]["with_predicted_structure"][task_idx][
                         intervention_idx].append(local_edit_intervention_match)
@@ -128,10 +128,10 @@ class RiceChemEvaluation:
             global_intervention_match = self.compare_scores(expected_global_edit_score, global_result_after_intervention)
 
             if completion_type == "gold_structure":
-                evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
+                evaluation_metrics["faithfulness"]["with_gold_structure"]["Global"].append(
                     global_intervention_match)
             elif completion_type == "structure_prediction":
-                evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
+                evaluation_metrics["faithfulness"]["with_predicted_structure"]["Global"].append(
                     global_intervention_match)
 
         aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
@@ -155,7 +155,7 @@ class RiceChemEvaluation:
         
         print("\nFaithfulness Metrics:")
         print("--------------------")
-        for structure_type, metrics in evaluation_metrics["faithfullness"].items():
+        for structure_type, metrics in evaluation_metrics["faithfulness"].items():
             print(f"\n{structure_type}:")
             for intervention_type, value in metrics.items():
                 if None not in value.values():

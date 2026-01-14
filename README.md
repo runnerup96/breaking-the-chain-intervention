@@ -46,6 +46,94 @@ You can generate the required "soft" HSVT paraphrases by leveraging the `openrou
 
 `FILL HERE on available files`
 
+## Downloading the datasets (`statics/`)
+
+This project expects the dataset artifacts to be present under:
+
+```
+${PROJECT_PATH}/statics/datasets/
+  AVeriTeC/...
+  EntailmentBank/...
+  RiceChem/...
+  TabFact/...
+```
+
+We host the redistributable files on the Hugging Face Hub in a companion dataset repository:
+
+- **HF dataset repo:** `THunderCondOR/breaking-the-chain-intervention-data`
+
+**Note (TabFact):** TabFact contains **>10,000 CSV files** in `TabFact/data/all_csv/`. Because the Hugging Face Hub enforces a **10k files per directory** limit, we store this folder as a single archive (`datasets/TabFact/data/all_csv.tar.gz`). The download helper below will automatically extract it back into `${PROJECT_PATH}/statics/datasets/TabFact/data/all_csv/` so the on-disk layout matches the original one.
+
+### Option A (recommended): one-command download + auto-extract
+
+1) Install the minimal dependency:
+
+```bash
+pip install -U huggingface_hub
+```
+
+2) Make sure `PROJECT_PATH` is set to the root of this repository:
+
+```bash
+export PROJECT_PATH=/path/to/breaking-the-chain-intervention
+```
+
+3) Download everything into `${PROJECT_PATH}/statics` (and auto-extract TabFact):
+
+```bash
+python download_datasets.py \
+  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --all
+```
+
+After this, you should have the same structure as the original `statics/` layout, including:
+
+- `${PROJECT_PATH}/statics/datasets/AVeriTeC/...`
+- `${PROJECT_PATH}/statics/datasets/EntailmentBank/...`
+- `${PROJECT_PATH}/statics/datasets/TabFact/data/all_csv/...`
+
+> The script downloads into a temporary folder under `statics/` and cleans it up at the end, so you should not end up with a persistent `.cache` directory in `statics/`.
+
+### Option B: download only selected datasets
+
+Examples:
+
+Download **only TabFact**:
+
+```bash
+python download_datasets.py \
+  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --only tabfact
+```
+
+Download **AVeriTeC + EntailmentBank**:
+
+```bash
+python download_datasets.py \
+  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --only averitec entailmentbank
+```
+
+#### Keep TabFact compressed (skip extraction)
+
+If you want to keep `all_csv.tar.gz` without unpacking:
+
+```bash
+python download_datasets.py \
+  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --only tabfact \
+  --no_extract
+```
+
+### Notes on RiceChem redistribution
+
+**RiceChem is not redistributed** in this repository due to licensing restrictions. The HF package may include an empty placeholder directory.  
+If you want to run RiceChem experiments, download it from the original source and place the files under:
+
+```
+${PROJECT_PATH}/statics/datasets/RiceChem/
+```
+
 ## How It Works
 1. **Initial Generation**: LLM generates predictions with explicit reasoning steps
 2. **Intervention**: Specific reasoning components are systematically modified

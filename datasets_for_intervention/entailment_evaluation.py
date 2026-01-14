@@ -107,7 +107,7 @@ class EntailmentEvaluation:
                     "correct_predictions_count": 0
                 }
             },
-            "faithfullness": {
+            "faithfulness": {
                 "with_gold_structure": {
                     "HSVT": [],
                     "Local Edits": [],
@@ -163,9 +163,9 @@ class EntailmentEvaluation:
             hsvt_after = hsvt["result_after_intervention"]
             hsvt_match = self.compare_binary_targets(expected_hsvt_score, hsvt_after)
             if completion_type == "gold_structure":
-                evaluation_metrics["faithfullness"]["with_gold_structure"]["HSVT"].append(hsvt_match)
+                evaluation_metrics["faithfulness"]["with_gold_structure"]["HSVT"].append(hsvt_match)
             elif completion_type == "structure_prediction":
-                evaluation_metrics["faithfullness"]["with_predicted_structure"]["HSVT"].append(hsvt_match)
+                evaluation_metrics["faithfulness"]["with_predicted_structure"]["HSVT"].append(hsvt_match)
 
             # Local edits
             local_edits = structure_intervention["Local Edits"]
@@ -175,11 +175,11 @@ class EntailmentEvaluation:
                 local_match = self.compare_binary_targets(expected_local, local_after)
 
                 if completion_type == "gold_structure":
-                    evaluation_metrics["faithfullness"]["with_gold_structure"]["Local Edits"].append(local_match)
+                    evaluation_metrics["faithfulness"]["with_gold_structure"]["Local Edits"].append(local_match)
                     if idx < len(self.modes):
                         evaluation_metrics["local_edit_influence"]["with_gold_structure"][self.modes[idx]].append(local_match)
                 elif completion_type == "structure_prediction":
-                    evaluation_metrics["faithfullness"]["with_predicted_structure"]["Local Edits"].append(local_match)
+                    evaluation_metrics["faithfulness"]["with_predicted_structure"]["Local Edits"].append(local_match)
                     if idx < len(self.modes):
                         evaluation_metrics["local_edit_influence"]["with_predicted_structure"][self.modes[idx]].append(local_match)
 
@@ -189,9 +189,9 @@ class EntailmentEvaluation:
             global_after = glob["result_after_intervention"]
             global_match = self.compare_binary_targets(expected_global, global_after)
             if completion_type == "gold_structure":
-                evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(global_match)
+                evaluation_metrics["faithfulness"]["with_gold_structure"]["Global"].append(global_match)
             elif completion_type == "structure_prediction":
-                evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(global_match)
+                evaluation_metrics["faithfulness"]["with_predicted_structure"]["Global"].append(global_match)
 
         aggregated = self.summarize_nested_lists(evaluation_metrics)
         self.print_evaluation_metrics(aggregated)
@@ -218,7 +218,7 @@ class EntailmentEvaluation:
 
         print("\nFaithfulness Metrics:")
         print("--------------------")
-        for structure_type, metrics in evaluation_metrics["faithfullness"].items():
+        for structure_type, metrics in evaluation_metrics["faithfulness"].items():
             print(f"\n{structure_type}:")
             for intervention_type, stats in metrics.items():
                 mean_val = stats["mean"] if isinstance(stats, dict) else stats

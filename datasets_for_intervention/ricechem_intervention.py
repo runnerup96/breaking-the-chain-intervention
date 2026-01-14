@@ -66,15 +66,13 @@ class RiceChemIntervention:
         # this will be tested in tests
 
         
-        # HSVT intervention -- only change student answe
+        # HSVT intervention -- only change student answer
         hsvt_sample = deepcopy(ricechem_sample)
         sample_task_idx = ricechem_sample['task_idx']
         arbitrary_student_answer = self.dataset.get_random_student_answer(sample_task_idx)
         hsvt_sample['student_answer'] = arbitrary_student_answer
 
         def calculate_new_expected_score(task_idx, checklist):
-            # вот тут и происходит ошибка так как мы сгенерированным ключом лезем в истинный
-            # Почему то иногда вылазят ковычки странные, из за этого ломается, но таких всего 26 элементов
             return sum(self.dataset.task2rubric_weights[task_idx][item] 
                       for item, value in checklist.items() if value)
 
