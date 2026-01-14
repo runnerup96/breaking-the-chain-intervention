@@ -20,6 +20,7 @@ from datasets_for_intervention import entailment_intervention, entailment_datase
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
 from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
+from datasets_for_intervention import pauq_intervention, pauq_dataset, pauq_evaluation
 
 logging.set_verbosity_error()
 
@@ -108,6 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--try_one_batch", type=bool, default=False)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--prompting_regime", type=str,
                         choices=["baseline_structure_faithfulness", "detailed_instruction"], default="baseline_structure_faithfulness")
     parser.add_argument("--use_api", action="store_true")
@@ -170,6 +172,11 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model, prompt_type=args.prompting_regime)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
+    elif args.evaluation_dataset == "pauq":
+        dataset = pauq_dataset.PAUQDataset(args.data_path)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
+        intervention_logic = pauq_intervention.PAUQIntervention(dataset, llm_model)
+        evaluator = pauq_evaluation.PAUQEvaluation(dataset)
     elif args.evaluation_dataset == "tabfact":
         dataset_path = os.path.join(project_path, "statics/datasets/TabFact")
         dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap_full.json',
@@ -179,7 +186,7 @@ if __name__ == "__main__":
         evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, entailment, averitec, tabfact]")
+                                  f"Currently -- [ricechem, entailment, averitec, tabfact, pauq]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 
@@ -197,7 +204,7 @@ if __name__ == "__main__":
                                                           skip_special_tokens=False)
         promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
         gold_structure_outputs = llm_model.generate(promted_batch_with_gold_structure,
-                                                    max_new_tokens=10,
+                                                    max_new_tokens=30,
                                                     skip_special_tokens=False)
         # Combine outputs and completion types
         batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
@@ -211,7 +218,7 @@ if __name__ == "__main__":
             try:
                 sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
                 prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
-                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
+                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=100,
                                                                 skip_special_tokens=True)
                 # parse completions to final structure
                 final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)

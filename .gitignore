@@ -6,8 +6,8 @@ intervention_predictions/
 __pycache__/
 artifacts/
 *.ipynb
-*.ipynb
 
 entailment_trees_emnlp2021_data_v3
 logs
 plots
+.idea
