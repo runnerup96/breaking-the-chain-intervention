@@ -3,7 +3,7 @@ from copy import deepcopy
 import json
 import random
 import re
-from .utils import extract_data_from_response
+from .utils import parse_model_response
 
 
 class PAUQIntervention:
@@ -39,7 +39,13 @@ class PAUQIntervention:
             sample['structure_intervention'][intervention_type][idx]['generated_output'] = completion
             sample['structure_intervention'][intervention_type][idx]['generated_sql'] = extracted
         return sample
-    
+
+    def update_slots(self, sample: dict, name: str, new_name: str):
+        # assert name in sample["slots"]
+        if name in sample["slots"]:
+            idx = sample["slots"].index(name)
+            sample["slots"][idx] = new_name
+
     def make_local_intervention(self, sample: dict, intervention_type: str = "column"):
         table_name = random.choice(list(sample["schema_links"].keys()))
         db_schema = sample["db_schema"]
@@ -64,6 +70,10 @@ class PAUQIntervention:
                 db_schema[table_name].append(other_column)
                 db_schema[table_name] = list(set(db_schema[table_name]))
             columns[column_idx] = other_column
+
+            # Intervene slots
+            self.update_slots(sample, column_name, other_column)
+            
         elif intervention_type == "table":
             # Table name
             table_names = sample["db"]["table_names_original"]
@@ -81,6 +91,9 @@ class PAUQIntervention:
             columns = sample["schema_links"][table_name][:]
             del sample["schema_links"][table_name]
             sample["schema_links"][other_table_name] = columns
+
+            # Intervene slots
+            self.update_slots(sample, table_name, other_table_name)
 
         sample["local_intervention"] = intervention
 
@@ -103,7 +116,9 @@ class PAUQIntervention:
             random_schema_links[random_table] = random_columns_link
             for old_column, new_column in zip(schema_links[table_name], random_columns_link):
                 intervention.append({"type": "column", "before": old_column, "after": new_column})
+                self.update_slots(sample, old_column, new_column)
             intervention.append({"type": "table", "before": table_name, "after": random_table})
+            self.update_slots(sample, table_name, random_table)
             db_schema[random_table] = self.dataset.dummy_tables[random_table][:]
         sample["schema_links"] = random_schema_links
         sample["global_intervention"] = intervention
@@ -115,14 +130,19 @@ class PAUQIntervention:
         if sample["completion_type"] == "gold_structure":
             sample["generated_sql"] = completion.strip()
             sample["schema_links"] = copy.deepcopy(sample["true_schema_links"])
+            sample["skeleton"] = copy.deepcopy(sample["true_skeleton"])
+            sample["slots"] = copy.deepcopy(sample["true_slots"])
         elif sample["completion_type"] == "structure_prediction":
-            json_completion = extract_data_from_response(completion)
+            # json_completion = extract_data_from_response(completion)
+            json_completion = parse_model_response(completion)
             schema_links_json = json_completion["schema_links"]
             schema_links = {}
             for item in schema_links_json:
                 schema_links[item["table"]] = item["columns"]
             sample["schema_links"] = schema_links
             sample["generated_sql"] = json_completion["sql"]
+            sample["skeleton"] = json_completion["skeleton"]
+            sample["slots"] = json_completion["slots"]
         else:
             raise NotImplementedError
         interventions = self.make_structure_intervention(sample)
@@ -164,71 +184,114 @@ class PAUQIntervention:
 
         user_prompt = (
             f"You are an expert in natural language understanding and SQL queries generation.\n"
-            f"Given a natural language question and a database schema, perform two steps:\n\n"
-    
-            f"1. Schema Linking: Based on the question identify which tables and columns in the schema are relevant to answer the question.\n"
-            f"2. SQL Generation: Write a correct, executable SQL query that answers the question, using the linked schema elements.\n\n"
-    
+            f"Given a natural language question and a database schema, perform 4 steps:\n\n"
+        
+            f"1. SQL Skeleton Generation: Derive the abstract syntactic structure of the SQL query that answers the question."
+            f"Replace all concrete identifiers (table names, column names, literals, etc.) with generic placeholders SLOT_1, SLOT_2, ..., in the order they appear."
+            f"The skeleton must be valid SQL syntax except for the use of SLOT_* tokens.\n"
+            f"2. Schema Linking: Based on the question identify which tables and columns in the schema are relevant to answer the question.\n"
+            f"3. Slot Matching: For each SLOT_i in the skeleton, map it to the exact identifier from the provided schema or a literal value derived from the question."
+            f"Use only:\n"
+            f"Column names (e.g., capacity)\n"
+            f"Table names (e.g., stadium)\n"
+            f"Numeric or string literals (e.g., 56, '2020%')\n"
+            f"Do not infer semantics; match based on the question intent and schema content.\n"
+            f"4. SQL Generation: Substitute all SLOT_i tokens in the skeleton with their matched identifiers to produce a syntactically correct, executable SQL query."
+            f"The query must:\n"
+            f"- Use only tables and columns from the given schema\n"
+            f"- Answer the question exactly\n"
+            f"Be written in standard SQL (no markdown, no comments, no extra text)\n\n"
+        
             f"Output Format\n"
-            f"Return the answer in the exact following format:\n"
-    
+            f"Return only the following, with no additional explanations or formatting:\n"
+        
             f"Output:\n"
+            f"===SKELETON===\n"
+            f"[SQL skeleton with SLOT tokens]\n"
             f"===SCHEMA_LINKS===\n"
             f"table1:col1,col2\n"
             f"table2:col1,col2\n"
+            f"...\n"
+            f"===SLOT_MATCHING===\n"
+            f"SLOT_1:[value]\n"
+            f"SLOT_2:[value]\n"
+            f"...\n"
             f"===SQL===\n"
-            f"SELECT ... FROM ... WHERE ...;\n\n"
-    
+            f"[final executable SQL query]\n\n"
+        
             f"Rules:\n"
-            f"- List all relevant tables and their columns in schema links\n"
+            f"- Never include real identifiers in the skeleton.\n"
+            f"- Every SLOT_i must appear in both SKELETON and SLOT_MATCHING.\n"
             f"- Write a valid SQL query string without markdown, without extra text\n"
             f"- Only output in the specified format. Do not add explanations.\n"
-            f"- Do not pay attention to the name semantics of columns and tables, rely more on schema links.\n\n"
-    
+            f"- Do not pay attention to the name semantics of columns and tables, rely more on slot matching.\n"
+            f"- String literals must be enclosed in single quotes; numeric literals must not be quoted.\n\n"
+        
             f"Few-Shot Examples\n"
             f"Example 1\n"
             f'Question: "How many heads of the departments are older than 56?"\n\n'
-    
+        
             f"Schema:\n"
             f"Table: head\n"
             f"Columns: head_id, name, age\n"
             f"Table: department\n"
             f"Columns: dept_id, name, budget\n\n"
-    
+        
             f"Output:\n"
+            f"===SKELETON===\n"
+            f"SELECT COUNT(SLOT_1) FROM SLOT_2 WHERE SLOT_3 > SLOT_4;\n"
             f"===SCHEMA_LINKS===\n"
             f"head:age\n"
+            f"===SLOT_MATCHING===\n"
+            f"SLOT_1:*\n"
+            f"SLOT_2:head\n"
+            f"SLOT_3:age\n"
+            f"SLOT_4:56\n"
             f"===SQL===\n"
             f"SELECT COUNT(*) FROM head WHERE age > 56;\n\n"
-    
+        
             f"Example 2\n"
             f'Question: "List the names of departments with budget over 1 million."\n\n'
-    
+        
             f"Schema:\n"
             f"Table: department\n"
             f"Columns: dept_id, name, budget\n"
             f"Table: employee\n"
             f"Columns: emp_id, name, salary\n\n"
-    
+        
             f"Output:\n"
+            f"===SKELETON===\n"
+            f"SELECT SLOT_1 FROM SLOT_2 WHERE SLOT_3 > SLOT_4;\n"
             f"===SCHEMA_LINKS===\n"
             f"department:name,budget\n"
+            f"===SLOT_MATCHING===\n"
+            f"SLOT_1:name\n"
+            f"SLOT_2:department\n"
+            f"SLOT_3:budget\n"
+            f"SLOT_4:1000000\n"
             f"===SQL===\n"
             f"SELECT name FROM department WHERE budget > 1000000;\n\n"
-    
+        
             f"Example 3\n"
             f'Question: "What is the average salary of employees hired in 2020?"\n\n'
-    
+        
             f"Schema:\n"
             f"Table: employee\n"
             f"Columns: emp_id, name, salary, hire_date\n\n"
-    
+        
             f"Output:\n"
+            f"===SKELETON===\n"
+            f"SELECT AVG(SLOT_1) FROM SLOT_2 WHERE SLOT_3 LIKE SLOT_4;\n"
             f"===SCHEMA_LINKS===\n"
             f"employee:salary,hire_date\n"
+            f"===SLOT_MATCHING===\n"
+            f"SLOT_1:salary\n"
+            f"SLOT_2:employee\n"
+            f"SLOT_3:hire_date\n"
+            f"SLOT_4:'2020%'\n"
             f"===SQL===\n"
             f"SELECT AVG(salary) FROM employee WHERE hire_date LIKE '2020%';\n\n"
-    
+        
             f"Now process the following:\n"
             f'Question: "{question}"\n'
             f"Schema:\n"
@@ -236,13 +299,25 @@ class PAUQIntervention:
             f"Output:\n"
         )
         
-        if include_gold_structure and not "schema_links" in sample:
-            sample["schema_links"] = deepcopy(sample["true_schema_links"])
+        if include_gold_structure:
+            if "schema_links" not in sample:
+                sample["schema_links"] = deepcopy(sample["true_schema_links"])
+            if "skeleton" not in sample:
+                sample["skeleton"] = deepcopy(sample["true_skeleton"])
+            if "slots" not in sample:
+                sample["slots"] = deepcopy(sample["true_slots"])
+            
         
         messages = [{"role": "user", "content": user_prompt}]
         add_generation_prompt_status = True
 
         if include_gold_structure:
+            # Add skeleton
+            mediator_string = "===SKELETON===\n"
+            mediator_string += sample["skeleton"]
+            mediator_string += "\n"
+
+            # Add schema links
             schema_links_string = "===SCHEMA_LINKS===\n"
             for table_name in sample['schema_links']:
                 schema_links_string += table_name
@@ -252,8 +327,16 @@ class PAUQIntervention:
                     schema_links_string += ","
                 schema_links_string = schema_links_string[:-1]
                 schema_links_string += "\n"
-            schema_links_string += "===SQL==="
-            messages.append({"role": "assistant", "content": schema_links_string})
+            mediator_string += schema_links_string
+
+            # Add slots matching
+            mediator_string += "===SLOT_MATCHING===\n"
+            for i, slot in enumerate(sample["slots"]):
+                mediator_string += f"SLOT_{i}:{slot}\n"
+
+            # Add final SQL
+            mediator_string += "===SQL==="
+            messages.append({"role": "assistant", "content": mediator_string})
             add_generation_prompt_status = False
 
         prompt = self.llm_model.apply_chat_template(

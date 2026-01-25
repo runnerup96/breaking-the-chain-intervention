@@ -2,9 +2,11 @@ import re
 import json
 from typing import List, Dict, Any
 import sys
+from sql_metadata import Parser
 
 sys.path.append("/home/jovyan/kmvafin/research/test-suite-sql-eval")
 import evaluation
+
 
 def parse_sql(query, db_schema):
     """
@@ -126,166 +128,161 @@ def validate_generated_sql(true_sql: str, generated_sql: str, db_schema: dict) -
 
     return true_parsed == pred_parsed
 
-# def _is_subselect(parsed):
-#     if not parsed.is_group:
-#         return False
-#     return any(token.ttype is DML and token.value.upper() == "SELECT"
-#                for token in parsed.tokens)
+
+def convert_db_schema(db_schema):
+    result = {}
+    result["schema_items"] = []
+    for table in db_schema:
+        result["schema_items"].append({"table_name_original": table, "column_names_original": db_schema[table]})
+    return result
 
 
-# def _extract_from_part(statement):
-#     """
-#     Возвращает токены, соответствующие части FROM ... (включая JOIN).
-#     """
-#     from_seen = False
-#     from_tokens = []
-#     for token in statement.tokens:
-#         if from_seen:
-#             if token.ttype is Keyword and token.value.upper() in (
-#                 "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION", "INTERSECT", "EXCEPT"
-#             ):
-#                 break
-#             from_tokens.append(token)
-#         if token.ttype is Keyword and token.value.upper() == "FROM":
-#             from_seen = True
-#     return from_tokens
+def isNegativeInt(string):
+    if string.startswith("-") and string[1:].isdigit():
+        return True
+    else:
+        return False
 
 
-# def _get_tables(statement):
-#     """
-#     Возвращает set с именами таблиц (без алиасов).
-#     """
-#     tables = set()
-#     from_tokens = _extract_from_part(statement)
+def isFloat(string):
+    if string.startswith("-"):
+        string = string[1:]
+    
+    s = string.split(".")
+    if len(s)>2:
+        return False
+    else:
+        for s_i in s:
+            if not s_i.isdigit():
+                return False
+        return True
+        
+    
+def extract_skeleton_and_slots(sql: str, db_schema: dict) -> str:
+    table_names_original, column_names_original, table_dot_column_names_original = [], [], []
+    db_schema = convert_db_schema(db_schema)
+    
+    for table in db_schema["schema_items"]:
+        t_name = table["table_name_original"]
+        table_names_original.append(t_name)
+        for col in ["*"] + table["column_names_original"]:
+            table_dot_column_names_original.append(f"{t_name}.{col}")
+            column_names_original.append(col)
 
-#     def extract_from_identifier(idt: Identifier):
-#         real_name = idt.get_real_name() or idt.get_name()
-#         if real_name:
-#             tables.add(real_name)
+    parsed_sql = Parser(sql)
+    masked_tokens = []
+    slots = []
+    i = 1
+    for tok in parsed_sql.tokens:
+        val = tok.value.strip()
+        if not val:
+            continue
 
-#     for token in from_tokens:
-#         if isinstance(token, IdentifierList):
-#             for idt in token.get_identifiers():
-#                 if isinstance(idt, Identifier):
-#                     extract_from_identifier(idt)
-#         elif isinstance(token, Identifier):
-#             extract_from_identifier(token)
-#         elif _is_subselect(token):
-#             # подзапросы во FROM
-#             for sub in token.tokens:
-#                 if isinstance(sub, sqlparse.sql.Statement):
-#                     tables |= _get_tables(sub)
+        if val in table_names_original:
+            masked_tokens.append(f"SLOT_{i}")
+            i += 1
+            slots.append(val)
+        elif val in column_names_original or val in table_dot_column_names_original:
+            masked_tokens.append(f"SLOT_{i}")
+            i += 1
+            slots.append(val)
+        elif val.startswith("'") and val.endswith("'"):
+            masked_tokens.append(f"SLOT_{i}")
+            i += 1
+            slots.append(val)
+        elif val.isdigit() or isNegativeInt(val) or isFloat(val):
+            masked_tokens.append(f"SLOT_{i}")
+            i += 1
+            slots.append(val)
+        else:
+            masked_tokens.append(val)
 
-#     return tables
+    skeleton = " ".join(masked_tokens)
 
-
-# def _extract_select_part(statement):
-#     """
-#     Возвращает токены, соответствующие части SELECT ... (до FROM).
-#     """
-#     select_seen = False
-#     select_tokens = []
-#     for token in statement.tokens:
-#         if token.ttype is DML and token.value.upper() == "SELECT":
-#             select_seen = True
-#             continue
-#         if select_seen:
-#             if token.ttype is Keyword and token.value.upper() == "FROM":
-#                 break
-#             select_tokens.append(token)
-#     return select_tokens
-
-
-# def _get_columns_from_select(statement):
-#     """
-#     Возвращает set имён колонок, встречающихся в SELECT.
-#     """
-#     select_tokens = _extract_select_part(statement)
-#     cols = set()
-
-#     for token in select_tokens:
-#         if isinstance(token, IdentifierList):
-#             for idt in token.get_identifiers():
-#                 if isinstance(idt, Identifier):
-#                     col = idt.get_real_name() or idt.get_name()
-#                     if col:
-#                         cols.add(col)
-#         elif isinstance(token, Identifier):
-#             col = token.get_real_name() or token.get_name()
-#             if col:
-#                 cols.add(col)
-#         elif isinstance(token, Function):
-#             # Например COUNT(col) -> попробуем вытащить аргументы
-#             for t in token.tokens:
-#                 if isinstance(t, Identifier):
-#                     col = t.get_real_name() or t.get_name()
-#                     if col:
-#                         cols.add(col)
-#         # остальное (звёздочки, литералы) игнорируем
-#     return cols
+    while "  " in skeleton:
+        skeleton = skeleton.replace("  ", " ")
+    while " ," in skeleton:
+        skeleton = skeleton.replace(" ,", ",")
+    while " ;" in skeleton:
+        skeleton = skeleton.replace(" ;", ";")
+    return skeleton.strip(), slots
 
 
-# def _get_where_token(statement):
-#     for token in statement.tokens:
-#         if isinstance(token, Where):
-#             return token
-#     return None
+def parse_model_response(output_str):
+    """
+    Парсит строку с результатом и извлекает skeleton, schema_links, slot_matching и sql.
+    
+    Args:
+        output_str (str): Строка в формате с метками ===SKELETON===, ===SCHEMA_LINKS=== и т.д.
+    
+    Returns:
+        dict: Словарь с ключами 'sql', 'schema_links', 'slots', 'skeleton'
+    """
+    lines = output_str.strip().split('\n')
+    
+    skeleton = None
+    schema_links_str = None
+    slot_matching_lines = []
+    sql = None
+    current_section = None
+    
+    for line in lines:
+        line = line.strip()
+        
+        if line.startswith('==='):
+            if 'SKELETON===' in line:
+                current_section = 'SKELETON'
+            elif 'SCHEMA_LINKS===' in line:
+                current_section = 'SCHEMA_LINKS'
+            elif 'SLOT_MATCHING===' in line:
+                current_section = 'SLOT_MATCHING'
+            elif 'SQL===' in line:
+                current_section = 'SQL'
+            else:
+                current_section = None
+        elif current_section:
+            if line:
+                if current_section == 'SKELETON' and skeleton is None:
+                    skeleton = line
+                elif current_section == 'SCHEMA_LINKS' and schema_links_str is None:
+                    schema_links_str = line
+                elif current_section == 'SLOT_MATCHING':
+                    slot_matching_lines.append(line)
+                elif current_section == 'SQL' and sql is None:
+                    sql = line
+    
+    schema_links = {}
+    if schema_links_str:
+        if ':' in schema_links_str:
+            table, columns = schema_links_str.split(':', 1)
+            table = table.strip()
+            columns_list = [col.strip() for col in columns.split(',')]
+            schema_links[table] = columns_list
+    
+    slots = []
+    if slot_matching_lines:
+        slot_dict = {}
+        for slot_line in slot_matching_lines:
+            if ':' in slot_line:
+                slot_name, slot_value = slot_line.split(':', 1)
+                if slot_name.startswith('SLOT_'):
+                    slot_num = int(slot_name.replace('SLOT_', ''))
+                    slot_dict[slot_num] = slot_value.strip()
+        for i in range(1, max(slot_dict.keys()) + 1):
+            if i in slot_dict:
+                slots.append(slot_dict[i])
 
-
-# def _get_columns_from_where(where_token):
-#     """
-#     Возвращает set имён колонок, встречающихся в WHERE.
-#     """
-#     if where_token is None:
-#         return set()
-
-#     cols = set()
-
-#     def walk(token):
-#         if isinstance(token, IdentifierList):
-#             for t in token.get_identifiers():
-#                 walk(t)
-#         elif isinstance(token, Identifier):
-#             col = token.get_real_name() or token.get_name()
-#             if col:
-#                 cols.add(col)
-#         elif token.is_group:
-#             for t in token.tokens:
-#                 walk(t)
-
-#     walk(where_token)
-#     return cols
-
-
-# def extract_tables_and_columns(sql: str):
-#     """
-#     Парсит SQL-запрос и возвращает словарь вида:
-#     {
-#         "tables": [...],
-#         "column": [...],
-#     }
-
-#     Таблицы берутся из FROM / JOIN.
-#     Колонки — из SELECT и WHERE (можно расширить при необходимости).
-#     """
-#     parsed = sqlparse.parse(sql)
-#     if not parsed:
-#         return {"tables": [], "column": []}
-
-#     statement = parsed[0]
-
-#     tables = _get_tables(statement)
-#     cols_select = _get_columns_from_select(statement)
-#     where_token = _get_where_token(statement)
-#     cols_where = _get_columns_from_where(where_token)
-
-#     columns = cols_select | cols_where
-
-#     return {
-#         "tables": sorted(tables),
-#         "column": sorted(columns),
-#     }
-
+    schema_links_list = [{"table": table_name, "columns": columns} for table_name, columns in schema_links.items()]
+    
+    result = {
+        'sql': sql,
+        'schema_links': schema_links_list,
+        'slots': slots,
+        'skeleton': skeleton
+    }
+    
+    return result
+    
 
 if __name__ == '__main__':
     query = "SELECT name, email FROM users;"
@@ -297,3 +294,35 @@ if __name__ == '__main__':
     print(parsed)
     print(extract_schema_links(parsed))
     print(validate_generated_sql(query, query2, db_schema))
+
+    print(extract_skeleton_and_slots(query, {"users": ["name", "email"]}))
+    test_string = f"Output:\n" \
+                      f"===SKELETON===\n" \
+                      f"SELECT COUNT(SLOT_1) FROM SLOT_2 WHERE SLOT_3 > SLOT_4;\n" \
+                      f"===SCHEMA_LINKS===\n" \
+                      f"head:age\n" \
+                      f"===SLOT_MATCHING===\n" \
+                      f"SLOT_1:*\n" \
+                      f"SLOT_2:head\n" \
+                      f"SLOT_3:age\n" \
+                      f"SLOT_4:56\n" \
+                      f"===SQL===\n" \
+                      f"SELECT COUNT(*) FROM head WHERE age > 56;\n\n"
+    
+    result = parse_model_response(test_string)
+    print("Результат парсинга:")
+    print(result)
+    print()
+    
+    # Проверяем соответствие ожидаемому результату
+    expected = {
+        'sql': "SELECT COUNT(*) FROM head WHERE age > 56;",
+        'schema_links': {"head": ["age"]},
+        'slots': ['*', 'head', 'age', '56'],
+        'skeleton': "SELECT COUNT(SLOT_1) FROM SLOT_2 WHERE SLOT_3 > SLOT_4;"
+    }
+    
+    print("Ожидаемый результат:")
+    print(expected)
+    print()
+    print("Результаты совпадают?", result == expected)

@@ -1,9 +1,9 @@
 import json
 import os
 if __name__ == "__main__":
-    from utils import extract_schema_links, parse_sql
+    from utils import extract_schema_links, parse_sql, extract_skeleton_and_slots
 else:
-    from .utils import extract_schema_links, parse_sql
+    from .utils import extract_schema_links, parse_sql, extract_skeleton_and_slots
 import copy
 
 
@@ -62,6 +62,9 @@ class PAUQDataset:
             }
             parsed_sql = parse_sql(row["query"], row["db_schema"])
             row["true_schema_links"] = extract_schema_links(parsed_sql)
+            skeleton, slots = extract_skeleton_and_slots(row["query"], row["db_schema"])
+            row["true_skeleton"] = skeleton
+            row["true_slots"] = slots
             if row["true_schema_links"]:
                 self.data.append(row)
                 self.sample_idx2idx[idx] = i
