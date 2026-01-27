@@ -67,7 +67,7 @@ for model_name in "${models[@]}"; do
         
         echo "Running: $simple_model_name on $evaluation_dataset with batch_size=$batch_size"
 
-        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_intervention.py \
+        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_correction.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
             --batch_size '$batch_size'" ENTER

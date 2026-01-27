@@ -174,3 +174,96 @@ class RiceChemEvaluation:
                         print(f"    Edit {edit_id}: mean = {value['mean']}, std = {value['std']}")
                     else:
                         print(f"    Edit {edit_id}: mean = No, std = No")
+
+
+class RiceChemCorrectionEvaluation:
+    def __init__(self, dataset):
+        self.dataset = dataset
+
+        self.idx2gold_rubric = {s["idx"]: s["golden_rubric"] for s in dataset}
+        self.idx2gold_score = {s["idx"]: s["golden_score"] for s in dataset}
+        self.idx2bad_rubric = {s["idx"]: s["bad_rubric"] for s in dataset}
+
+    def compare_checklists(self, gold_checklist, predicted_checklist):
+        # same behavior as before: missing key => mismatch
+        for item, answer in gold_checklist.items():
+            if item not in predicted_checklist or predicted_checklist[item] != answer:
+                return 0
+        return 1
+
+    def compare_scores(self, gold_score, predicted_score, *, atol=1e-3):
+        if gold_score is None or predicted_score is None:
+            return 0
+        return 1 if isclose(gold_score, predicted_score, abs_tol=atol) else 0
+
+    def summarize_nested_lists(self, tree):
+        if isinstance(tree, dict):
+            return {k: self.summarize_nested_lists(v) for k, v in tree.items()}
+        elif isinstance(tree, list):
+            if not all(isinstance(x, (int, float)) for x in tree):
+                raise TypeError("All list elements must be int or float.")
+            if len(tree) == 0:
+                return {"mean": None, "std": None}
+            return {"mean": round(mean(tree), 3), "std": round(pstdev(tree), 3)}
+        else:
+            raise TypeError("Leaf values must be lists; found non-list leaf instead.")
+
+    def evaluate(self, processed_samples_list):
+        evaluation_metrics = {
+            "performance": {
+                "with_bad_structure": {
+                    "checklist_match": [],
+                    "score_match": [],
+                },
+                "with_corrected_structure": {
+                    "score_match": [],
+                },
+            },
+            "faithfulness": {
+                "correction": [],  # identical to score_match after correction (expected = golden_score)
+            },
+        }
+
+        for sample in processed_samples_list:
+            idx = sample["idx"]
+            gold_rubric = self.idx2gold_rubric[idx]
+            gold_score = self.idx2gold_score[idx]
+            bad_rubric = self.idx2bad_rubric[idx]
+
+            bad_score_pred = sample.get("generated_score_before_intervention")
+            evaluation_metrics["performance"]["with_bad_structure"]["checklist_match"].append(
+                self.compare_checklists(gold_rubric, bad_rubric)
+            )
+            evaluation_metrics["performance"]["with_bad_structure"]["score_match"].append(
+                self.compare_scores(gold_score, bad_score_pred)
+            )
+
+            corrected = sample["structure_intervention"]["correction"][0]
+            corrected_score_pred = corrected.get("score_after_intervention")
+            after = self.compare_scores(gold_score, corrected_score_pred)
+            evaluation_metrics["performance"]["with_corrected_structure"]["score_match"].append(after)
+            evaluation_metrics["faithfulness"]["correction"].append(after)
+
+        aggregated = self.summarize_nested_lists(evaluation_metrics)
+        self.print_evaluation_metrics(aggregated)
+        return aggregated
+
+    def print_evaluation_metrics(self, evaluation_metrics):
+        print("\nEvaluation Results (RiceChem Correction):")
+        print("========================================")
+
+        print("\nPerformance:")
+        for structure_type, metrics in evaluation_metrics["performance"].items():
+            print(f"\n{structure_type}:")
+            for metric_name, value in metrics.items():
+                if None not in value.values():
+                    print(f"  {metric_name}: mean = {value['mean']}, std = {value['std']}")
+                else:
+                    print(f"  {metric_name}: mean = No, std = No")
+
+        print("\nFaithfulness:")
+        for metric_name, value in evaluation_metrics["faithfulness"].items():
+            if None not in value.values():
+                print(f"  {metric_name}: mean = {value['mean']}, std = {value['std']}")
+            else:
+                print(f"  {metric_name}: mean = No, std = No")
