@@ -20,7 +20,7 @@ from datasets_for_intervention import entailment_intervention, entailment_datase
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
 from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
-from datasets_for_intervention import pauq_intervention, pauq_dataset, pauq_evaluation
+from datasets_for_intervention import pauq_intervention_2, pauq_dataset, pauq_evaluation
 
 logging.set_verbosity_error()
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     elif args.evaluation_dataset == "pauq":
         dataset = pauq_dataset.PAUQDataset(args.data_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = pauq_intervention.PAUQIntervention(dataset, llm_model)
+        intervention_logic = pauq_intervention_2.PAUQIntervention(dataset, llm_model)
         evaluator = pauq_evaluation.PAUQEvaluation(dataset)
     elif args.evaluation_dataset == "tabfact":
         dataset_path = os.path.join(project_path, "statics/result_splits/Table-Fact-Checking")
@@ -204,7 +204,7 @@ if __name__ == "__main__":
                                                           skip_special_tokens=False)
         promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
         gold_structure_outputs = llm_model.generate(promted_batch_with_gold_structure,
-                                                    max_new_tokens=30,
+                                                    max_new_tokens=100,
                                                     skip_special_tokens=False)
         # Combine outputs and completion types
         batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
@@ -218,7 +218,7 @@ if __name__ == "__main__":
             try:
                 sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
                 prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
-                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=100,
+                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=200,
                                                                 skip_special_tokens=True)
                 # parse completions to final structure
                 final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)

@@ -1,47 +1,47 @@
-from .utils import validate_generated_sql, extract_schema_links, parse_sql
+if __name__ == "__main__":
+    from utils import validate_generated_sql, extract_schema_links, parse_sql
+    from pauq_dataset import PAUQDataset
+else:
+    from .utils import validate_generated_sql, extract_schema_links, parse_sql
 from statistics import mean, pstdev
 
 
 class PAUQEvaluation:
-    def __init__(self, dataset=None):
+    def __init__(self, dataset):
         self.dataset = dataset
 
         self.idx2gold_schema_links = {sample['index']: sample['true_schema_links'] for sample in dataset}
         self.idx2gold_sql = {sample['index']: sample['query'] for sample in dataset}
 
-    def compare_sql_queries(self, query_before: str, query_after: str, intervention: dict[str, str], db_schema: dict) -> bool:
-        intervention_type = intervention["type"]
-        before = intervention["before"]
-        after = intervention["after"]
-
+    def compare_sql_queries(self, query_before: str, query_after: str, intervention_list: dict[str, str], db_schema: dict) -> bool:
         schema_links_before = extract_schema_links(parse_sql(query_before, db_schema))
         schema_links_after = extract_schema_links(parse_sql(query_after, db_schema))
+        
+        for intervention in intervention_list:
+            intervention_type = intervention["type"]
+            before = intervention["before"]
+            after = intervention["after"]
+    
+            if intervention_type == "column":
+                found = False
+                for table_name in schema_links_after:
+                    schema_links_after[table_name] = list(set(schema_links_after[table_name]))
+                    if after in schema_links_after[table_name]:
+                        after_idx = schema_links_after[table_name].index(after)
+                        schema_links_after[table_name][after_idx] = before
+                        found = True
+                if not found:
+                    return False
+                    
+            elif intervention_type == "table":
+                if after not in schema_links_after:
+                    return False
+                columns = schema_links_after[after][:]
+                del schema_links_after[after]
+                schema_links_after[before] = columns
+            else:
+                raise NotImplementedError
 
-        if intervention_type == "column":
-            # for columns_list in schema_links_after.values():
-            #     columns_list = list(set(columns_list))
-            #     if after in columns_list:
-            #         after_idx = columns_list.index(after)
-            #         columns_list[after_idx] = before
-            found = False
-            for table_name in schema_links_after:
-                schema_links_after[table_name] = list(set(schema_links_after[table_name]))
-                if after in schema_links_after[table_name]:
-                    after_idx = schema_links_after[table_name].index(after)
-                    schema_links_after[table_name][after_idx] = before
-                    found = True
-            if not found:
-                return False
-                
-        elif intervention_type == "table":
-            if after not in schema_links_after:
-                return False
-            columns = schema_links_after[after][:]
-            del schema_links_after[after]
-            schema_links_after[before] = columns
-        else:
-            raise NotImplementedError
-            
         return self.compare_schema_links(schema_links_before, schema_links_after)
     
     def validate_generated_sql(self, true_sql: str, generated_sql: str, db_schema: dict) -> bool:
@@ -120,7 +120,7 @@ class PAUQEvaluation:
 
             schema_links_match = self.compare_schema_links(gold_schema_links, predicted_schema_links)
             sql_match = self.validate_generated_sql(gold_sql, predicted_sql, sample["db_schema"])
-
+                
             if completion_type == "gold_structure":
                 evaluation_metrics["performance"]["with_gold_structure"]["sql_match"].append(sql_match)
             elif completion_type == "structure_prediction":
@@ -137,8 +137,8 @@ class PAUQEvaluation:
                 hsvt_result_after_intervention = hsvt_result_after_intervention[:idx+1]
             else:
                 hsvt_result_after_intervention += ";"
-            
-            hsvt_intervention_score = int(hsvt_result_after_intervention == predicted_sql)
+
+            hsvt_intervention_score = self.validate_generated_sql(predicted_sql, hsvt_result_after_intervention, sample["db_schema"])
 
             if completion_type == "gold_structure":
                 evaluation_metrics["faithfullness"]["with_gold_structure"]["HSVT"].append(hsvt_intervention_score)
@@ -152,7 +152,7 @@ class PAUQEvaluation:
 
                 local_edit_intervention_match = self.compare_sql_queries(predicted_sql,
                                                                          local_edit_result_after_intervention,
-                                                                         local_edit_intervention['local_intervention'],
+                                                                         [local_edit_intervention['local_intervention']],
                                                                          local_edit_intervention["db_schema"])
 
                 if completion_type == "gold_structure":
@@ -173,12 +173,13 @@ class PAUQEvaluation:
             global_intervention = structure_intervention['Global'][0]
             global_result_after_intervention = global_intervention['generated_sql']
 
-            global_intervention_score = 0
-            for global_int in global_intervention['global_intervention']:
-                global_intervention_match = self.compare_sql_queries(predicted_sql, global_result_after_intervention, global_int, global_intervention["db_schema"])
-                global_intervention_score += global_intervention_match
-            
-            global_intervention_score //= len(global_intervention['global_intervention'])
+            global_intervention_match = self.compare_sql_queries(
+                predicted_sql,
+                global_result_after_intervention,
+                global_intervention['global_intervention'],
+                global_intervention["db_schema"]
+            )
+            global_intervention_score = int(global_intervention_match)
             
             if completion_type == "gold_structure":
                 evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
@@ -231,15 +232,19 @@ class PAUQEvaluation:
 
 
 if __name__ == "__main__":
-    sql_before = "SELECT name FROM students WHERE age > 20"
-    sql_after = "SELECT full_name FROM students WHERE age > 20"
-    intervention = {"type": "columns", "before": "name", "after": "full_name"}
+    sql_before = "SELECT full_name FROM students WHERE age > 20;"
+    sql_after = "SELECT ages FROM new_students WHERE age > 20;"
+    interventions = [
+        {"type": "column", "before": "full_name", "after": "ages"},
+        {"type": "table", "before": "students", "after": "new_students"}
+    ]
 
-    info_before = extract_tables_and_columns(sql_before)
-    info_after = extract_tables_and_columns(sql_after)
+    # info_before = extract_tables_and_columns(sql_before)
+    # info_after = extract_tables_and_columns(sql_after)
 
-    print("Before:", info_before)
-    print("After:", info_after)
+    # print("Before:", info_before)
+    # print("After:", info_after)
 
-    eval = PAUQEvaluation()
-    print(eval.compare_sql_queries(sql_before, sql_after, intervention))
+    dataset = PAUQDataset("./pauq")
+    eval = PAUQEvaluation(dataset)
+    print(eval.compare_sql_queries(sql_before, sql_after, interventions, {"students": ["name", "full_name", "age"], "new_students": ["new_name", "full_name_new", "ages", "age"]}))

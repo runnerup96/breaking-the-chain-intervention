@@ -49,7 +49,8 @@ def extract_schema_links(parsed_sql: dict) -> dict:
     Возвращает schema_links в формате
         {"table": ["col1", "col2", ...], ...}
     """
-    _LIT = re.compile(r'__([^_]+)__')
+    # _LIT = re.compile(r'__([^_]+)__')
+    _LIT = re.compile(r'__(.+?)__')
 
     tc_pairs = set()
 
@@ -125,7 +126,7 @@ def validate_generated_sql(true_sql: str, generated_sql: str, db_schema: dict) -
         pred_parsed = evaluation.get_sql(schema, generated_sql)
     except Exception:
         return False
-
+    
     return true_parsed == pred_parsed
 
 
@@ -208,80 +209,73 @@ def extract_skeleton_and_slots(sql: str, db_schema: dict) -> str:
     return skeleton.strip(), slots
 
 
-def parse_model_response(output_str):
-    """
-    Парсит строку с результатом и извлекает skeleton, schema_links, slot_matching и sql.
-    
-    Args:
-        output_str (str): Строка в формате с метками ===SKELETON===, ===SCHEMA_LINKS=== и т.д.
-    
-    Returns:
-        dict: Словарь с ключами 'sql', 'schema_links', 'slots', 'skeleton'
-    """
-    lines = output_str.strip().split('\n')
-    
-    skeleton = None
-    schema_links_str = None
-    slot_matching_lines = []
-    sql = None
-    current_section = None
-    
-    for line in lines:
-        line = line.strip()
-        
-        if line.startswith('==='):
-            if 'SKELETON===' in line:
-                current_section = 'SKELETON'
-            elif 'SCHEMA_LINKS===' in line:
-                current_section = 'SCHEMA_LINKS'
-            elif 'SLOT_MATCHING===' in line:
-                current_section = 'SLOT_MATCHING'
-            elif 'SQL===' in line:
-                current_section = 'SQL'
-            else:
-                current_section = None
-        elif current_section:
-            if line:
-                if current_section == 'SKELETON' and skeleton is None:
-                    skeleton = line
-                elif current_section == 'SCHEMA_LINKS' and schema_links_str is None:
-                    schema_links_str = line
-                elif current_section == 'SLOT_MATCHING':
-                    slot_matching_lines.append(line)
-                elif current_section == 'SQL' and sql is None:
-                    sql = line
-    
+def parse_model_response(output_str: str):
+    lines = [ln.rstrip() for ln in output_str.strip().splitlines()]
+
+    sections = {"SKELETON": [], "SCHEMA_LINKS": [], "SLOT_MATCHING": [], "SQL": []}
+    current = None
+
+    header_map = {
+        "===SKELETON===": "SKELETON",
+        "===SCHEMA_LINKS===": "SCHEMA_LINKS",
+        "===SLOT_MATCHING===": "SLOT_MATCHING",
+        "===SQL===": "SQL",
+    }
+
+    for ln in lines:
+        s = ln.strip()
+        if s in header_map:
+            current = header_map[s]
+            continue
+        if current is not None:
+            if s != "":
+                sections[current].append(s)
+
+    skeleton = "\n".join(sections["SKELETON"]).strip() or None
+    sql = "\n".join(sections["SQL"]).strip() or None
+
     schema_links = {}
-    if schema_links_str:
-        if ':' in schema_links_str:
-            table, columns = schema_links_str.split(':', 1)
-            table = table.strip()
-            columns_list = [col.strip() for col in columns.split(',')]
-            schema_links[table] = columns_list
-    
+    for row in sections["SCHEMA_LINKS"]:
+        if ":" not in row:
+            continue
+        table, cols = row.split(":", 1)
+        table = table.strip()
+        cols_list = [c.strip() for c in cols.split(",") if c.strip()]
+        if table:
+            schema_links[table] = cols_list
+
+    schema_links_list = [{"table": t, "columns": cols} for t, cols in schema_links.items()]
+
+    slot_dict = {}
+    for row in sections["SLOT_MATCHING"]:
+        if ":" not in row:
+            continue
+        name, val = row.split(":", 1)
+        name = name.strip()
+        m = re.fullmatch(r"SLOT_(\d+)", name)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        slot_dict[idx] = val.strip()
+
     slots = []
-    if slot_matching_lines:
-        slot_dict = {}
-        for slot_line in slot_matching_lines:
-            if ':' in slot_line:
-                slot_name, slot_value = slot_line.split(':', 1)
-                if slot_name.startswith('SLOT_'):
-                    slot_num = int(slot_name.replace('SLOT_', ''))
-                    slot_dict[slot_num] = slot_value.strip()
-        for i in range(1, max(slot_dict.keys()) + 1):
+    if slot_dict:
+        min_k = min(slot_dict.keys())
+        max_k = max(slot_dict.keys())
+        start = 0 if min_k == 0 else 1
+        for i in range(start, max_k + 1):
             if i in slot_dict:
                 slots.append(slot_dict[i])
 
-    schema_links_list = [{"table": table_name, "columns": columns} for table_name, columns in schema_links.items()]
-    
-    result = {
-        'sql': sql,
-        'schema_links': schema_links_list,
-        'slots': slots,
-        'skeleton': skeleton
+    if sql is None:
+        sql = ""
+        
+    return {
+        "sql": sql,
+        "schema_links": schema_links_list,
+        "slots": slots,
+        "skeleton": skeleton,
     }
-    
-    return result
     
 
 if __name__ == '__main__':
@@ -326,3 +320,8 @@ if __name__ == '__main__':
     print(expected)
     print()
     print("Результаты совпадают?", result == expected)
+
+    # sql1 = "select t2.name, t2.capacity from concert as t1 join stadium as t2 on t1.stadium_id = t2.stadium_id where t1.year > 2013 group by t2.stadium_id order by count ( 1 ) desc limit *;"
+    # sql2 = "select t2.name, t2.capacity from concert as t1 join stadium as t2 on t1.stadium_id = t2.stadium_id where t1.year > 2013 group by t2.stadium_id order by count ( 1 ) desc limit *;"
+    # print(sql1 == sql2)
+    # print(validate_generated_sql(sql1, sql2, {'stadium': ['stadium_id', 'location', 'name', 'capacity', 'highest', 'lowest', 'average'], 'singer': ['singer_id', 'name', 'country', 'song_name', 'song_release_year', 'age', 'is_male'], 'concert': ['concert_id', 'concert_name', 'theme', 'stadium_id', 'year'], 'singer_in_concert': ['concert_id', 'singer_id']}))
