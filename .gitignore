@@ -5,9 +5,12 @@ intervention_predictions/
 .pytest_cache/
 __pycache__/
 artifacts/
-*.ipynb
-*.ipynb
+*.ipynb !get_bad_gold_correction_pairs.ipynb
+tmp.ipynb
+plots.ipynb
 
 entailment_trees_emnlp2021_data_v3
 logs
 plots
+
+classification_exp*

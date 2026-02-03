@@ -3,15 +3,26 @@ from typing import List, Dict, Optional, Tuple
 
 # one checklist line, e.g.:
 # "correctly cites ... (weight: 1.5) (True/False): True"
+# LINE_RE = re.compile(
+#     r"""
+#     ^\s*
+#     (?P<question>.+?)
+#     \s*\(\s*weight:\s*(?P<weight>[-+]?\d+(?:\.\d+)?)\s*\)
+#     \s*\(\s*(?P<options>[^()]+?)\s*\)
+#     \s*[:\-]\s*(?P<answer>True|False)\s*$
+#     """,
+#     re.IGNORECASE | re.VERBOSE
+# )
+
 LINE_RE = re.compile(
     r"""
     ^\s*
     (?P<question>.+?)
-    \s*\(\s*weight:\s*(?P<weight>[-+]?\d+(?:\.\d+)?)\s*\)
+    (?:\s*\(\s*weight:\s*(?P<weight>[-+]?\d+(?:\.\d+)?)\s*\))?
     \s*\(\s*(?P<options>[^()]+?)\s*\)
     \s*[:\-]\s*(?P<answer>True|False)\s*$
     """,
-    re.IGNORECASE | re.VERBOSE
+    re.IGNORECASE | re.VERBOSE,
 )
 
 # final grade line, e.g. "Final grade (0-8): 7.5" or "Final grade: 7.5"

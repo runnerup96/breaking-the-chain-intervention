@@ -10,6 +10,23 @@ class AVeriTeCIntervention:
         self.llm_model = llm_model
         self.prompt_type = prompt_type
 
+    def clean_llm_output(self, text):
+        tokens_to_remove = ['<|im_end|>',
+                            '<|endoftext|>',
+                            '<|im_start|>',
+                            '<|eot_id|>',
+                            '<|pad|>',
+                            '\u00ad',
+                            '\u200b',
+                            '\u200c',
+                            '\u200d',
+                            '\u2060',
+                            '\ufeff']
+
+        for token in tokens_to_remove:
+            text = text.replace(token, '')
+        return text.strip()
+
     def interventions_to_prompt(self, sample: dict):
         interventions = sample['structure_intervention']
         hsvt_intervention_prompt = [self.make_prompt(interventions['HSVT'][0], include_gold_structure=True)]
@@ -23,7 +40,7 @@ class AVeriTeCIntervention:
         return match.group() if match else None
     
     def collect_intervention_completion(self, sample: dict, generated_output: list):
-        completion_list = [generation['completion'] for generation in generated_output]
+        completion_list = [self.clean_llm_output(generation['completion']) for generation in generated_output]
         intervention = sample['structure_intervention']
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
@@ -32,7 +49,8 @@ class AVeriTeCIntervention:
         return sample
 
     def make_intervention(self, sample: dict, generated_output: dict):
-        completion = generated_output['completion']
+        completion = self.clean_llm_output(generated_output['completion'])
+        sample["raw_completion"] = completion
         
         if sample['completion_type'] == "structure_prediction":
             extracted_structure = capture_averitec_checklist.extract_intermediate_structure(completion)
@@ -84,6 +102,40 @@ class AVeriTeCIntervention:
             return 'Supported'
         else:
             return None
+        
+    def make_correction_intervention(self, sample: dict, bad_generated_output: dict) -> dict:
+        """
+        After BAD mediator query:
+          - store predicted verdict in sample['label']
+          - store the used mediator in sample['supporting_questions']
+          - create single intervention 'correction' with GOLD mediator
+        Expects sample to contain:
+          - bad_supporting_questions, golden_supporting_questions, golden_label
+        """
+        bad_completion = self.clean_llm_output(bad_generated_output["completion"])
+        bad_label_model = self.infer_completion(bad_completion)
+
+        sample["generated_label_before_intervention"] = bad_label_model
+        sample["supporting_questions"] = sample["bad_supporting_questions"]
+        sample["completion_type"] = "bad_structure"
+
+        corrected = deepcopy(sample)
+        corrected["supporting_questions"] = corrected["golden_supporting_questions"]
+        sample["generated_label_before_intervention"] = bad_label_model
+        corrected["completion_type"] = "corrected_structure"
+
+        sample["structure_intervention"] = {"correction": [corrected]}
+        return sample
+
+    def collect_correction_completion(self, sample_with_intervention: dict, corrected_generated_output: list) -> dict:
+        """
+        Parse the single completion after correction and store label_after_intervention.
+        """
+        completion = corrected_generated_output[0]["completion"]
+        corrected_label_model = self.infer_completion(completion)
+
+        sample_with_intervention["structure_intervention"]["correction"][0]["label_after_intervention"] = corrected_label_model
+        return sample_with_intervention
 
     def make_prompt(self, averitec_sample: dict, include_gold_structure: bool = False) -> str:
         explanations = []
@@ -113,7 +165,7 @@ class AVeriTeCIntervention:
                 "- Each question-answer pair becomes part of the reasoning.\n"
                 "- Each answer should be either Yes or No (in the same case).\n\n"
     
-                "Important: Your final response must contain only two fields question and answer and no other text:\n"
+                "Important: Your final response must contain only two fields question and answer and no other text STRICTLY in the following format:\n"
                 "Intermediate Structure: Q: <question> A: <answer>\n"
                 "Final Verdict: <Supported/Refuted>\n\n"
     

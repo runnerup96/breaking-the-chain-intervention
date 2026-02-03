@@ -35,14 +35,14 @@ datasets=("ricechem")
 prompt_regime="detailed_instruction"
 
 models=(
-    # "Qwen/Qwen3-1.7B"
-    # "Qwen/Qwen3-4B"
-    # "Qwen/Qwen3-8B"
-    # "tiiuae/Falcon3-3B-Instruct"
-    # "tiiuae/Falcon3-7B-Instruct"
-    # "alpindale/Llama-3.2-3B-Instruct"
-    # "alpindale/Llama-3.2-1B-Instruct"
-    # "unsloth/Meta-Llama-3.1-8B-Instruct"
+    "Qwen/Qwen3-1.7B"
+    "Qwen/Qwen3-4B"
+    "Qwen/Qwen3-8B"
+    "tiiuae/Falcon3-3B-Instruct"
+    "tiiuae/Falcon3-7B-Instruct"
+    "alpindale/Llama-3.2-3B-Instruct"
+    "alpindale/Llama-3.2-1B-Instruct"
+    "unsloth/Meta-Llama-3.1-8B-Instruct"
     "google/gemma-2-2b-it"
     # "Openai/Gpt-oss-120b"
     # 'qwen/qwen3-235b-a22b'
@@ -67,7 +67,7 @@ for model_name in "${models[@]}"; do
         
         echo "Running: $simple_model_name on $evaluation_dataset with batch_size=$batch_size"
 
-        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_intervention.py \
+        tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_correction.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
             --batch_size '$batch_size'" ENTER
