@@ -237,7 +237,7 @@ class RiceChemCorrectionDataset:
         path: str,
     ):
         self.task2rubric_weights = _ricechem_task2rubric_weights()
-
+        print(path)
         idx2payload = None
         with open(path, "r", encoding="utf-8") as f:
             idx2payload = json.load(f)

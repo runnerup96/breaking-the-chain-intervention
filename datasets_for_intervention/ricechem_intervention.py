@@ -120,12 +120,14 @@ class RiceChemIntervention:
         sample["completion_type"] = "bad_structure"
         sample["filled_rubric"] = sample["bad_rubric"]
         sample["generated_score_before_intervention"] = bad_score_model
+        sample["raw_generation_before_intervention"] = bad_completion
 
         corrected = deepcopy(sample)
+        corrected["completion_type"] = "corrected_structure"
         corrected["filled_rubric"] = corrected["golden_rubric"]
-        corrected["generated_score_before_intervention"] = corrected["golden_score"]
-        corrected["completion_type"] = bad_score_model
-
+        corrected["generated_score_before_intervention"] = bad_score_model
+        corrected["expected_score_after_intervention"] = corrected["golden_score"]
+        
         sample["structure_intervention"] = {"correction": [corrected]}
         return sample
 
@@ -136,7 +138,7 @@ class RiceChemIntervention:
         if len(corrected_generated_output) != 1:
             raise ValueError("correction expects exactly one generated output.")
 
-        completion = corrected_generated_output[0]["completion"]
+        completion = self.clean_llm_output(corrected_generated_output[0]["completion"])
         corrected_score_model = self.infer_completion(completion)
 
         sample_with_intervention["structure_intervention"]["correction"][0]["score_after_intervention"] = corrected_score_model

@@ -131,7 +131,7 @@ if __name__ == "__main__":
     
     fix_seed(args.seed)
 
-    torch._dynamo.config.cache_size_limit = 8192
+    torch._dynamo.config.cache_size_limit = 16000
 
     llm_model = llm_model.LLMModel(
         args.model_name,
