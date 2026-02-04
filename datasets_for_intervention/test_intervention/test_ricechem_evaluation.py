@@ -3,7 +3,7 @@ from copy import deepcopy
 from math import isclose
 
 from datasets_for_intervention.ricechem_evaluation import RiceChemEvaluation
-from ricechem_mocks import RiceChemDatasetMock
+from datasets_for_intervention.test_intervention.ricechem_mocks import RiceChemDatasetMock
 
 
 

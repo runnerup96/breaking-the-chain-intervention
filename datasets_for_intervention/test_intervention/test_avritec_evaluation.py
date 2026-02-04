@@ -2,12 +2,8 @@ import unittest
 from copy import deepcopy
 from math import isclose
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from datasets_for_intervention.averitec_evaluation import AVeriTeCEvaluation
-from averitec_mocks import AVeriTeCDatasetMock
+from datasets_for_intervention.test_intervention.averitec_mocks import AVeriTeCDatasetMock
 
 
 class TestAveritecEvaluation(unittest.TestCase):

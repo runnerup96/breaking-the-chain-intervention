@@ -3,7 +3,7 @@ from copy import deepcopy
 from math import isclose
 
 from datasets_for_intervention.tabfact_evaluation import TabFactEvaluation
-from tabfact_mocks import TabFactDatasetMock
+from datasets_for_intervention.test_intervention.tabfact_mocks import TabFactDatasetMock
 
 class TestTabFactEvaluation(unittest.TestCase):
     def setUp(self):

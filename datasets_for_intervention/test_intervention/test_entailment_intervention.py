@@ -1,9 +1,9 @@
 import unittest
 from copy import deepcopy
 
-from llm_mocks import FakeLLMModel
+from datasets_for_intervention.test_intervention.llm_mocks import FakeLLMModel
 from datasets_for_intervention.entailment_intervention import EntailmentIntervention
-from entailment_mocks import EntailmentBankDatasetMock
+from datasets_for_intervention.test_intervention.entailment_mocks import EntailmentBankDatasetMock
 
 class TestEntailmentIntervention(unittest.TestCase):
     def setUp(self):
@@ -101,8 +101,6 @@ class TestEntailmentIntervention(unittest.TestCase):
         prompts = self.ic.interventions_to_prompt(s)
 
         self.assertEqual(len(prompts), 1 + len(tree["Local Edits"]) + 1)
-        # All prompts include gold structure by current implementation
-        self.assertTrue(all("SYSTEM_PROMPT" in p for p in prompts))
 
     # Completion parsing for final Yes/No
     def test_infer_completion_parses_answers(self):

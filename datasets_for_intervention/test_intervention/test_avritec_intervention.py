@@ -1,11 +1,8 @@
 import unittest
 from copy import deepcopy
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from llm_mocks import FakeLLMModel
-from averitec_mocks import AVeriTeCDatasetMock, FakeCapture
+from datasets_for_intervention.test_intervention.llm_mocks import FakeLLMModel
+from datasets_for_intervention.test_intervention.averitec_mocks import AVeriTeCDatasetMock, FakeCapture
 from datasets_for_intervention.averitec_intervention import AVeriTeCIntervention
 
 

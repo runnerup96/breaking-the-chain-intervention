@@ -1,7 +1,4 @@
 import unittest
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datasets_for_intervention.capture_averitec_checklist import (
     QA_LINE_RE, FINAL_VERDICT_RE,
