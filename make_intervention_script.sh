@@ -30,8 +30,9 @@ get_batch_size() {
 project_path="/mnt/extremessd10tb/seleznev/breaking-the-chain-intervention"
 CUDA_DEVICE_NUMBER=1
 
-# datasets=("averitec" "ricechem" "entailment")
-datasets=("entailment")
+datasets=("tabfact")
+
+prompt_regime="detailed_instruction"
 
 models=(
     # "Qwen/Qwen3-1.7B"
@@ -45,7 +46,8 @@ models=(
     # "google/gemma-2-2b-it"
     # "google/gemma-2-9b-it"
     # "Openai/Gpt-oss-120b"
-    'qwen/qwen3-235b-a22b'
+    # 'qwen/qwen3-235b-a22b'
+    'Meta-llama/Llama-3.1-70B-Instruct'
 )
 
 run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)"
@@ -71,13 +73,15 @@ for model_name in "${models[@]}"; do
             --evaluation_dataset '$evaluation_dataset' \
             --batch_size 8 \
             --use_api \
-            --tokenizer_name Qwen/Qwen3-235B-A22B \
-            --api_base_url https://openrouter.ai/api/v1 \
+            --tokenizer_name meta-llama/Llama-3.1-70B-Instruct \
+            --api_base_url https://inference.airi.net:46783/v1 \
             --prompting_regime baseline_structure_faithfulness" ENTER
 
         tmux send-keys "echo '----------------------------------------'" ENTER
     done
 done
+
+# --api_base_url https://openrouter.ai/api/v1 \
 
 echo "All runs queued. Attaching to tmux session..."
 tmux attach-session -t $run_name

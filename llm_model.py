@@ -24,8 +24,8 @@ class LLMModel:
                  device_map: str = "auto",
                  torch_dtype: torch.dtype = torch.bfloat16,
                  use_api: bool = False,
-                 api_base_url: str | None = None,
-                 tokenizer_name: str | None = None,
+                 api_base_url: Union[str, None] = None,
+                 tokenizer_name: Union[str, None] = None,
                  ):
         """
         Initialize the LLM model.
@@ -295,6 +295,7 @@ class LLMModel:
 
         return results
 
+
     # def _generate_api_batch(
     #     self,
     #     prompts: List[str],
@@ -302,60 +303,31 @@ class LLMModel:
     #     skip_special_tokens: bool
     # ) -> List[Dict[str, str]]:
 
-    #     results = []
-
-    #     for prompt in prompts:
-    #         # Один API-запрос на один prompt
+    #     def worker(prompt):
     #         resp = self.client.completions.create(
     #             model=self.model_name,
     #             prompt=prompt,
     #             max_tokens=max_new_tokens,
     #             temperature=0.0,
     #         )
-
-    #         # Берём первую (и единственную) completion
     #         completion_text = resp.choices[0].text
+    #         return prompt, completion_text
 
-    #         results.append({
-    #             "prompt": prompt,
-    #             "completion": completion_text,
-    #         })
+    #     max_workers = 16
 
-    #     return results
+    #     with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    #         future_map = {executor.submit(worker, p): i for i, p in enumerate(prompts)}
 
+    #         outputs = [None] * len(prompts)
+    #         for future in as_completed(future_map):
+    #             idx = future_map[future]
+    #             prompt, completion = future.result()
+    #             outputs[idx] = {
+    #                 "prompt": prompt,
+    #                 "completion": completion,
+    #             }
 
-    def _generate_api_batch(
-        self,
-        prompts: List[str],
-        max_new_tokens: int,
-        skip_special_tokens: bool
-    ) -> List[Dict[str, str]]:
-
-        def worker(prompt):
-            resp = self.client.completions.create(
-                model=self.model_name,
-                prompt=prompt,
-                max_tokens=max_new_tokens,
-                temperature=0.0,
-            )
-            completion_text = resp.choices[0].text
-            return prompt, completion_text
-
-        max_workers = 16
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {executor.submit(worker, p): i for i, p in enumerate(prompts)}
-
-            outputs = [None] * len(prompts)
-            for future in as_completed(future_map):
-                idx = future_map[future]
-                prompt, completion = future.result()
-                outputs[idx] = {
-                    "prompt": prompt,
-                    "completion": completion,
-                }
-
-        return outputs
+    #     return outputs
 
 
     def clean_model_specific_completion(self, output: str) -> str:
