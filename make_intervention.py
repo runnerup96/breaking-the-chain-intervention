@@ -107,7 +107,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--evaluation_dataset", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--try_one_batch", type=bool, default=False)
+    parser.add_argument("--try_one_batch", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--prompting_regime", type=str,
                         choices=["baseline_structure_faithfulness", "detailed_instruction"], default="baseline_structure_faithfulness")
