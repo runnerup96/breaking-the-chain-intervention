@@ -155,24 +155,3 @@ class TabFactDataset:
 
     def __getitem__(self, idx):
         return self.data[idx]
-    
-
-if __name__ == "__main__":
-    TABLES_DIR = "~/datasets/Table-Fact-Checking/data/all_csv"
-    QUERIES_JSON = "~/datasets/Table-Fact-Checking/bootstrap/bootstrap_new.json"
-
-    dataset = TabFactDataset(tables_dir=TABLES_DIR, queries_json_path=QUERIES_JSON)
-
-    for i in range(min(3, len(dataset))):
-        sample = dataset[i]
-        print(f"\n=== Sample {i+1} (ID: {sample['idx']}) ===")
-        print(f"Statement: {sample['statement']}")
-        print(f"Table (first 100 chars): {sample['table_html_csv'][:100]}...")
-        print(f"Verifier Query (M): {sample['verifier_query_gt']}")
-        print(f"Distractors: {sample['distractors']}")
-        print("-" * 80)
-
-    sample_data = [dataset[i] for i in range(min(5, len(dataset)))]
-    with open("tabfact_sample.json", "w", encoding='utf-8') as f:
-        json.dump(sample_data, f, ensure_ascii=False, indent=4)
-    print("\nSample data saved to 'tabfact_sample.json'")

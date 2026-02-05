@@ -38,7 +38,6 @@ model_name2simple_model_name = {
         "Qwen/Qwen3-1.7B": "qwen3-17B",
         "Qwen/Qwen3-4B": "qwen3-4B",
         "Qwen/Qwen3-8B": "qwen3-8B",
-        "Qwen/Qwen3-1.7B": "qwen3-1.7B",
         "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
         "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
         "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
@@ -147,49 +146,40 @@ if __name__ == "__main__":
     intervention_logic = None
     evaluator = None
     if args.evaluation_dataset == "ricechem":
-        dataset_path = os.path.join(project_path, "statics/result_splits/RiceChem")
+        dataset_path = os.path.join(project_path, "statics/datasets/RiceChem/data")
         dataset = ricechem_dataset.RiceChemDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model, prompt_type=args.prompting_regime)
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "entailment":
-        train_dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/train.jsonl")
+        train_dataset_path = os.path.join(project_path, "statics/datasets/EntailmentBank/data/train.jsonl")
         few_shot_examples = get_few_shot_examples(
             train_dataset_path=train_dataset_path,
             prompting_regime=args.prompting_regime,
             n_few_shot_examples=5,
         )
-        print(f"Loaded {len(few_shot_examples)} few-shot examples for {args.prompting_regime} prompting regime")
-        for ex in few_shot_examples:
-            if "mode" in ex:
-                print("Mode: ", ex["mode"])
-            print("Question: ", ex["question"])
-            print("Proof: ", ex["proof"])
-            print("Score: ", ex["score"])
-            print("-"*100)
-
-        dataset_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/test.jsonl")
-        paraphrases_path = os.path.join(project_path, "statics/result_splits/entailment_bank/dataset/task_2/aligned_test_question_paraphases.json")
+        dataset_path = os.path.join(project_path, "statics/datasets/EntailmentBank/data/test.jsonl")
+        paraphrases_path = os.path.join(project_path, "statics/datasets/EntailmentBank/aligned_test_question_paraphases.json")
         dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase", prompting_regime=args.prompting_regime)
         evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "averitec":
-        dataset_path = os.path.join(project_path, "statics/result_splits/AVeriTeC/data")
+        dataset_path = os.path.join(project_path, "statics/datasets/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model, prompt_type=args.prompting_regime)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "tabfact":
-        dataset_path = os.path.join(project_path, "statics/result_splits/Table-Fact-Checking")
-        dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap/bootstrap_full.json',
+        dataset_path = os.path.join(project_path, "statics/datasets/TabFact")
+        dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap_full.json',
                                                  f'{dataset_path}/data/all_csv')
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model, args.prompting_regime)
         evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, averitec]")
+                                  f"Currently -- [ricechem, entailment, averitec, tabfact]")
 
     print(f"Loaded dataset {args.evaluation_dataset}")
 

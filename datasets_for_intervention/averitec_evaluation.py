@@ -48,7 +48,7 @@ class AVeriTeCEvaluation:
                     "verdict_match": []
                 }
             },
-            "faithfullness": {
+            "faithfulness": {
                 "with_gold_structure": {
                     "HSVT": [],
                     "Local Edits": [],
@@ -84,7 +84,7 @@ class AVeriTeCEvaluation:
                 evaluation_metrics["performance"]["with_predicted_structure"]["structure_match"].append(structure_match)
                 evaluation_metrics["performance"]["with_predicted_structure"]["verdict_match"].append(verdict_match)
 
-            # faithfullness metrics
+            # faithfulness metrics
             structure_intervention = sample['structure_intervention']
 
             hsvt_intervention = structure_intervention['HSVT'][0]
@@ -93,9 +93,9 @@ class AVeriTeCEvaluation:
             hsvt_intervention_match = self.compare_verdicts(expected_hsvt_verdict, hsvt_result_after_intervention)
 
             if completion_type == "gold_structure":
-                evaluation_metrics["faithfullness"]["with_gold_structure"]["HSVT"].append(hsvt_intervention_match)
+                evaluation_metrics["faithfulness"]["with_gold_structure"]["HSVT"].append(hsvt_intervention_match)
             elif completion_type == "structure_prediction":
-                evaluation_metrics["faithfullness"]["with_predicted_structure"]["HSVT"].append(hsvt_intervention_match)
+                evaluation_metrics["faithfulness"]["with_predicted_structure"]["HSVT"].append(hsvt_intervention_match)
 
             # Local edits intervention
             if predicted_verdict == "Supported" or len(predicted_structure) == 1:
@@ -108,14 +108,14 @@ class AVeriTeCEvaluation:
                                                                         local_edit_result_after_intervention)
 
                     if completion_type == "gold_structure":
-                        evaluation_metrics["faithfullness"]["with_gold_structure"]["Local Edits"].append(
+                        evaluation_metrics["faithfulness"]["with_gold_structure"]["Local Edits"].append(
                             local_edit_intervention_match)
                         if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_gold_structure"]:
                             evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx] = []
                         evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx].append(local_edit_intervention_match)
 
                     elif completion_type == "structure_prediction":
-                        evaluation_metrics["faithfullness"]["with_predicted_structure"]["Local Edits"].append(
+                        evaluation_metrics["faithfulness"]["with_predicted_structure"]["Local Edits"].append(
                             local_edit_intervention_match)
                         if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_predicted_structure"]:
                             evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx] = []
@@ -129,10 +129,10 @@ class AVeriTeCEvaluation:
                     global_intervention_match = self.compare_verdicts(expected_global_verdict, global_result_after_intervention)
 
                     if completion_type == "gold_structure":
-                        evaluation_metrics["faithfullness"]["with_gold_structure"]["Global"].append(
+                        evaluation_metrics["faithfulness"]["with_gold_structure"]["Global"].append(
                             global_intervention_match)
                     elif completion_type == "structure_prediction":
-                        evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
+                        evaluation_metrics["faithfulness"]["with_predicted_structure"]["Global"].append(
                             global_intervention_match)
 
         aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
@@ -156,7 +156,7 @@ class AVeriTeCEvaluation:
         
         print("\nFaithfulness Metrics:")
         print("--------------------")
-        for structure_type, metrics in evaluation_metrics["faithfullness"].items():
+        for structure_type, metrics in evaluation_metrics["faithfulness"].items():
             print(f"\n{structure_type}:")
             for intervention_type, value in metrics.items():
                 if None not in value.values():

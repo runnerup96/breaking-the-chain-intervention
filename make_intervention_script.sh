@@ -2,7 +2,7 @@
 
 # make sure to do
 # sudo chmod -R 755 intervention_predictions/{evaluation_dataset}
-# sudo chown -R somov intervention_predictions/{evaluation_dataset}
+# sudo chown -R user_name intervention_predictions/{evaluation_dataset}
 
 model_name2simple_model_name() {
     echo "${1##*/}"
@@ -30,12 +30,17 @@ get_batch_size() {
 project_path="/mnt/extremessd10tb/seleznev/breaking-the-chain-intervention"
 CUDA_DEVICE_NUMBER=0
 
+<<<<<<< HEAD
 datasets=("entailment")
+=======
+datasets=("ricechem", "tabfact", "entailment", "averitec")
+>>>>>>> main
 
 prompt_regime="detailed_instruction"
 
 models=(
     "Qwen/Qwen3-1.7B"
+<<<<<<< HEAD
     # "Qwen/Qwen3-4B"
     # "Qwen/Qwen3-8B"
     "tiiuae/Falcon3-3B-Instruct"
@@ -48,6 +53,20 @@ models=(
     # "Openai/Gpt-oss-120b"
     # 'qwen/qwen3-235b-a22b'
     # 'Meta-llama/Llama-3.1-70B-Instruct'
+=======
+    "Qwen/Qwen3-4B"
+    "Qwen/Qwen3-8B"
+    "tiiuae/Falcon3-3B-Instruct"
+    "tiiuae/Falcon3-7B-Instruct"
+    "alpindale/Llama-3.2-3B-Instruct"
+    "alpindale/Llama-3.2-1B-Instruct"
+    "unsloth/Meta-Llama-3.1-8B-Instruct"
+    "google/gemma-2-2b-it"
+    "google/gemma-2-9b-it"
+    "Openai/Gpt-oss-120b"
+    'qwen/qwen3-235b-a22b'
+    'Meta-llama/Llama-3.1-70B-Instruct'
+>>>>>>> main
 )
 
 # run_name="intervention_batch_$(date +%Y%m%d_%H%M%S)"
