@@ -30,6 +30,19 @@ FINAL_GRADE_RE = re.compile(
     r"""(?i)^\s*final\s*grade(?:\s*\([^)]*\))?\s*[:\-]\s*(?P<grade>[-+]?\d+(?:\.\d+)?)\s*(?!\w)"""
 )
 
+MEDIATOR_BLOCK_RE = re.compile(
+    r"(?is)Checklist\s*:\s*(?P<block>.*?)(?=\n\s*Final\s*grade\b|\n\s*TOOL\s*:|$)"
+)
+
+TOOL_ARGS_BLOCK_RE = re.compile(
+    r"(?is)\bARGS\s*:\s*(?P<block>.*)$"
+)
+
+# Extract value of "rubric": "<...>" (supports literal newlines inside quotes)
+TOOL_RUBRIC_STRING_RE = re.compile(
+    r'(?is)"rubric"\s*:\s*"(?P<rubric>(?:\\.|[^"\\])*)"\s*(?:,|\})'
+)
+
 def extract_final_grade(text: str) -> Optional[float]:
     """
     Extract final grade from text.
@@ -84,3 +97,43 @@ def extract_checklist_entries(text: str) -> List[Dict]:
     return checklist
 
 
+def extract_mediator_rubric_raw(text: str) -> Optional[str]:
+    """
+    Returns raw checklist text produced under:
+      Checklist:
+        ...
+    Stops before 'Final grade' or 'TOOL:'.
+    """
+    m = MEDIATOR_BLOCK_RE.search(text)
+    if not m:
+        return None
+    block = m.group("block").strip()
+    return block if block else None
+
+
+def extract_tool_rubric_raw(text: str) -> Optional[str]:
+    """
+    Returns raw checklist text that was passed inside:
+      ARGS: {"rubric": "<MULTILINE CHECKLIST>"}
+
+    We do NOT parse JSON. We only extract the value of "rubric" as raw text.
+    """
+    m = TOOL_ARGS_BLOCK_RE.search(text)
+    if not m:
+        return None
+
+    block = m.group("block").strip()
+    if not block:
+        return None
+
+    block = block.replace("\\r\\n", "\n").replace("\\n", "\n")
+
+    ms = TOOL_RUBRIC_STRING_RE.search(block)
+    if not ms:
+        return None
+
+    rubric = ms.group("rubric")
+    rubric = rubric.replace("\\r\\n", "\n").replace("\\n", "\n")
+    rubric = rubric.replace('\\"', '"').replace("\\\\", "\\")
+    rubric = rubric.strip()
+    return rubric if rubric else None

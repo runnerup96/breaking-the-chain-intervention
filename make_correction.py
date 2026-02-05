@@ -66,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompting_regime",
         type=str,
-        choices=["baseline_structure_faithfulness", "detailed_instruction"],
+        choices=["baseline_structure_faithfulness", "detailed_instruction", "baseline_structure_tool_call"],
         default="baseline_structure_faithfulness",
     )
 
@@ -96,16 +96,17 @@ if __name__ == "__main__":
     intervention_logic = None
     evaluator = None
 
-    dataset_path = f'{project_path}/statics/datasets/{args.evaluation_dataset}_correction/{model_name2simple_model_name[args.model_name]}.json'
+    corrections_path = f'{project_path}/intervention_analysis/intervention_predictions/{args.evaluation_dataset}/{model_name2simple_model_name[args.model_name]}.json'
 
     if args.evaluation_dataset == "ricechem":
-        dataset = ricechem_dataset.RiceChemCorrectionDataset(path=dataset_path)
+        dataset_path = os.path.join(project_path, "statics/datasets/RiceChem/data")
+        dataset = ricechem_dataset.RiceChemDataset(data_path=dataset_path, correction_path=corrections_path, use_corrections=True, correction_only=True)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda b: b, shuffle=False)
         intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm, prompt_type=args.prompting_regime)
         evaluator = ricechem_evaluation.RiceChemCorrectionEvaluation(dataset)
 
     elif args.evaluation_dataset == "averitec":
-        dataset = averitec_dataset.AVeriTeCCorrectionDataset(path=dataset_path)
+        dataset = averitec_dataset.AVeriTeCCorrectionDataset(path=corrections_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda b: b, shuffle=False)
         intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm, prompt_type=args.prompting_regime)
         # evaluator = averitec_evaluation.AVeriTeCCorrectionEvaluation(dataset, intervention_logic)
@@ -118,6 +119,8 @@ if __name__ == "__main__":
 
     processed_samples_list = []
 
+    max_new_tokens = 1024 if args.prompting_regime == "baseline_structure_tool_call" else 10
+
     for batch in tqdm(dataloader, desc=f"Correction ({args.evaluation_dataset})", total=len(dataloader)):
         # 1) BAD mediator pass
         bad_prompts = []
@@ -128,7 +131,7 @@ if __name__ == "__main__":
             else:  # averitec_correction
                 tmp["supporting_questions"] = tmp["bad_supporting_questions"]
             bad_prompts.append(intervention_logic.make_prompt(tmp, include_gold_structure=True))
-        bad_outputs = llm.generate(bad_prompts, max_new_tokens=10, skip_special_tokens=True)
+        bad_outputs = llm.generate(bad_prompts, max_new_tokens=max_new_tokens, skip_special_tokens=True)
 
         # 2) Build corrected prompts + run again with GOLD mediator
         corrected_prompts = []
@@ -139,7 +142,7 @@ if __name__ == "__main__":
             samples_with_interventions.append(s2)
             corrected_prompts.append(intervention_logic.make_prompt(s2['structure_intervention']['correction'][0], include_gold_structure=True))
 
-        corrected_outputs = llm.generate(corrected_prompts, max_new_tokens=10, skip_special_tokens=True)
+        corrected_outputs = llm.generate(corrected_prompts, max_new_tokens=max_new_tokens, skip_special_tokens=True)
 
         for s2, out2 in zip(samples_with_interventions, corrected_outputs):
             final = intervention_logic.collect_correction_completion(s2, [out2])
@@ -175,6 +178,6 @@ if __name__ == "__main__":
     file_name = f"{model_name}_{curr_time}_{prompt_regime}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}_{prompt_regime}.json"
     path2save = os.path.join(path2save, file_name)
 
-    with open(path2save, "w") as f:
+    with open(path2save, "w", encoding='utf-8') as f:
         json.dump(final_dict, f, ensure_ascii=False, indent=4)
     print(f"The results are saved to {path2save}!")

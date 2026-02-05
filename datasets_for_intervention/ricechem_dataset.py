@@ -2,11 +2,12 @@ import pandas as pd
 import os
 from collections import defaultdict
 import random
+from copy import deepcopy
 import json
 pd.options.mode.chained_assignment = None
 
 class RiceChemDataset:
-    def __init__(self, data_path: str):
+    def __init__(self, data_path: str, correction_path: str = None, use_corrections: bool = False, correction_only: bool = False,):
         """
         Args:
             data_path: path to the folder with csv files
@@ -117,6 +118,12 @@ class RiceChemDataset:
 
         self.process_data()
 
+        if use_corrections:
+            if correction_path is None:
+                raise ValueError("use_corrections=True but correction_path=None")
+            self.attach_bad_generations(correction_path, correction_only=correction_only)
+
+
     def get_random_student_answer(self, task_idx):
         return random.choice(self.task2student_answers[task_idx])
 
@@ -171,114 +178,78 @@ class RiceChemDataset:
                     self.data.append(sample)
 
         print('Total samples =', len(self.data))
+
+    def load_bad_map_auto(self, path: str):
+        """
+        Returns mapping:
+          idx -> {"bad_rubric": dict[item->bool], "bad_score": float|None}
+        """
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+
+        # A) raw predictions
+        out = {}
+        for rec in obj["result"]:
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("completion_type") == "gold_structure":
+                continue
+
+            idx = rec.get("idx", None)
+            filled = rec.get("filled_rubric", None)
+            score = rec.get("score", None)
+
+            if idx is None or not isinstance(filled, dict) or filled == {}:
+                continue
+
+            out[str(idx)] = {"bad_rubric": filled, "bad_score": score}
+        return out
+
+    def attach_bad_generations(self, bad_generations_path: str, correction_only: bool = False):
+        """
+        Build correction pairs by your filtering logic:
+          - idx exists in generated
+          - generated rubric non-empty
+          - keyset matches base golden rubric keyset
+          - generated rubric differs from base golden rubric
+        Then attach fields:
+          bad_rubric, bad_score, golden_rubric, golden_score
+        """
+        idx2bad = self.load_bad_map_auto(bad_generations_path)
+
+        hit = 0
+        for s in self.data:
+            idx = str(s["idx"])
+            if idx not in idx2bad:
+                continue
+
+            bad_rubric = idx2bad[idx]["bad_rubric"]
+            if bad_rubric == {}:
+                continue
+
+            gold_rubric = s["filled_rubric"]
+            if set(bad_rubric.keys()) != set(gold_rubric.keys()):
+                continue
+
+            if bad_rubric == gold_rubric:
+                continue
+
+            s["bad_rubric"] = bad_rubric
+            s["bad_score"] = idx2bad[idx].get("bad_score", None)
+
+            s["golden_rubric"] = deepcopy(gold_rubric)
+            s["golden_score"] = float(s["score"])
+
+            hit += 1
+
+        if correction_only:
+            self.data = [s for s in self.data if "bad_rubric" in s]
+
+        print(f"[RiceChemDataset] attached bad rubrics: {hit} / {len(self.data)} (correction_only={correction_only})")
+
    
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, i):
-        return self.data[i]
-    
-
-
-def _as_bool(v) -> bool:
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, str):
-        s = v.strip().lower()
-        if s in ("true", "t", "1", "yes"):
-            return True
-        if s in ("false", "f", "0", "no"):
-            return False
-    raise TypeError(f"Cannot coerce to bool: {v!r} (type={type(v)})")
-
-
-def _ricechem_task2rubric_weights():
-    q1 = {
-        "correctly cites decreased electron electron repulsion": 1.0,
-        "relates decreased electron electron repulsion to decreased potential energy": 1.0,
-        "3rd and 4th electrons ionized feel same core charge": 1.0,
-        "3rd and 4th electrons ionized from n=3 shell and have same radius": 1.0,
-        "5th electron ionized from n=2 shell and feels higher core charge": 1.0,
-        "5th electron ionized from n=2 shell and has smaller radius": 1.0,
-        "correctly explains relationship of potential energy to ionization energy": 1.0,
-        "partially explains relationship between potential energy and ionization energy": 1.0,
-    }
-    q2 = {
-        "Correctly states that frequency is proportional to energy of light": 1.0,
-        "Explaining sentence 1: energy levels of an electron in an atom are quantized": 1.0,
-        "Explaining sentence 1: FULLY explains energy/frequency absorbed must equal the difference in energy levels in an electron": 1.0,
-        "Explaining sentence 1: PARTIALLY explains energy/frequency absorbed must equal the difference in energy levels in an electron": 1.0,
-        "Explaining sentence 2: a minimum amount of energy is needed to eject an electron": 1.0,
-        "Explaining sentence 2: any additional energy becomes kinetic energy": 1.0,
-    }
-    q3 = {
-        "Sentence 1 is correct. Valence bond theory describes that atomic orbitals must be half-filled to participate in covalent bonding.": 1.0,
-        "Sentence 2: Correct number of hybrid orbitals. In this molecule, carbon must form three hybrid orbitals to form three electron domains.": 1.0,
-        "Sentence 2: Correct type of hybrid orbitals. Carbon must form sp2 hybrid orbitals (from using a 2s and two 2p orbitals)": 1.0,
-        "Sentence 3: Correctly states that nitrogen is hybridized": 1.0,
-        "Sentence 3: Correct type of hybridization. Nitrogen is sp2 hybridized to form 3 electron domains": 1.0,
-        "Sentence 3: Correct description of hybrid orbital bonds in nitrogen. Two sp2 orbitals form two sigma bonds.": 1.0,
-        "Sentence 3: Correct description of unhybridized orbital bonds in nitrogen. Unhybridized p orbital forms pi bond": 1.0,
-    }
-    q4 = {
-        "Fixed mass of one element": 1.0,
-        "Mass data in LoMP": 1.0,
-        "Combine to form compounds": 1.0,
-        "Integer/whole number ratio": 1.0,
-        "Whole numbers mean indivisible/discrete": 1.0,
-        "Indivisible unit of mass = atom": 1.0,
-    }
-    return {1: q1, 2: q2, 3: q3, 4: q4}
-
-
-class RiceChemCorrectionDataset:
-    def __init__(
-        self,
-        path: str,
-    ):
-        self.task2rubric_weights = _ricechem_task2rubric_weights()
-        print(path)
-        idx2payload = None
-        with open(path, "r", encoding="utf-8") as f:
-            idx2payload = json.load(f)
-        
-        self.data = []
-
-        for idx, p in idx2payload.items():
-            for k in ("task_idx", "task", "student_answer", "golden_rubric", "golden_score", "bad_rubric", "score_range"):
-                if k not in p:
-                    raise ValueError(f"Missing '{k}' for idx={idx}")
-
-            task_idx = int(p["task_idx"])
-            if task_idx not in self.task2rubric_weights:
-                raise ValueError(f"Invalid task_idx={task_idx} for idx={idx}; expected 1..4")
-
-            task = str(p["task"])
-            student_answer = str(p["student_answer"])
-
-            gold_raw = p["golden_rubric"]
-            bad_raw = p["bad_rubric"]
-
-            gold = {str(k): _as_bool(v) for k, v in gold_raw.items()}
-            bad = {str(k): _as_bool(v) for k, v in bad_raw.items()}
-
-            self.data.append(
-                {
-                    "idx": idx,
-                    "task_idx": task_idx,
-                    "task": task,
-                    "student_answer": student_answer,
-                    "golden_rubric": gold,
-                    "golden_score": p['golden_score'],
-                    "bad_rubric": bad,
-                    "score_range": p['score_range']
-                }
-            )
-
-        self.data.sort(key=lambda x: x["idx"])
-
-    def __len__(self) -> int:
-        return len(self.data)
-
-    def __getitem__(self, i: int):
         return self.data[i]

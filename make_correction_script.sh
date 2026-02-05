@@ -70,6 +70,7 @@ for model_name in "${models[@]}"; do
         tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_correction.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
+            --prompting_regime "baseline_structure_tool_call" \
             --batch_size '$batch_size'" ENTER
 
         tmux send-keys "echo '----------------------------------------'" ENTER
