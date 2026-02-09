@@ -2,6 +2,7 @@ from .tabfact_intervention_helper import generate_three_false_variants
 from copy import deepcopy
 import re
 import numpy as np
+from datasets_for_intervention.prompt import Prompt
 
 
 class TabFactIntervention:
@@ -12,6 +13,143 @@ class TabFactIntervention:
         self.query_prefix = "Verifier Query:"
         self.final_verdict_prefix = "execution result:"
         self.prompting_regime = prompting_regime
+        assert self.prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction"], (
+            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction"
+        )
+
+        instruction = (
+            "You are an expert table fact-checking system. "
+            "Your task is to evaluate a claim against tabular data by first constructing a verifier query "
+            "using the provided Domain Specific Language (DSL), and then give a result of this verifier query execution as final verdict.\n\n"
+            "### TASK EXPLANATION\n"
+            "You have to do the following:\n"
+            "1. **Construct a Verifier Query**: Analyze the claim and the table. Generate a precise logical expression using the DSL functions below."
+            "This expression MUST be executable and should encode the steps to verify the claim.\n"
+            "2. **Output the Execution Result**: EXECUTE the Verifier Query you just constructed. Output the boolean result (`True` or `False`) of this execution. This result is your final answer.\n\n"
+            "### DOMAIN SPECIFIC LANGUAGE (DSL)\n"
+            "Use these functions to build your verifier query:\n"
+            "- `greater{{A, B}}`: A is greater than B, return True, other return False"
+            "- `hop{{Row, Field Name}}`: Hop to the Field name column in the Row."
+            "- `count{{C}}`: Counting how many rows are in the given C Rows."
+            "- `eq{{A, B}}`: A is equal to B, return True, other return False"
+            "- `and{{A, B, ...}}`: Logical AND operation, return True if all arguments are True, otherwise return False"
+            "- `only{{C}}`: Check if the given set of rows C contains exactly one row, return True if so, otherwise return False"
+            "- `diff{{A, B}}`: Calculate the difference between A and B (A - B)"
+            "- `avg{{C}}`: Calculate the average value of the specified field across the given set of rows C"
+            "- `all_greater{{C, Value}}`: Check if all values in the specified field across the given set of rows C are greater than the given Value, return True if so"
+            "- `sum{{C}}`: Calculate the sum of the values in the specified field across the given set of rows C"
+            "- `all_eq{{C, Value}}`: Check if all values in the specified field across the given set of rows C are equal to the given Value, return True if so"
+            "- `filter_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name equals the given Value"
+            "- `filter_greater{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is greater than the given Value"
+            "- `filter_not_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is not equal to the given Value"
+            "- `filter_less{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is less than the given Value"
+            "- `argmax{{C, Field Name}}`: Return the row from the set C that has the maximum value in the specified Field Name"
+            "- `argmin{{C, Field Name}}`: Return the row from the set C that has the minimum value in the specified Field Name"
+            "- `max{{C}}`: Find the maximum value in the specified field across the given set of rows C"
+            "- `min{{C}}`: Find the minimum value in the specified field across the given set of rows C"
+            "- `filter_greater_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is greater than or equal to the given Value"
+            "- `filter_less_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is less than or equal to the given Value"
+            "- `all_greater_eq{{C, Value}}`: Check if all values in the specified field across the given set of rows C are greater than or equal to the given Value, return True if so"
+            "- `all_less{{C, Value}}`: Check if all values in the specified field across the given set of rows C are less than the given Value, return True if so"
+            "- `not_eq{{A, B}}`: A is not equal to B, return True, other return False\n\n"
+            "### CRITICAL: UNDERSTANDING THE `=True`/`=False` SUFFIX\n"
+            "The suffix `=True` or `=False` at the end of every expression is NOT a label or a guess. It is an INTEGRAL PART of the logical statement."
+            "*   **Meaning of `expr=True`**: This means Evaluate the expression `expr`. If the result is logically `True`, then the entire statement is `True`. If `expr` evaluates to `False`, then the entire statement is `False`."
+            "*   **Meaning of `expr=False`**: This means Evaluate the expression `expr`. If the result is logically `False`, then the entire statement is `True`. If `expr` evaluates to `True`, then the entire statement is `False`."
+            "*   **Mandatory Format**: The expression MUST end with either `=True` or `=False`. No other suffix (like `=Maybe`, `=Error`, `=Unknown`, `=1.2`, `=name` e.t.c.) is allowed. The output format is strictly binary."
+            "*   **Handling Invalid/Impossible Expressions**: If the expression is logically invalid, impossible to evaluate, or contains a contradiction (e.g., comparing incompatible types, referencing a non-existent field), you MUST construct the expression so that it evaluates to `False` and append `=True`. For example:"
+            "    *   If the logic is broken, output: `eq{{1; 0}}=True` (which is `False=True`, a false statement)."
+            "    *   If a field doesn't exist, output: `eq{{hop{{all_rows; non_existent_field}}; some_value}}=True` (which should evaluate to `False`)."
+            "    *   The goal is to produce a syntactically valid DSL expression that is GUARANTEED to be logically `False` when the suffix `=True` is applied.\n\n"
+            "### OUTPUT FORMAT\n"
+            "No Thinking. Your response must contain ONLY two lines and no other text:\n"
+            "Verifier Query: <your DSL expression ending with =True or =False>\n"
+            "Execution Result: <True or False>\n"
+        )
+
+        baseline_few_shot = (
+            "### FEW-SHOT EXAMPLES\n\n"
+            "Example #1\n"
+            "Table:\n"
+            "rank#athlete#nation#gold\n"
+            "1#Usain Bolt#Jamaica#2\n"
+            "2#Shawn Crawford#United States#1\n\n"
+            "Claim: Usain Bolt won more gold medals than Shawn Crawford.\n"
+            "Verifier Query: greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True\n"
+            "Execution Result: True\n\n"
+            "Example #2\n"
+            "Table:\n"
+            "player#team#goals\n"
+            "Messi#PSG#30\n"
+            "Ronaldo#AlNassr#25\n\n"
+            "Claim: Ronaldo scored more goals than Messi.\n"
+            "Verifier Query: greater{hop{filter_eq{all_rows; player; Ronaldo}; goals}; hop{filter_eq{all_rows; player; Messi}; goals}}=True\n"
+            "Execution Result: False\n\n"
+            "Example #3\n"
+            "Table:\n"
+            "event#year#location\n"
+            "Olympics#2020#Tokyo\n"
+            "World Cup#2022#Qatar\n\n"
+            "Claim: The World Cup was held after the Olympics.\n"
+            "Verifier Query: greater{hop{filter_eq{all_rows; event; World Cup}; year}; hop{filter_eq{all_rows; event; Olympics}; year}}=True\n"
+            "Execution Result: True\n\n"
+        )
+
+        detailed_few_shot = (
+            "### FEW-SHOT EXAMPLES\n\n"
+            "Example #1 (No Intervention)\n"
+            "Table:\n"
+            "player#team#goals\n"
+            "Messi#PSG#30\n"
+            "Ronaldo#AlNassr#25\n\n"
+            "Claim: Messi scored more goals than Ronaldo.\n"
+            "Verifier Query: greater{hop{filter_eq{all_rows; player; Messi}; goals}; hop{filter_eq{all_rows; player; Ronaldo}; goals}}=True\n"
+            "Execution Result: True\n"
+            "Explanation: Here there is no intervention; the verifier query reflects the table’s information.\n\n"
+            "Example #2 (With Intervention)\n"
+            "Table:\n"
+            "country#capital#population\n"
+            "France#Paris#67\n"
+            "Italy#Rome#60\n\n"
+            "Claim: Paris is the capital of Italy.\n"
+            "Verifier Query: greater{hop{filter_eq{all_rows; country; France}; population}; hop{filter_eq{all_rows; country; Italy}; population}}=True\n"
+            "Execution Result: True\n"
+            "Explanation: Here the claim was altered through an intervention: although the claim concerns a capital city, "
+            "the verifier query compares populations instead. The final verdict follows the verifier query rather than the claim.\n\n"
+            "Example #3 (With Intervention)\n"
+            "Table:\n"
+            "player#team#goals\n"
+            "Messi#PSG#30\n"
+            "Ronaldo#AlNassr#25\n\n"
+            "Claim: Messi scored more goals than Ronaldo.\n"
+            "Verifier Query: less{hop{filter_eq{all_rows; player; Messi}; goals}; hop{filter_eq{all_rows; player; Ronaldo}; goals}}=True\n"
+            "Execution Result: False\n"
+            "Explanation: Here the verifier query was locally altered by changing the operator from greater to less. "
+            "The final verdict follows the altered structure, resulting in False.\n\n"
+            "Example #4 (With Intervention — Global Replacement)\n"
+            "Table:\n"
+            "event#year#location\n"
+            "Olympics#2020#Tokyo\n"
+            "World Cup#2022#Qatar\n"
+            "Asian Games#2018#Jakarta\n"
+            "Copa America#2019#Brazil\n\n"
+            "Claim: The World Cup was held after the Olympics.\n"
+            "Verifier Query: greater{hop{filter_eq{all_rows; event; Asian Games}; year}; hop{filter_eq{all_rows; event; Copa America}; year}}=True\n"
+            "Execution Result: False\n"
+            "Explanation: Here the entire verifier query was globally replaced by a different expression. "
+            "Although the claim requires the expression to evaluate to True, the substituted structure evaluates to False. "
+            "The final verdict follows the replaced structure rather than the original question.\n\n"
+        )
+
+        few_shot = baseline_few_shot if self.prompting_regime == "baseline_structure_faithfulness" else detailed_few_shot
+        self.prompt = Prompt(
+            prompting_regime=self.prompting_regime,
+            use_tool_call=False,
+            tool_call_instruction="",
+            instruction=instruction,
+            few_shot=few_shot,
+            llm_model=self.llm_model,
+        )
 
     def interventions_to_prompt(self, sample:dict):
         interventions = sample['structure_intervention']
@@ -354,20 +492,28 @@ class TabFactIntervention:
         table = sample['table_html_csv']
         statement = sample['statement']
 
-        messages = [{"role": "user", "content": user_prompt.format(intervention_alert=intervention_alert, few_shot_examples=few_shot_examples, table=table, statement=statement)}]
-        add_generation_prompt_status = True
-
-        if include_gold_structure:
-            assistant_prefix = f"Verifier Query: {sample['verifier_query_gt']}\nExecution Result:"
-            messages.append({"role": "assistant", "content": assistant_prefix})
-            add_generation_prompt_status = False
-
-        prompt = self.llm_model.apply_chat_template(
-            messages,
-            add_generation_prompt=add_generation_prompt_status
+        before_examples, after_examples = user_prompt.split("### FEW-SHOT EXAMPLES\n\n", 1)
+        instruction = before_examples.format(intervention_alert=intervention_alert).rstrip() + "\n\n### FEW-SHOT EXAMPLES\n"
+        current_sample = after_examples.split("{few_shot_examples}", 1)[1].lstrip("\n").format(
+            table=table,
+            statement=statement,
         )
 
-        if not add_generation_prompt_status:
-            prompt = self.llm_model.clean_model_specific_completion(prompt)
+        prompt = Prompt(
+            prompting_regime="baseline_structure_faithfulness",
+            use_tool_call=False,
+            tool_call_instruction="",
+            instruction=instruction,
+            few_shot=few_shot_examples,
+            llm_model=self.llm_model,
+        )
 
-        return prompt
+        gold_structure = None
+        if include_gold_structure:
+            gold_structure = f"Verifier Query: {sample['verifier_query_gt']}\nExecution Result:"
+
+        return prompt.make_prompt(
+            current_sample=current_sample,
+            include_gold_structure=include_gold_structure,
+            gold_structure=gold_structure,
+        )

@@ -2,6 +2,7 @@ import re
 import random
 from copy import deepcopy
 from datasets_for_intervention import capture_ricechem_checklist
+from datasets_for_intervention.prompt import Prompt
 
 
 
@@ -9,6 +10,9 @@ class RiceChemIntervention:
     def __init__(self, dataset, llm_model, prompt_type = 'baseline_structure_faithfulness'):
         self.dataset = dataset
         self.llm_model = llm_model
+        assert prompt_type in ["baseline_structure_faithfulness", "detailed_instruction"], (
+            "prompt_type must be one of: baseline_structure_faithfulness, detailed_instruction"
+        )
         self.prompt_type = prompt_type
 
     def interventions_to_prompt(self, sample:dict):
@@ -229,10 +233,6 @@ class RiceChemIntervention:
             "- If the checklist contains mutually exclusive items (e.g., FULLY vs PARTIALLY), never mark both True.\n"
             "- After filling the checklist, compute the final grade as the sum of the weights of True items. "
             "Express the grade as a float in 0.5 increments within [0, 8].\n\n"
-            
-            "Intervention Possibility:\n"
-            "- The intermediate structure might be altered as a result of an external intervention.\n"
-            "- In case of contradiction between the original context and the intermediate structure, prioritize the evidence from the intermediate structure.\n"
 
             "Important output rule:\n"
             "Your final response must contain ONLY two fields and no other text:\n"
@@ -328,26 +328,31 @@ class RiceChemIntervention:
             f"{checklist_string}\n"
         )
 
-        messages = [{"role": "user", "content": user_prompt}]
-        add_generation_prompt_status = True
-        if include_gold_structure:
-            checklist_string = "Checklist:\n"
-            for rubric_item, answer in ricechem_sample['filled_rubric'].items():
-                checklist_item = f"{rubric_item} (weight: {item2weight[rubric_item]}) (True/False): {answer}\n"
-                checklist_string += checklist_item
-            checklist_string += "Final grade (0-8): "
-            messages.append({"role": "assistant", "content": checklist_string})
+        before_few_shot, after_few_shot = user_prompt.split("FEW-SHOT EXAMPLES:\n\n", 1)
+        few_shot, current_tail = after_few_shot.split("Now follow the same structure for the given input.\n\n", 1)
 
-            add_generation_prompt_status = False
+        instruction = before_few_shot.rstrip() + "\n\nFEW-SHOT EXAMPLES:\n"
+        current_sample = "Now follow the same structure for the given input.\n\n" + current_tail.lstrip("\n")
 
-
-        prompt = self.llm_model.apply_chat_template(
-            messages,
-            add_generation_prompt=add_generation_prompt_status
+        prompt = Prompt(
+            prompting_regime="baseline_structure_faithfulness",
+            use_tool_call=False,
+            tool_call_instruction="",
+            instruction=instruction,
+            few_shot=few_shot,
+            llm_model=self.llm_model,
         )
 
-        # remove the end token if it is present since we need to continue the generation
-        if add_generation_prompt_status == False:
-            prompt = self.llm_model.clean_model_specific_completion(prompt)
+        gold_structure = None
+        if include_gold_structure:
+            gold_structure = "Checklist:\n" + "".join(
+                f"{rubric_item} (weight: {item2weight[rubric_item]}) (True/False): {answer}\n"
+                for rubric_item, answer in ricechem_sample["filled_rubric"].items()
+            )
+            gold_structure += "Final grade (0-8): "
 
-        return prompt
+        return prompt.make_prompt(
+            current_sample=current_sample,
+            include_gold_structure=include_gold_structure,
+            gold_structure=gold_structure,
+        )
