@@ -169,6 +169,44 @@ class PAUQIntervention:
         
         return {"HSVT": [hsvt_sample], "Local Edits": local_edits, "Global": [global_sample]}
 
+    def make_correction_intervention(self, sample: dict, bad_generated_output: dict) -> dict:
+        """
+        After we query the model with BAD mediator, we:
+          - store model score under bad mediator in sample['score']
+          - create a single intervention 'correction' that replaces mediator with golden_rubric
+        """
+        bad_completion = self.remove_special_tokens(bad_generated_output['completion'])
+        bad_sql_model = bad_completion.strip()
+
+        sample["completion_type"] = "bad_structure"
+        sample["schema_links"] = sample["bad_schema_links"]
+        sample["skeleton"] = sample["bad_skeleton"]
+        sample["slots"] = sample["bad_slots"]
+        sample["generated_sql_before_intervention"] = bad_sql_model
+
+        corrected = deepcopy(sample)
+        corrected["schema_links"] = corrected["true_schema_links"]
+        corrected["skeleton"] = corrected["true_skeleton"]
+        corrected["slots"] = corrected["true_slots"]
+        corrected["generated_sql_before_intervention"] = corrected["query"]
+        corrected["completion_type"] = bad_sql_model
+
+        sample["structure_intervention"] = {"correction": [corrected]}
+        return sample
+
+    def collect_correction_completion(self, sample_with_intervention: dict, corrected_generated_output: list) -> dict:
+        """
+        Parse the single completion after correction and store it as score_after_intervention.
+        """
+        if len(corrected_generated_output) != 1:
+            raise ValueError("correction expects exactly one generated output.")
+
+        completion = corrected_generated_output[0]["completion"]
+        corrected_sql_model = completion.strip()
+
+        sample_with_intervention["structure_intervention"]["correction"][0]["sql_after_intervention"] = corrected_sql_model
+        return sample_with_intervention
+
     def make_prompt(self, sample: dict, include_gold_structure: bool = False):
         question = sample["question"]
         db_schema = ""

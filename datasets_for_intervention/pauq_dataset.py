@@ -109,21 +109,61 @@ class PAUQDataset:
         return self.data[i]
 
 
+class PAUQCorrectionDataset:
+    def __init__(
+        self,
+        path: str,
+    ):
+        with open(path, "r", encoding="utf-8") as f:
+            idx2payload = json.load(f)
+        if not isinstance(idx2payload, dict):
+            raise ValueError("PAUQ correction file must be a JSON dict: idx -> payload")
+
+        self.data = []
+        self.idx2claim = {}
+
+        for raw_idx, p in idx2payload.items():
+            if not isinstance(p, dict):
+                raise ValueError(f"Payload for idx={raw_idx} must be a dict")
+
+            idx = int(raw_idx) if str(raw_idx).isdigit() else raw_idx
+
+            for k in ("query", "question", "db", "db_schema", "true_schema_links", "true_slots", "true_skeleton", "paraphrase", "bad_schema_links", "bad_skeleton", "bad_slots"):
+                if k not in p:
+                    raise ValueError(f"Missing '{k}' for idx={raw_idx}")
+
+            sample = {
+                "idx": idx,
+            }
+            for k, v in p.items():
+                sample[k] = v
+
+            self.data.append(sample)
+
+        self.data.sort(key=lambda x: str(x["idx"]))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, i):
+        return self.data[i]
+        
 
 if __name__ == "__main__":
-    dataset = PAUQDataset("./pauq")
-    tables = {}
-    for i in range(1, 100, 20):
-        print("=" * 100)
-        for k, v in dataset[i].items():
-            if k == "db_schema":
-                for table_name in v:
-                    tables[table_name] = v[table_name]
-            print("\t"*4, end="")
-            if isinstance(v, str):
-                print(f'"{k}": "{v}",')
-            else:
-                print(f'"{k}": {v},')
+    dataset = PAUQCorrectionDataset("./pauq/correction/qwen3-4B_2026-01-27@18:37_bsf.json")
+    print(dataset[0])
+    # tables = {}
+    # for i in range(1, 100, 20):
+    #     print("=" * 100)
+    #     for k, v in dataset[i].items():
+    #         if k == "db_schema":
+    #             for table_name in v:
+    #                 tables[table_name] = v[table_name]
+    #         print("\t"*4, end="")
+    #         if isinstance(v, str):
+    #             print(f'"{k}": "{v}",')
+    #         else:
+    #             print(f'"{k}": {v},')
         
-    print(tables)
+    # print(tables)
     

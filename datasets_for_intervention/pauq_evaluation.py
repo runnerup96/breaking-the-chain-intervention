@@ -230,7 +230,125 @@ class PAUQEvaluation:
         #                 print(f"    Edit {edit_id}: mean = No, std = No")
 
 
+class PAUQCorrectionEvaluation:
+    def __init__(self, dataset):
+        self.dataset = dataset
 
+        self.idx2gold_schema_links = {s["idx"]: s["true_schema_links"] for s in dataset}
+        self.idx2gold_skeleton = {s["idx"]: s["true_skeleton"] for s in dataset}
+        self.idx2gold_slots = {s["idx"]: s["true_slots"] for s in dataset}
+        self.idx2gold_sql = {s["idx"]: s["query"] for s in dataset}
+        self.idx2bad_schema_links = {s["idx"]: s["bad_schema_links"] for s in dataset}
+        self.idx2bad_skeleton = {s["idx"]: s["bad_skeleton"] for s in dataset}
+        self.idx2bad_slots = {s["idx"]: s["bad_slots"] for s in dataset}
+        self.idx2db_schema = {s["idx"]: s["db_schema"] for s in dataset}
+
+    def compare_schema_links(self, true_schema_links: dict, generated_schema_links: dict) -> bool:
+        true_tables = set(true_schema_links.keys())
+        generated_tables = set(generated_schema_links.keys())
+        if true_tables != generated_tables:
+            return False
+        
+        for table_name in generated_schema_links:
+            if set(true_schema_links[table_name]) != set(generated_schema_links[table_name]):
+                return False
+            
+        return True
+        
+    def compare_sql_queries(self, query_before: str, query_after: str, db_schema: dict) -> bool:
+        schema_links_before = extract_schema_links(parse_sql(query_before, db_schema))
+        schema_links_after = extract_schema_links(parse_sql(query_after, db_schema))
+
+        return self.compare_schema_links(schema_links_before, schema_links_after)
+
+    def summarize_nested_lists(self, tree):
+        if isinstance(tree, dict):
+            return {k: self.summarize_nested_lists(v) for k, v in tree.items()}
+        elif isinstance(tree, list):
+            if not all(isinstance(x, (int, float)) for x in tree):
+                raise TypeError("All list elements must be int or float.")
+            if len(tree) == 0:
+                return {"mean": None, "std": None}
+            return {"mean": round(mean(tree), 3), "std": round(pstdev(tree), 3)}
+        else:
+            raise TypeError("Leaf values must be lists; found non-list leaf instead.")
+
+    def evaluate(self, processed_samples_list):
+        evaluation_metrics = {
+            "performance": {
+                "with_bad_structure": {
+                    # "checklist_match": [],
+                    "sql_match": [],
+                },
+                "with_corrected_structure": {
+                    "sql_match": [],
+                },
+            },
+            "faithfulness": {
+                "correction": [],  # identical to score_match after correction (expected = golden_score)
+            },
+        }
+
+        for sample in processed_samples_list:
+            idx = sample["idx"]
+
+            db_schema = self.idx2db_schema[idx]
+            gold_schema_links = self.idx2gold_schema_links[idx]
+            gold_skeleton = self.idx2gold_skeleton[idx]
+            gold_slots = self.idx2gold_slots[idx]
+            
+            gold_sql = self.idx2gold_sql[idx]
+
+            bad_schema_links = self.idx2bad_schema_links[idx]
+            bad_skeleton = self.idx2bad_skeleton[idx]
+            bad_slots = self.idx2bad_slots[idx]
+
+            bad_sql_pred = sample.get("generated_sql_before_intervention")
+            
+            # evaluation_metrics["performance"]["with_bad_structure"]["checklist_match"].append(
+            #     self.compare_checklists(gold_rubric, bad_rubric)
+            #     self.compare_structures({
+            #         "gold_schema_links": gold_schema_links,
+            #         "bad_schema_links": bad_schema_links,
+            #         "gold_skeleton": gold_skeleton,
+            #         "bad_skeleton": bad_skeleton,
+            #     })
+            # )
+            evaluation_metrics["performance"]["with_bad_structure"]["sql_match"].append(
+                self.compare_sql_queries(gold_sql, bad_sql_pred, db_schema)
+            )
+
+            corrected = sample["structure_intervention"]["correction"][0]
+            corrected_sql_pred = corrected.get("sql_after_intervention")
+            after = self.compare_sql_queries(gold_sql, corrected_sql_pred, db_schema)
+            evaluation_metrics["performance"]["with_corrected_structure"]["sql_match"].append(after)
+            evaluation_metrics["faithfulness"]["correction"].append(after)
+
+        aggregated = self.summarize_nested_lists(evaluation_metrics)
+        self.print_evaluation_metrics(aggregated)
+        return aggregated
+
+    def print_evaluation_metrics(self, evaluation_metrics):
+        print("\nEvaluation Results (RiceChem Correction):")
+        print("========================================")
+
+        print("\nPerformance:")
+        for structure_type, metrics in evaluation_metrics["performance"].items():
+            print(f"\n{structure_type}:")
+            for metric_name, value in metrics.items():
+                if None not in value.values():
+                    print(f"  {metric_name}: mean = {value['mean']}, std = {value['std']}")
+                else:
+                    print(f"  {metric_name}: mean = No, std = No")
+
+        print("\nFaithfulness:")
+        for metric_name, value in evaluation_metrics["faithfulness"].items():
+            if None not in value.values():
+                print(f"  {metric_name}: mean = {value['mean']}, std = {value['std']}")
+            else:
+                print(f"  {metric_name}: mean = No, std = No")
+
+                
 if __name__ == "__main__":
     sql_before = "SELECT full_name FROM students WHERE age > 20;"
     sql_after = "SELECT ages FROM new_students WHERE age > 20;"

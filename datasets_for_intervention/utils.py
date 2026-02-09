@@ -276,6 +276,19 @@ def parse_model_response(output_str: str):
         "slots": slots,
         "skeleton": skeleton,
     }
+
+
+def compare_schema_links(true_schema_links: dict, generated_schema_links: dict) -> bool:
+    true_tables = set(true_schema_links.keys())
+    generated_tables = set(generated_schema_links.keys())
+    if true_tables != generated_tables:
+        return False
+    
+    for table_name in generated_schema_links:
+        if set(true_schema_links[table_name]) != set(generated_schema_links[table_name]):
+            return False
+        
+    return True
     
 
 if __name__ == '__main__':
