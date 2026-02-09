@@ -170,6 +170,10 @@ def extract_skeleton_and_slots(sql: str, db_schema: dict) -> str:
             table_dot_column_names_original.append(f"{t_name}.{col}")
             column_names_original.append(col)
 
+    table_names_lc = {t.lower() for t in table_names_original}
+    column_names_lc = {c.lower() for c in column_names_original}
+    table_dot_column_names_lc = {tc.lower() for tc in table_dot_column_names_original}
+
     parsed_sql = Parser(sql)
     masked_tokens = []
     slots = []
@@ -179,11 +183,25 @@ def extract_skeleton_and_slots(sql: str, db_schema: dict) -> str:
         if not val:
             continue
 
-        if val in table_names_original:
+        if val.startswith('"') and val.endswith('"') and len(val) >= 2:
+            inner = val[1:-1]
+            inner_lc = inner.lower()
+            # Quoted identifier
+            if inner_lc in table_names_lc or inner_lc in column_names_lc or inner_lc in table_dot_column_names_lc:
+                val = inner
+            else:
+                # Treat as a literal string (keep quotes as in original).
+                masked_tokens.append(f"SLOT_{i}")
+                i += 1
+                slots.append(val)
+                continue
+
+        val_lc = val.lower()
+        if val_lc in table_names_lc:
             masked_tokens.append(f"SLOT_{i}")
             i += 1
             slots.append(val)
-        elif val in column_names_original or val in table_dot_column_names_original:
+        elif val_lc in column_names_lc or val_lc in table_dot_column_names_lc:
             masked_tokens.append(f"SLOT_{i}")
             i += 1
             slots.append(val)

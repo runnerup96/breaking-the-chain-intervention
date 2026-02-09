@@ -13,6 +13,15 @@ class PAUQEvaluation:
         self.idx2gold_schema_links = {sample['index']: sample['true_schema_links'] for sample in dataset}
         self.idx2gold_sql = {sample['index']: sample['query'] for sample in dataset}
 
+    @staticmethod
+    def _normalize_schema_links(schema_links: dict) -> dict:
+        normalized = {}
+        for table, cols in schema_links.items():
+            table_lc = table.lower()
+            cols_lc = [c.lower() for c in cols]
+            normalized[table_lc] = sorted(set(cols_lc))
+        return normalized
+
     def compare_sql_queries(self, query_before: str, query_after: str, intervention_list: dict[str, str], db_schema: dict) -> bool:
         schema_links_before = extract_schema_links(parse_sql(query_before, db_schema))
         schema_links_after = extract_schema_links(parse_sql(query_after, db_schema))
@@ -48,6 +57,9 @@ class PAUQEvaluation:
         return validate_generated_sql(true_sql, generated_sql, db_schema)
     
     def compare_schema_links(self, true_schema_links: dict, generated_schema_links: dict) -> bool:
+        true_schema_links = self._normalize_schema_links(true_schema_links)
+        generated_schema_links = self._normalize_schema_links(generated_schema_links)
+
         true_tables = set(true_schema_links.keys())
         generated_tables = set(generated_schema_links.keys())
         if true_tables != generated_tables:
@@ -243,7 +255,19 @@ class PAUQCorrectionEvaluation:
         self.idx2bad_slots = {s["idx"]: s["bad_slots"] for s in dataset}
         self.idx2db_schema = {s["idx"]: s["db_schema"] for s in dataset}
 
+    @staticmethod
+    def _normalize_schema_links(schema_links: dict) -> dict:
+        normalized = {}
+        for table, cols in schema_links.items():
+            table_lc = table.lower()
+            cols_lc = [c.lower() for c in cols]
+            normalized[table_lc] = sorted(set(cols_lc))
+        return normalized
+
     def compare_schema_links(self, true_schema_links: dict, generated_schema_links: dict) -> bool:
+        true_schema_links = self._normalize_schema_links(true_schema_links)
+        generated_schema_links = self._normalize_schema_links(generated_schema_links)
+
         true_tables = set(true_schema_links.keys())
         generated_tables = set(generated_schema_links.keys())
         if true_tables != generated_tables:

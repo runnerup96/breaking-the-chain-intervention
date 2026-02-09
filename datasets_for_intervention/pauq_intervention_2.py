@@ -202,7 +202,7 @@ class PAUQIntervention:
             raise ValueError("correction expects exactly one generated output.")
 
         completion = corrected_generated_output[0]["completion"]
-        corrected_sql_model = completion.strip()
+        corrected_sql_model = self.remove_special_tokens(completion).strip()
 
         sample_with_intervention["structure_intervention"]["correction"][0]["sql_after_intervention"] = corrected_sql_model
         return sample_with_intervention
@@ -370,7 +370,7 @@ class PAUQIntervention:
             # Add slots matching
             mediator_string += "===SLOT_MATCHING===\n"
             for i, slot in enumerate(sample["slots"]):
-                mediator_string += f"SLOT_{i}:{slot}\n"
+                mediator_string += f"SLOT_{i + 1}:{slot}\n"
 
             # Add final SQL
             mediator_string += "===SQL==="
