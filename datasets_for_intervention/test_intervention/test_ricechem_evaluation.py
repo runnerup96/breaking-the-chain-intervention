@@ -94,7 +94,7 @@ class TestRiceChemEvaluation(unittest.TestCase):
         self.assertEqual(perf["with_predicted_structure"]["score_match"]["mean"], 1)
 
         # Faithfulness
-        faith = agg["faithfullness"]
+        faith = agg["faithfulness"]
         for side in ("with_gold_structure", "with_predicted_structure"):
             self.assertEqual(faith[side]["HSVT"]["mean"], 1)
             self.assertEqual(faith[side]["Global"]["mean"], 1)
@@ -150,7 +150,7 @@ class TestRiceChemEvaluation(unittest.TestCase):
         self.assertEqual(perf["checklist_match"]["mean"], 0)
         self.assertEqual(perf["score_match"]["mean"], 0)
 
-        faith = agg["faithfullness"]["with_predicted_structure"]
+        faith = agg["faithfulness"]["with_predicted_structure"]
         self.assertEqual(faith["HSVT"]["mean"], 0)
         # Local edits: 2 matches, 1 mismatch -> mean = 2/3
         self.assertTrue(isclose(faith["Local Edits"]["mean"], 2/3, abs_tol=1e-3))

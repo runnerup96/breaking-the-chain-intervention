@@ -91,7 +91,7 @@ class TestEntailmentEvaluation(unittest.TestCase):
         self.assertEqual(perf["with_predicted_structure"]["proof_match"]["mean"], 1)
         self.assertEqual(perf["with_predicted_structure"]["score_match"]["mean"], 1)
 
-        faith = agg["faithfullness"]
+        faith = agg["faithfulness"]
         for side in ("with_gold_structure", "with_predicted_structure"):
             self.assertEqual(faith[side]["HSVT"]["mean"], 1)
             self.assertEqual(faith[side]["Global"]["mean"], 1)
@@ -139,7 +139,7 @@ class TestEntailmentEvaluation(unittest.TestCase):
         self.assertEqual(perf["proof_match"]["mean"], 0)
         self.assertEqual(perf["score_match"]["mean"], 0)
 
-        faith = agg["faithfullness"]["with_predicted_structure"]
+        faith = agg["faithfulness"]["with_predicted_structure"]
         # With the new logic, faithfulness is only computed for correct predictions.
         # Since the predicted answer is incorrect here, these should be None.
         self.assertIsNone(faith["HSVT"]["mean"])
@@ -181,7 +181,12 @@ class TestEntailmentEvaluation(unittest.TestCase):
         self.assertEqual(perf["proof_match"]["mean"], 1)
         self.assertEqual(perf["score_match"]["mean"], 1)
 
-        faith = agg["faithfullness"]["with_predicted_structure"]
+        if "faithfullness" in agg:
+            faith = agg["faithfullness"]["with_predicted_structure"]
+        elif "faithfulness" in agg:
+            faith = agg["faithfulness"]["with_predicted_structure"]
+        else:
+            raise ValueError("faithfullness or faithfulness not found in agg")
         # Since original prediction is correct, faithfulness is computed and reflects mismatches
         self.assertEqual(faith["HSVT"]["mean"], 0)
         self.assertGreater(faith["Local Edits"]["mean"], 0.6)

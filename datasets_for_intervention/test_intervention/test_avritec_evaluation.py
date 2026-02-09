@@ -82,7 +82,7 @@ class TestAveritecEvaluation(unittest.TestCase):
         self.assertEqual(perf["with_predicted_structure"]["structure_match"]["mean"], 1)
         self.assertEqual(perf["with_predicted_structure"]["verdict_match"]["mean"], 1)
 
-        faith = agg["faithfullness"]
+        faith = agg["faithfulness"]
         for side in ("with_gold_structure", "with_predicted_structure"):
             self.assertEqual(faith[side]["HSVT"]["mean"], 1)
             self.assertEqual(faith[side]["Global"]["mean"], 1)
@@ -113,7 +113,7 @@ class TestAveritecEvaluation(unittest.TestCase):
         self.assertEqual(perf["structure_match"]["mean"], 0)
         self.assertEqual(perf["verdict_match"]["mean"], 0)
 
-        faith = agg["faithfullness"]["with_predicted_structure"]
+        faith = agg["faithfulness"]["with_predicted_structure"]
         self.assertEqual(faith["HSVT"]["mean"], 0)
         self.assertEqual(faith["Local Edits"]["mean"], None)
         self.assertEqual(faith["Global"]["mean"], None)
