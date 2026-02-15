@@ -20,7 +20,7 @@ from datasets_for_intervention import entailment_intervention, entailment_datase
 from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
 from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
 from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
-from datasets_for_intervention import pauq_intervention, pauq_dataset, pauq_evaluation
+from datasets_for_intervention import pauq_intervention_2, pauq_dataset, pauq_evaluation
 
 logging.set_verbosity_error()
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     elif args.evaluation_dataset == "pauq":
         dataset = pauq_dataset.PAUQDataset(args.data_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = pauq_intervention.PAUQIntervention(dataset, llm_model)
+        intervention_logic = pauq_intervention_2.PAUQIntervention(dataset, llm_model)
         evaluator = pauq_evaluation.PAUQEvaluation(dataset)
     elif args.evaluation_dataset == "tabfact":
         dataset_path = os.path.join(project_path, "statics/result_splits/Table-Fact-Checking")

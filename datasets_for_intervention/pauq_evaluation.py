@@ -353,7 +353,7 @@ class PAUQCorrectionEvaluation:
         return aggregated
 
     def print_evaluation_metrics(self, evaluation_metrics):
-        print("\nEvaluation Results (RiceChem Correction):")
+        print("\nEvaluation Results (PAUQ Correction):")
         print("========================================")
 
         print("\nPerformance:")
