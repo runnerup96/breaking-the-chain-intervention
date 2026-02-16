@@ -34,10 +34,14 @@ class PAUQIntervention:
         intervention = sample['structure_intervention']
         intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
         intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
-        for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
+        for completion, intervention_type, idx, generation in zip(completion_list, intervention_list, intervention_idx_list, generated_output):
             extracted = completion.strip()
             sample['structure_intervention'][intervention_type][idx]['generated_output'] = completion
             sample['structure_intervention'][intervention_type][idx]['generated_sql'] = extracted
+            if "token_metrics" in generation:
+                sample['structure_intervention'][intervention_type][idx]['token_metrics'] = generation["token_metrics"]
+            if "prompt_metrics" in generation:
+                sample['structure_intervention'][intervention_type][idx]['prompt_metrics'] = generation["prompt_metrics"]
         return sample
     
     def make_local_intervention(self, sample: dict, intervention_type: str = "column"):

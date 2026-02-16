@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 import sys
 from sql_metadata import Parser
 
-sys.path.append("/home/jovyan/kmvafin/research/test-suite-sql-eval")
+sys.path.append("/Users/kmvafin/research/test-suite-sql-eval")
 import evaluation
 
 

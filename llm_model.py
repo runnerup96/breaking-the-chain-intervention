@@ -117,18 +117,24 @@ class LLMModel:
             raise NotImplementedError(f"Model family for {model_name} not yet implemented")
 
     def generate(self, prompts: List[str], max_new_tokens: int,
-                 skip_special_tokens: bool) -> List[Dict[str, str]]:
+                 skip_special_tokens: bool, return_token_metrics: bool = False,
+                 return_prompt_metrics: bool = False) -> List[Dict[str, str]]:
         if self.use_api:
-            return self._generate_api_batch(prompts, max_new_tokens, skip_special_tokens)
+            return self._generate_api_batch(prompts, max_new_tokens, skip_special_tokens,
+                                            return_token_metrics, return_prompt_metrics)
         
         if self.model_family == QWEN3_MODEL_FAMILY:
-            return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens)
+            return self._generate_qwen3_batch(prompts, max_new_tokens, skip_special_tokens,
+                                              return_token_metrics, return_prompt_metrics)
         elif self.model_family == FALCON3_MODEL_FAMILY:
-            return self._generate_falcon3_batch(prompts, max_new_tokens, skip_special_tokens)
+            return self._generate_falcon3_batch(prompts, max_new_tokens, skip_special_tokens,
+                                                return_token_metrics, return_prompt_metrics)
         elif self.model_family in [LLAMA32_MODEL_FAMILY, LLAMA31_MODEL_FAMILY]:
-            return self._generate_llama_batch(prompts, max_new_tokens, skip_special_tokens)
+            return self._generate_llama_batch(prompts, max_new_tokens, skip_special_tokens,
+                                              return_token_metrics, return_prompt_metrics)
         elif self.model_family == GEMMA2_MODEL_FAMILY:
-            return self._generate_gemma2_batch(prompts, max_new_tokens, skip_special_tokens)
+            return self._generate_gemma2_batch(prompts, max_new_tokens, skip_special_tokens,
+                                               return_token_metrics, return_prompt_metrics)
         else:
             # For now, return error for non-supported models
             # TODO: Add other model generation functions
@@ -160,18 +166,36 @@ class LLMModel:
         return prompt
 
     def _generate_qwen3_batch(self, prompts: List[str], max_new_tokens: int,
-                              skip_special_tokens: bool) -> List[Dict[str, str]]:
+                              skip_special_tokens: bool, return_token_metrics: bool,
+                              return_prompt_metrics: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts using Qwen3 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        if return_token_metrics:
+            generation_output = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1,
+                output_scores=True,
+                return_dict_in_generate=True
+            )
+            generated_ids = generation_output.sequences
+            scores = generation_output.scores
+        else:
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
+            scores = None
 
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+        prompt_logits = None
+        if return_prompt_metrics:
+            with torch.no_grad():
+                prompt_logits = self.model(**model_inputs).logits
 
         results = []
         for i in range(len(prompts)):
@@ -183,20 +207,52 @@ class LLMModel:
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
-            results.append({"prompt": prompt, "completion": completion})
+            result = {"prompt": prompt, "completion": completion}
+            if return_token_metrics and scores is not None:
+                result["token_metrics"] = self._collect_token_metrics(
+                    generated_ids[i],
+                    scores,
+                    input_length,
+                    i
+                )
+            if return_prompt_metrics and prompt_logits is not None:
+                result["prompt_metrics"] = self._collect_prompt_metrics(
+                    model_inputs.input_ids[i],
+                    model_inputs.attention_mask[i],
+                    prompt_logits[i]
+                )
+            results.append(result)
 
         return results
 
     def _generate_falcon3_batch(self, prompts: List[str], max_new_tokens: int,
-                                skip_special_tokens: bool) -> List[Dict[str, str]]:
+                                skip_special_tokens: bool, return_token_metrics: bool,
+                                return_prompt_metrics: bool) -> List[Dict[str, str]]:
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        if return_token_metrics:
+            generation_output = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1,
+                output_scores=True,
+                return_dict_in_generate=True
+            )
+            generated_ids = generation_output.sequences
+            scores = generation_output.scores
+        else:
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
+            scores = None
 
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+        prompt_logits = None
+        if return_prompt_metrics:
+            with torch.no_grad():
+                prompt_logits = self.model(**model_inputs).logits
 
         results = []
         for i in range(len(prompts)):
@@ -208,23 +264,55 @@ class LLMModel:
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
-            results.append({"prompt": prompt, "completion": completion})
+            result = {"prompt": prompt, "completion": completion}
+            if return_token_metrics and scores is not None:
+                result["token_metrics"] = self._collect_token_metrics(
+                    generated_ids[i],
+                    scores,
+                    input_length,
+                    i
+                )
+            if return_prompt_metrics and prompt_logits is not None:
+                result["prompt_metrics"] = self._collect_prompt_metrics(
+                    model_inputs.input_ids[i],
+                    model_inputs.attention_mask[i],
+                    prompt_logits[i]
+                )
+            results.append(result)
 
         return results
 
     def _generate_llama_batch(self, prompts: List[str], max_new_tokens: int,
-                               skip_special_tokens: bool) -> List[Dict[str, str]]:
+                               skip_special_tokens: bool, return_token_metrics: bool,
+                               return_prompt_metrics: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts using Llama3.2 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        if return_token_metrics:
+            generation_output = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1,
+                output_scores=True,
+                return_dict_in_generate=True
+            )
+            generated_ids = generation_output.sequences
+            scores = generation_output.scores
+        else:
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
+            scores = None
 
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+        prompt_logits = None
+        if return_prompt_metrics:
+            with torch.no_grad():
+                prompt_logits = self.model(**model_inputs).logits
 
         results = []
         for i in range(len(prompts)):
@@ -236,23 +324,55 @@ class LLMModel:
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
-            results.append({"prompt": prompt, "completion": completion})
+            result = {"prompt": prompt, "completion": completion}
+            if return_token_metrics and scores is not None:
+                result["token_metrics"] = self._collect_token_metrics(
+                    generated_ids[i],
+                    scores,
+                    input_length,
+                    i
+                )
+            if return_prompt_metrics and prompt_logits is not None:
+                result["prompt_metrics"] = self._collect_prompt_metrics(
+                    model_inputs.input_ids[i],
+                    model_inputs.attention_mask[i],
+                    prompt_logits[i]
+                )
+            results.append(result)
 
         return results
 
     def _generate_gemma2_batch(self, prompts: List[str], max_new_tokens: int,
-                               skip_special_tokens: bool) -> List[Dict[str, str]]:
+                               skip_special_tokens: bool, return_token_metrics: bool,
+                               return_prompt_metrics: bool) -> List[Dict[str, str]]:
         """
         Generate text for multiple prompts using Gemma2 model in batch.
         """
         model_inputs = self.tokenizer(prompts, return_tensors="pt", padding=True).to(self.model.device)
+        if return_token_metrics:
+            generation_output = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1,
+                output_scores=True,
+                return_dict_in_generate=True
+            )
+            generated_ids = generation_output.sequences
+            scores = generation_output.scores
+        else:
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
+            scores = None
 
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+        prompt_logits = None
+        if return_prompt_metrics:
+            with torch.no_grad():
+                prompt_logits = self.model(**model_inputs).logits
 
         results = []
         for i in range(len(prompts)):
@@ -264,7 +384,21 @@ class LLMModel:
             prompt = self.tokenizer.decode(prompt_ids, skip_special_tokens=False)
             completion = self.tokenizer.decode(completion_ids, skip_special_tokens=skip_special_tokens)
 
-            results.append({"prompt": prompt, "completion": completion})
+            result = {"prompt": prompt, "completion": completion}
+            if return_token_metrics and scores is not None:
+                result["token_metrics"] = self._collect_token_metrics(
+                    generated_ids[i],
+                    scores,
+                    input_length,
+                    i
+                )
+            if return_prompt_metrics and prompt_logits is not None:
+                result["prompt_metrics"] = self._collect_prompt_metrics(
+                    model_inputs.input_ids[i],
+                    model_inputs.attention_mask[i],
+                    prompt_logits[i]
+                )
+            results.append(result)
 
         return results
     
@@ -272,7 +406,9 @@ class LLMModel:
         self,
         prompts: List[str],
         max_new_tokens: int,
-        skip_special_tokens: bool) -> List[Dict[str, str]]:
+        skip_special_tokens: bool,
+        return_token_metrics: bool,
+        return_prompt_metrics: bool) -> List[Dict[str, str]]:
 
         resp = self.client.completions.create(
             model=self.model_name,
@@ -288,12 +424,65 @@ class LLMModel:
             choice = index2choice[i]
             completion_text = choice.text
 
-            results.append({
+            result = {
                 "prompt": prompt,
                 "completion": completion_text,
-            })
+            }
+            if return_token_metrics:
+                result["token_metrics"] = None
+            if return_prompt_metrics:
+                result["prompt_metrics"] = None
+            results.append(result)
 
         return results
+
+    def _collect_token_metrics(self, generated_ids: torch.Tensor, scores: List[torch.Tensor], prompt_length: int, batch_idx: int):
+        """
+        Collect per-token metrics for the generated continuation.
+        Returns a list of dicts with cross-entropy, max logit, and gt token logit.
+        """
+        metrics = []
+        for step, step_scores in enumerate(scores):
+            token_id = int(generated_ids[prompt_length + step].item())
+            logits = step_scores[batch_idx]
+            max_logit = float(torch.max(logits).item())
+            gt_logit = float(logits[token_id].item())
+            log_probs = torch.log_softmax(logits, dim=-1)
+            cross_entropy = float((-log_probs[token_id]).item())
+            token_str = self.tokenizer.decode([token_id], skip_special_tokens=False)
+            metrics.append({
+                "token_id": token_id,
+                "token": token_str,
+                "cross_entropy": cross_entropy,
+                "max_logit": max_logit,
+                "gt_logit": gt_logit,
+            })
+        return metrics
+
+    def _collect_prompt_metrics(self, input_ids: torch.Tensor, attention_mask: torch.Tensor, logits: torch.Tensor):
+        """
+        Collect per-token metrics for the prompt (next-token prediction on prompt tokens).
+        """
+        metrics = []
+        seq_len = input_ids.shape[0]
+        for t in range(1, seq_len):
+            if attention_mask[t].item() == 0 or attention_mask[t - 1].item() == 0:
+                continue
+            token_id = int(input_ids[t].item())
+            step_logits = logits[t - 1]
+            max_logit = float(torch.max(step_logits).item())
+            gt_logit = float(step_logits[token_id].item())
+            log_probs = torch.log_softmax(step_logits, dim=-1)
+            cross_entropy = float((-log_probs[token_id]).item())
+            token_str = self.tokenizer.decode([token_id], skip_special_tokens=False)
+            metrics.append({
+                "token_id": token_id,
+                "token": token_str,
+                "cross_entropy": cross_entropy,
+                "max_logit": max_logit,
+                "gt_logit": gt_logit,
+            })
+        return metrics
 
 
     # def _generate_api_batch(

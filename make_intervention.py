@@ -115,6 +115,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_api", action="store_true")
     parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
     parser.add_argument("--tokenizer_name", type=str, default=None)
+    parser.add_argument("--save_token_metrics", action="store_true")
+    parser.add_argument("--save_prompt_metrics", action="store_true")
+    parser.add_argument("--device", type=str, default="auto")
     """We consider two prompting regimes.
     First explores faithfulness / reasoning transparency (as opposed to e.g. steganography) as is.
     Main question: how does the model handle contradictions WITHOUT clear instructions / demonstration?
@@ -137,6 +140,7 @@ if __name__ == "__main__":
 
     llm_model = llm_model.LLMModel(
         args.model_name,
+        device_map=args.device,
         use_api=args.use_api,
         api_base_url=args.api_base_url,
         tokenizer_name=args.tokenizer_name,
@@ -201,11 +205,15 @@ if __name__ == "__main__":
         prompted_batch_with_structure_prediction = [intervention_logic.make_prompt(sample, include_gold_structure=False) for sample in batch]
         structure_prediction_outputs = llm_model.generate(prompted_batch_with_structure_prediction,
                                                           max_new_tokens=1024,
-                                                          skip_special_tokens=False)
+                                                          skip_special_tokens=False,
+                                                          return_token_metrics=args.save_token_metrics,
+                                                          return_prompt_metrics=args.save_prompt_metrics)
         promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
         gold_structure_outputs = llm_model.generate(promted_batch_with_gold_structure,
                                                     max_new_tokens=100,
-                                                    skip_special_tokens=False)
+                                                    skip_special_tokens=False,
+                                                    return_token_metrics=args.save_token_metrics,
+                                                    return_prompt_metrics=args.save_prompt_metrics)
         # Combine outputs and completion types
         batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
         all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
@@ -214,12 +222,18 @@ if __name__ == "__main__":
         doubled_batch = batch + [deepcopy(s) for s in batch]
         for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
             sample['completion_type'] = completion_type
+            if args.save_token_metrics:
+                sample["token_metrics"] = model_output.get("token_metrics")
+            if args.save_prompt_metrics:
+                sample["prompt_metrics"] = model_output.get("prompt_metrics")
             # Mediator(DO_X)
             try:
                 sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
                 prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
                 intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=200,
-                                                                skip_special_tokens=True)
+                                                                skip_special_tokens=True,
+                                                                return_token_metrics=args.save_token_metrics,
+                                                                return_prompt_metrics=args.save_prompt_metrics)
                 # parse completions to final structure
                 final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)
                 processed_samples_list.append(final_sample)
@@ -238,7 +252,82 @@ if __name__ == "__main__":
             "error": f"{error_type}: {error_message}"
         }
 
-    final_dataset_dict = {"metrics": evaluation_metrics, "result": processed_samples_list, "fails": fails_list}
+    # --- Aggregate token-level metrics ---------------------------------------------------
+    def _mean_metric(metrics_list, key):
+        """Return the mean of `key` over a list-of-dicts, or None."""
+        if not metrics_list:
+            return None
+        vals = [m[key] for m in metrics_list if key in m]
+        return sum(vals) / len(vals) if vals else None
+
+    token_metrics_summary = None
+    if args.save_token_metrics or args.save_prompt_metrics:
+        # Buckets:  scenario -> metric_name -> list[float]
+        scenarios = [
+            "generation__gold_structure", "generation__predicted_structure",
+            "prompt__gold_structure", "prompt__predicted_structure",
+            "HSVT__generation", "HSVT__prompt",
+            "Local Edits__generation", "Local Edits__prompt",
+            "Global__generation", "Global__prompt",
+        ]
+        agg = {s: {"cross_entropy": [], "max_logit": [], "gt_logit": []} for s in scenarios}
+
+        for sample in processed_samples_list:
+            ct = sample.get("completion_type", "")
+            suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
+
+            # Main generation token metrics
+            if sample.get("token_metrics"):
+                for key in ("cross_entropy", "max_logit", "gt_logit"):
+                    val = _mean_metric(sample["token_metrics"], key)
+                    if val is not None:
+                        agg[f"generation__{suffix}"][key].append(val)
+
+            # Main prompt metrics
+            if sample.get("prompt_metrics"):
+                for key in ("cross_entropy", "max_logit", "gt_logit"):
+                    val = _mean_metric(sample["prompt_metrics"], key)
+                    if val is not None:
+                        agg[f"prompt__{suffix}"][key].append(val)
+
+            # Intervention metrics
+            si = sample.get("structure_intervention", {})
+            for intervention_type in ("HSVT", "Local Edits", "Global"):
+                interventions = si.get(intervention_type, [])
+                for interv in interventions:
+                    if interv.get("token_metrics"):
+                        for key in ("cross_entropy", "max_logit", "gt_logit"):
+                            val = _mean_metric(interv["token_metrics"], key)
+                            if val is not None:
+                                agg[f"{intervention_type}__generation"][key].append(val)
+                    if interv.get("prompt_metrics"):
+                        for key in ("cross_entropy", "max_logit", "gt_logit"):
+                            val = _mean_metric(interv["prompt_metrics"], key)
+                            if val is not None:
+                                agg[f"{intervention_type}__prompt"][key].append(val)
+
+        # Summarise into mean ± std
+        from statistics import mean as _mean, pstdev as _pstdev
+        token_metrics_summary = {}
+        for scenario, metrics_dict in agg.items():
+            token_metrics_summary[scenario] = {}
+            for metric_name, values in metrics_dict.items():
+                if values:
+                    token_metrics_summary[scenario][metric_name] = {
+                        "mean": round(_mean(values), 6),
+                        "std": round(_pstdev(values), 6),
+                        "n": len(values),
+                    }
+                else:
+                    token_metrics_summary[scenario][metric_name] = {"mean": None, "std": None, "n": 0}
+    # -------------------------------------------------------------------------------------
+
+    final_dataset_dict = {
+        "metrics": evaluation_metrics,
+        "token_metrics_summary": token_metrics_summary,
+        "result": processed_samples_list,
+        "fails": fails_list,
+    }
     print('Processed: ', len(processed_samples_list))
     print('Failed: ', len(fails_list))
     dataset_name = args.evaluation_dataset
