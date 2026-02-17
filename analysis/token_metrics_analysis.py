@@ -936,32 +936,123 @@ def extract_all_tokenized_texts(results: list) -> List[Dict]:
 
 # ──────────────────────── summary table (text) ────────────────────────
 
-def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_name: str):
-    """Print a formatted table of aggregated metrics."""
-    print(f"\n{'=' * 70}")
-    print(f"  Token Metrics Summary — {model_name}")
-    print(f"{'=' * 70}")
-    header = f"{'Scenario':<35} {'CE mean':>8} {'CE std':>8} {'MaxLogit':>9} {'GTLogit':>9} {'N':>5}"
-    print(header)
-    print("-" * 70)
+def _format_scenario_name(key: str) -> str:
+    """Format scenario key into a readable name."""
+    parts = key.split("/")
+    if len(parts) == 2:
+        category, structure = parts
+        structure_name = "Gold" if structure == "gold_structure" else "Predicted"
+        return f"{category.capitalize()} ({structure_name})"
+    elif len(parts) == 3:
+        intervention, category, structure = parts
+        structure_name = "Gold" if structure == "gold_structure" else "Predicted"
+        return f"{intervention} {category.capitalize()} ({structure_name})"
+    return key
 
+
+def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_name: str):
+    """Print a formatted table of aggregated metrics with grouping."""
+    print(f"\n{'=' * 90}")
+    print(f"  Token Metrics Summary — {model_name}")
+    print(f"{'=' * 90}")
+    
+    # Group scenarios by category
+    base_generation = []
+    base_prompt = []
+    interventions = []
+    
     for key in sorted(per_sample.keys()):
-        metrics = per_sample[key]
-        ce = metrics.get("cross_entropy", [])
-        ml = metrics.get("max_logit", [])
-        gt = metrics.get("gt_logit", [])
-        n = len(ce)
-        if n == 0:
-            continue
-        row = (
-            f"{key:<35} "
-            f"{_mean(ce):>8.4f} {(_pstdev(ce) if n >= 2 else 0):>8.4f} "
-            f"{(_mean(ml) if ml else 0):>9.4f} "
-            f"{(_mean(gt) if gt else 0):>9.4f} "
-            f"{n:>5}"
-        )
-        print(row)
-    print()
+        if key.startswith("generation/") and "/" not in key.replace("generation/", "").replace("gold_structure", "").replace("predicted_structure", ""):
+            base_generation.append(key)
+        elif key.startswith("prompt/") and "/" not in key.replace("prompt/", "").replace("gold_structure", "").replace("predicted_structure", ""):
+            base_prompt.append(key)
+        else:
+            interventions.append(key)
+    
+    # Print header
+    header = f"{'Scenario':<50} {'CE mean':>10} {'CE std':>10} {'MaxLogit':>12} {'GTLogit':>12} {'N':>6}"
+    print(header)
+    print("-" * 90)
+    
+    # Print base generation
+    if base_generation:
+        print("  Base Generation:")
+        for key in base_generation:
+            metrics = per_sample[key]
+            ce = metrics.get("cross_entropy", [])
+            ml = metrics.get("max_logit", [])
+            gt = metrics.get("gt_logit", [])
+            n = len(ce)
+            if n == 0:
+                continue
+            scenario_name = _format_scenario_name(key)
+            row = (
+                f"    {scenario_name:<46} "
+                f"{_mean(ce):>10.4f} {(_pstdev(ce) if n >= 2 else 0):>10.4f} "
+                f"{(_mean(ml) if ml else 0):>12.4f} "
+                f"{(_mean(gt) if gt else 0):>12.4f} "
+                f"{n:>6}"
+            )
+            print(row)
+        print()
+    
+    # Print base prompt
+    if base_prompt:
+        print("  Base Prompt (from ===SKELETON===):")
+        for key in base_prompt:
+            metrics = per_sample[key]
+            ce = metrics.get("cross_entropy", [])
+            ml = metrics.get("max_logit", [])
+            gt = metrics.get("gt_logit", [])
+            n = len(ce)
+            if n == 0:
+                continue
+            scenario_name = _format_scenario_name(key)
+            row = (
+                f"    {scenario_name:<46} "
+                f"{_mean(ce):>10.4f} {(_pstdev(ce) if n >= 2 else 0):>10.4f} "
+                f"{(_mean(ml) if ml else 0):>12.4f} "
+                f"{(_mean(gt) if gt else 0):>12.4f} "
+                f"{n:>6}"
+            )
+            print(row)
+        print()
+    
+    # Print interventions grouped by type
+    if interventions:
+        print("  Interventions:")
+        # Group by intervention type
+        intervention_groups = {}
+        for key in interventions:
+            parts = key.split("/")
+            if len(parts) >= 1:
+                intervention_type = parts[0]
+                if intervention_type not in intervention_groups:
+                    intervention_groups[intervention_type] = []
+                intervention_groups[intervention_type].append(key)
+        
+        for intervention_type in sorted(intervention_groups.keys()):
+            print(f"    {intervention_type}:")
+            for key in sorted(intervention_groups[intervention_type]):
+                metrics = per_sample[key]
+                ce = metrics.get("cross_entropy", [])
+                ml = metrics.get("max_logit", [])
+                gt = metrics.get("gt_logit", [])
+                n = len(ce)
+                if n == 0:
+                    continue
+                scenario_name = _format_scenario_name(key)
+                row = (
+                    f"      {scenario_name:<44} "
+                    f"{_mean(ce):>10.4f} {(_pstdev(ce) if n >= 2 else 0):>10.4f} "
+                    f"{(_mean(ml) if ml else 0):>12.4f} "
+                    f"{(_mean(gt) if gt else 0):>12.4f} "
+                    f"{n:>6}"
+                )
+                print(row)
+            print()
+    
+    print(f"{'=' * 90}\n")
 
 
 # ──────────────────────── main ────────────────────────
