@@ -6,13 +6,13 @@ from datasets_for_intervention.prompt import Prompt
 
 
 class AVeriTeCIntervention:
-    def __init__(self, dataset, llm_model, prompt_type='baseline_structure_faithfulness'):
+    def __init__(self, dataset, llm_model, prompting_regime='baseline_structure_faithfulness'):
         self.dataset = dataset
         self.llm_model = llm_model
-        assert prompt_type in ["baseline_structure_faithfulness", "detailed_instruction"], (
-            "prompt_type must be one of: baseline_structure_faithfulness, detailed_instruction"
+        assert prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
+            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
         )
-        self.prompt_type = prompt_type
+        self.prompting_regime = prompting_regime
 
         instruction = (
             "You are an expert fact-checking system. "
@@ -104,9 +104,9 @@ class AVeriTeCIntervention:
             "Explanation: Here we flip all 3 answers to question to Yes and final verdict must become Supported.\n\n"
         )
 
-        few_shot = baseline_few_shot if self.prompt_type == "baseline_structure_faithfulness" else detailed_few_shot
+        few_shot = baseline_few_shot if self.prompting_regime == "baseline_structure_faithfulness" else detailed_few_shot
         self.prompt = Prompt(
-            prompting_regime=self.prompt_type,
+            prompting_regime=self.prompting_regime,
             use_tool_call=False,
             tool_call_instruction="",
             instruction=instruction,

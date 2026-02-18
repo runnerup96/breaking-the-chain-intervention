@@ -351,6 +351,9 @@ class EntailmentIntervention:
             assert all(example["question_paraphrases"] is not None for example in self.dataset), "Dataset must have question paraphrases when using 'paraphrase' HSVT mode"
 
         self.prompting_regime = prompting_regime
+        assert self.prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
+            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
+        )
 
         self.question_prefix = "## Question\n"
         self.context_prefix = "## Context\n"

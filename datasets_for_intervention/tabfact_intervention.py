@@ -13,8 +13,8 @@ class TabFactIntervention:
         self.query_prefix = "Verifier Query:"
         self.final_verdict_prefix = "execution result:"
         self.prompting_regime = prompting_regime
-        assert self.prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction"], (
-            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction"
+        assert self.prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
+            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
         )
 
         instruction = (
@@ -384,8 +384,6 @@ class TabFactIntervention:
             "Verifier Query: <your DSL expression ending with =True or =False>\n"
             "Execution Result: <True or False>\n\n"
 
-            "{intervention_alert}"
-
             "### FEW-SHOT EXAMPLES\n\n"
 
             "{few_shot_examples}"
@@ -398,12 +396,9 @@ class TabFactIntervention:
             "Verifier Query: <YOUR QUERY>\n"
         )
 
-        intervention_alert = None
         few_shot_examples = None
 
         if self.prompting_regime == "baseline_structure_faithfulness":
-            intervention_alert = ""
-
             few_shot_examples = (
                 "Example #1\n"
                 "Table:\n"
@@ -432,12 +427,7 @@ class TabFactIntervention:
                 "Verifier Query: greater{hop{filter_eq{all_rows; event; World Cup}; year}; hop{filter_eq{all_rows; event; Olympics}; year}}=True\n"
                 "Execution Result: True\n\n"
             )
-        elif self.prompting_regime == "detailed_instruction":
-            intervention_alert = (
-                "### INTERVENTION POSSIBILITY\n"
-                "- The Verifier Query may be altered as a result of an external intervention.\n"
-                "- In case of contradiction between the original table or claim and the Verifier Query, prioritize the information encoded in the Verifier Query.\n\n"
-            )
+        elif self.prompting_regime == "detailed_instruction" or self.prompting_regime == "maximum_mediator_faithfulness":
 
             few_shot_examples = (
                 "Example #1 (No Intervention)\n"
@@ -493,14 +483,14 @@ class TabFactIntervention:
         statement = sample['statement']
 
         before_examples, after_examples = user_prompt.split("### FEW-SHOT EXAMPLES\n\n", 1)
-        instruction = before_examples.format(intervention_alert=intervention_alert).rstrip() + "\n\n### FEW-SHOT EXAMPLES\n"
+        instruction = before_examples.rstrip() + "\n\n### FEW-SHOT EXAMPLES\n"
         current_sample = after_examples.split("{few_shot_examples}", 1)[1].lstrip("\n").format(
             table=table,
             statement=statement,
         )
 
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime=self.prompting_regime,
             use_tool_call=False,
             tool_call_instruction="",
             instruction=instruction,
