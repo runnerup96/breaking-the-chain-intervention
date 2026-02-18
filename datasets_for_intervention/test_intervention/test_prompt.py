@@ -53,6 +53,33 @@ class TestPrompt(unittest.TestCase):
             llm_model=self.llm_model,
         )
         self.assertIn("intervention", prompt.regime_string.lower())
+        self.assertIn("structured reasoning block", prompt.regime_string.lower())
+
+    def test_detailed_regime_string_uses_new_wording(self):
+        prompt = Prompt(
+            prompting_regime="detailed_instruction",
+            use_tool_call=False,
+            tool_call_instruction="",
+            instruction="Domain instruction",
+            few_shot="Few-shot examples",
+            llm_model=self.llm_model,
+        )
+        self.assertIn("structured reasoning block", prompt.regime_string)
+        self.assertNotIn("intermediate structure", prompt.regime_string.lower())
+
+    def test_maximum_regime_string_contains_priority_rules(self):
+        prompt = Prompt(
+            prompting_regime="maximum_mediator_faithfulness",
+            use_tool_call=False,
+            tool_call_instruction="",
+            instruction="Domain instruction",
+            few_shot="Few-shot examples",
+            llm_model=self.llm_model,
+        )
+        regime = prompt.regime_string
+        self.assertIn("structured reasoning block", regime.lower())
+        self.assertIn("ULTIMATE TRUTH", regime)
+        self.assertIn("SOLELY on your compliance", regime)
 
     def test_invalid_regime_raises_error(self):
         with self.assertRaises(ValueError) as context:
@@ -111,6 +138,23 @@ class TestPrompt(unittest.TestCase):
         intervention_idx = result.find("intervention")
         self.assertLess(domain_idx, tool_idx)
         self.assertLess(tool_idx, intervention_idx)
+
+    def test_build_zeroshot_instruction_maximum_with_tool_call(self):
+        prompt = Prompt(
+            prompting_regime="maximum_mediator_faithfulness",
+            use_tool_call=True,
+            tool_call_instruction="Use tools for X",
+            instruction="Domain instruction",
+            few_shot="Few-shot examples",
+            llm_model=self.llm_model,
+        )
+        result = prompt.build_zeroshot_instruction()
+        self.assertIn("Domain instruction", result)
+        self.assertIn("Use tools for X", result)
+        self.assertIn("structured reasoning block", result.lower())
+        self.assertIn("ULTIMATE TRUTH", result)
+        self.assertLess(result.find("Domain instruction"), result.find("Use tools for X"))
+        self.assertLess(result.find("Use tools for X"), result.lower().find("intervention possibility"))
 
     def test_make_prompt_without_gold_structure(self):
         prompt = Prompt(
@@ -254,6 +298,42 @@ class TestPrompt(unittest.TestCase):
         self.assertGreater(gold_pos, -1)
 
         # Verify ordering
+        self.assertLess(instr_pos, tool_pos)
+        self.assertLess(tool_pos, regime_pos)
+        self.assertLess(regime_pos, fewshot_pos)
+        self.assertLess(fewshot_pos, sample_pos)
+        self.assertLess(sample_pos, gold_pos)
+
+    def test_ordering_anatomy_maximum_regime(self):
+        """Verify prompt anatomy also for maximum mediator faithfulness."""
+        prompt = Prompt(
+            prompting_regime="maximum_mediator_faithfulness",
+            use_tool_call=True,
+            tool_call_instruction="TOOL",
+            instruction="INSTR",
+            few_shot="FEWSHOT",
+            llm_model=self.llm_model,
+        )
+        result = prompt.make_prompt(
+            current_sample="SAMPLE",
+            include_gold_structure=True,
+            gold_structure="GOLD",
+        )
+
+        instr_pos = result.find("INSTR")
+        tool_pos = result.find("TOOL")
+        regime_pos = result.lower().find("intervention possibility")
+        fewshot_pos = result.find("FEWSHOT")
+        sample_pos = result.find("SAMPLE")
+        gold_pos = result.find("GOLD")
+
+        self.assertGreater(instr_pos, -1)
+        self.assertGreater(tool_pos, -1)
+        self.assertGreater(regime_pos, -1)
+        self.assertGreater(fewshot_pos, -1)
+        self.assertGreater(sample_pos, -1)
+        self.assertGreater(gold_pos, -1)
+
         self.assertLess(instr_pos, tool_pos)
         self.assertLess(tool_pos, regime_pos)
         self.assertLess(regime_pos, fewshot_pos)
