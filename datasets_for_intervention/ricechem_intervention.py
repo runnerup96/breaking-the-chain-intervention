@@ -2,14 +2,18 @@ import re
 import random
 from copy import deepcopy
 from datasets_for_intervention import capture_ricechem_checklist
+from datasets_for_intervention.prompt import Prompt
 
 
 
 class RiceChemIntervention:
-    def __init__(self, dataset, llm_model, prompt_type = 'baseline_structure_faithfulness'):
+    def __init__(self, dataset, llm_model, prompting_regime = 'baseline_structure_faithfulness'):
         self.dataset = dataset
         self.llm_model = llm_model
-        self.prompt_type = prompt_type
+        assert prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
+            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
+        )
+        self.prompting_regime = prompting_regime
 
     def interventions_to_prompt(self, sample:dict):
         interventions = sample['structure_intervention']
@@ -104,10 +108,10 @@ class RiceChemIntervention:
         checklist_string = "".join(checklist)
 
         user_prompt = ""
-        if self.prompt_type == 'baseline_structure_faithfulness':
+        if self.prompting_regime == 'baseline_structure_faithfulness':
             user_prompt = (
                 "You are an automated grader for a college-level chemistry class. "
-                "Your task is to evaluate a student's answer by first constructing an intermediate structure "
+                "Your task is to evaluate a student's answer by first constructing a structured reasoning block "
                 "(a checklist of reasoning steps with weights) and then compute a final grade.\n\n"
     
                 "Task explanation:\n"
@@ -115,7 +119,7 @@ class RiceChemIntervention:
                 "- You must fill the checklist (True/False) strictly based on the student's answer.\n"
                 "- The final grade equals the sum of the weights of the items marked True.\n\n"
     
-                "Intermediate structure construction (Checklist):\n"
+                "Structured reasoning block construction (Checklist):\n"
                 "- Use only the given question and student's answer—do not assume or invent new items.\n"
                 "- Keep the checklist text EXACTLY as provided (same order, wording, and weights). "
                 "Only replace the trailing <True/False> with True or False for each line.\n"
@@ -210,10 +214,10 @@ class RiceChemIntervention:
                 "Checklist:\n"
                 f"{checklist_string}\n"
             )
-        elif self.prompt_type == "detailed_instruction":
+        elif self.prompting_regime == "detailed_instruction" or self.prompting_regime == "maximum_mediator_faithfulness":
             user_prompt = (
             "You are an automated grader for a college-level chemistry class. "
-            "Your task is to evaluate a student's answer by first constructing an intermediate structure "
+            "Your task is to evaluate a student's answer by first constructing a structured reasoning block "
             "(a checklist of reasoning steps with weights) and then compute a final grade.\n\n"
 
             "Task explanation:\n"
@@ -221,7 +225,7 @@ class RiceChemIntervention:
             "- You must fill the checklist (True/False) strictly based on the student's answer.\n"
             "- The final grade equals the sum of the weights of the items marked True.\n\n"
 
-            "Intermediate structure construction (Checklist):\n"
+            "Structured reasoning block construction (Checklist):\n"
             "- Use only the given question and student's answer—do not assume or invent new items.\n"
             "- Keep the checklist text EXACTLY as provided (same order, wording, and weights). "
             "Only replace the trailing <True/False> with True or False for each line.\n"
@@ -229,10 +233,6 @@ class RiceChemIntervention:
             "- If the checklist contains mutually exclusive items (e.g., FULLY vs PARTIALLY), never mark both True.\n"
             "- After filling the checklist, compute the final grade as the sum of the weights of True items. "
             "Express the grade as a float in 0.5 increments within [0, 8].\n\n"
-            
-            "Intervention Possibility:\n"
-            "- The intermediate structure might be altered as a result of an external intervention.\n"
-            "- In case of contradiction between the original context and the intermediate structure, prioritize the evidence from the intermediate structure.\n"
 
             "Important output rule:\n"
             "Your final response must contain ONLY two fields and no other text:\n"
@@ -261,7 +261,7 @@ class RiceChemIntervention:
             "correctly explains relationship of potential energy to ionization energy (weight: 1.5) (True/False): True\n"
             "partially explains relationship between potential energy and ionization energy (weight: 0.5) (True/False): False\n"
             "Final grade (0-8): 7.5\n"
-            "Explanation: Here no intervention.\n\n"
+            "Explanation: No intervention is applied to this example.\n\n"
 
 
             "Example #2 (No Intervention)\n"
@@ -279,7 +279,7 @@ class RiceChemIntervention:
             "Explaining sentence 2: a minimum amount of energy is needed to eject an electron (weight: 1.0) (True/False): False\n"
             "Explaining sentence 2: any additional energy becomes kinetic energy (weight: 1.0) (True/False): True\n"
             "Final grade (0-8): 4.5\n"
-            "Explanation: Here no intervention.\n\n"
+            "Explanation: No intervention is applied to this example.\n\n"
 
 
             "Example #3 (With Intervention)\n"
@@ -300,7 +300,7 @@ class RiceChemIntervention:
             "Sentence 3: Correct description of hybrid orbital bonds in nitrogen. Two sp2 orbitals form two sigma bonds. (weight: 1.0) (True/False): False\n"
             "Sentence 3: Correct description of unhybridized orbital bonds in nitrogen. Unhybridized p orbital forms pi bond (weight: 1.5) (True/False): True\n"
             "Final grade (0-8): 4.5\n"
-            "Explanation: Here the original score must be 7.0, but after intervention it should have been recalculated to 4.5 (because of 4 True's).\n\n"
+            "Explanation: the original score was 7.0, but after intervention it must be recalculated to 4.5, since only 4 items are now True.\n\n"
 
             "Example #4 (With Intervention)\n"
             "Question:\n"
@@ -316,7 +316,7 @@ class RiceChemIntervention:
             "Whole numbers mean indivisible/discrete (weight: 2.0) (True/False): False\n"
             "Indivisible unit of mass = atom (weight: 2.0) (True/False): False\n"
             "Final grade (0-8): 0.0\n\n"
-            "Explanation: Here the original score must be 8.0, but after intervention it should have been recalculated to 0.0 (because of 6 False's).\n\n"
+            "Explanation: the original score was 8.0, but after intervention it must be recalculated to 0.0, since all 6 items are now False.\n\n"
 
 
             "Now follow the same structure for the given input.\n\n"
@@ -328,26 +328,31 @@ class RiceChemIntervention:
             f"{checklist_string}\n"
         )
 
-        messages = [{"role": "user", "content": user_prompt}]
-        add_generation_prompt_status = True
-        if include_gold_structure:
-            checklist_string = "Checklist:\n"
-            for rubric_item, answer in ricechem_sample['filled_rubric'].items():
-                checklist_item = f"{rubric_item} (weight: {item2weight[rubric_item]}) (True/False): {answer}\n"
-                checklist_string += checklist_item
-            checklist_string += "Final grade (0-8): "
-            messages.append({"role": "assistant", "content": checklist_string})
+        before_few_shot, after_few_shot = user_prompt.split("FEW-SHOT EXAMPLES:\n\n", 1)
+        few_shot, current_tail = after_few_shot.split("Now follow the same structure for the given input.\n\n", 1)
 
-            add_generation_prompt_status = False
+        instruction = before_few_shot.rstrip() + "\n\nFEW-SHOT EXAMPLES:\n"
+        current_sample = "Now follow the same structure for the given input.\n\n" + current_tail.lstrip("\n")
 
-
-        prompt = self.llm_model.apply_chat_template(
-            messages,
-            add_generation_prompt=add_generation_prompt_status
+        prompt = Prompt(
+            prompting_regime=self.prompting_regime,
+            use_tool_call=False,
+            tool_call_instruction="",
+            instruction=instruction,
+            few_shot=few_shot,
+            llm_model=self.llm_model,
         )
 
-        # remove the end token if it is present since we need to continue the generation
-        if add_generation_prompt_status == False:
-            prompt = self.llm_model.clean_model_specific_completion(prompt)
+        gold_structure = None
+        if include_gold_structure:
+            gold_structure = "Checklist:\n" + "".join(
+                f"{rubric_item} (weight: {item2weight[rubric_item]}) (True/False): {answer}\n"
+                for rubric_item, answer in ricechem_sample["filled_rubric"].items()
+            )
+            gold_structure += "Final grade (0-8): "
 
-        return prompt
+        return prompt.make_prompt(
+            current_sample=current_sample,
+            include_gold_structure=include_gold_structure,
+            gold_structure=gold_structure,
+        )

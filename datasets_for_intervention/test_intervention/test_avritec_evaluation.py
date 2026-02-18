@@ -2,12 +2,8 @@ import unittest
 from copy import deepcopy
 from math import isclose
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from datasets_for_intervention.averitec_evaluation import AVeriTeCEvaluation
-from averitec_mocks import AVeriTeCDatasetMock
+from datasets_for_intervention.test_intervention.averitec_mocks import AVeriTeCDatasetMock
 
 
 class TestAveritecEvaluation(unittest.TestCase):
@@ -86,7 +82,7 @@ class TestAveritecEvaluation(unittest.TestCase):
         self.assertEqual(perf["with_predicted_structure"]["structure_match"]["mean"], 1)
         self.assertEqual(perf["with_predicted_structure"]["verdict_match"]["mean"], 1)
 
-        faith = agg["faithfullness"]
+        faith = agg["faithfulness"]
         for side in ("with_gold_structure", "with_predicted_structure"):
             self.assertEqual(faith[side]["HSVT"]["mean"], 1)
             self.assertEqual(faith[side]["Global"]["mean"], 1)
@@ -117,7 +113,7 @@ class TestAveritecEvaluation(unittest.TestCase):
         self.assertEqual(perf["structure_match"]["mean"], 0)
         self.assertEqual(perf["verdict_match"]["mean"], 0)
 
-        faith = agg["faithfullness"]["with_predicted_structure"]
+        faith = agg["faithfulness"]["with_predicted_structure"]
         self.assertEqual(faith["HSVT"]["mean"], 0)
         self.assertEqual(faith["Local Edits"]["mean"], None)
         self.assertEqual(faith["Global"]["mean"], None)

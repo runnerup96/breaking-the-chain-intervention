@@ -1,7 +1,7 @@
 import unittest
 from copy import deepcopy
-from llm_mocks import FakeLLMModel
-from ricechem_mocks import RiceChemDatasetMock, FakeCapture
+from datasets_for_intervention.test_intervention.llm_mocks import FakeLLMModel
+from datasets_for_intervention.test_intervention.ricechem_mocks import RiceChemDatasetMock, FakeCapture
 from datasets_for_intervention.ricechem_intervention import RiceChemIntervention
 import math
 
