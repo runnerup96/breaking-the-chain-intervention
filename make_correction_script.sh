@@ -35,15 +35,15 @@ datasets=("ricechem")
 prompt_regime="detailed_instruction"
 
 models=(
-    "Qwen/Qwen3-1.7B"
-    "Qwen/Qwen3-4B"
-    "Qwen/Qwen3-8B"
-    "tiiuae/Falcon3-3B-Instruct"
-    "tiiuae/Falcon3-7B-Instruct"
-    "alpindale/Llama-3.2-3B-Instruct"
     "alpindale/Llama-3.2-1B-Instruct"
-    "unsloth/Meta-Llama-3.1-8B-Instruct"
+    "Qwen/Qwen3-1.7B"
     "google/gemma-2-2b-it"
+    "alpindale/Llama-3.2-3B-Instruct"
+    "tiiuae/Falcon3-3B-Instruct"
+    "Qwen/Qwen3-4B"
+    "tiiuae/Falcon3-7B-Instruct"
+    "Qwen/Qwen3-8B"
+    "unsloth/Meta-Llama-3.1-8B-Instruct"
     # "Openai/Gpt-oss-120b"
     # 'qwen/qwen3-235b-a22b'
     # 'Meta-llama/Llama-3.1-70B-Instruct'
@@ -70,7 +70,7 @@ for model_name in "${models[@]}"; do
         tmux send-keys "PROJECT_PATH='${project_path}' CUDA_VISIBLE_DEVICES='$CUDA_DEVICE_NUMBER' /home/chaichuk/miniconda3/envs/breaking-the-chain-env/bin/python make_correction.py \
             --model_name '$model_name' \
             --evaluation_dataset '$evaluation_dataset' \
-            --prompting_regime "baseline_structure_tool_call" \
+            --prompting_regime "baseline_structure_tool_call_boollist" \
             --batch_size '$batch_size'" ENTER
 
         tmux send-keys "echo '----------------------------------------'" ENTER

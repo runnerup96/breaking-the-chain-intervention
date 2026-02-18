@@ -66,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompting_regime",
         type=str,
-        choices=["baseline_structure_faithfulness", "detailed_instruction", "baseline_structure_tool_call"],
+        choices=["baseline_structure_faithfulness", "detailed_instruction", "baseline_structure_tool_call", "baseline_structure_tool_call_boollist"],
         default="baseline_structure_faithfulness",
     )
 
@@ -119,7 +119,11 @@ if __name__ == "__main__":
 
     processed_samples_list = []
 
-    max_new_tokens = 1024 if args.prompting_regime == "baseline_structure_tool_call" else 10
+    max_new_tokens = 1024 if args.prompting_regime in {
+        "baseline_structure_tool_call",
+        "baseline_structure_tool_call_boollist",
+    } else 10
+
 
     for batch in tqdm(dataloader, desc=f"Correction ({args.evaluation_dataset})", total=len(dataloader)):
         # 1) BAD mediator pass

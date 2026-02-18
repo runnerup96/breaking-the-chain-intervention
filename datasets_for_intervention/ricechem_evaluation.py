@@ -221,6 +221,8 @@ class RiceChemCorrectionEvaluation:
             },
             "faithfulness": {
                 "correction": [],  # identical to score_match after correction (expected = golden_score)
+                "faithfulness_tool": [],       # gold_rubric (after correction) vs tool_rubric (after correction)
+                "faithfulness_tool_bad": [],   # bad_rubric (before correction) vs tool_rubric (before correction)
             },
         }
 
@@ -230,6 +232,7 @@ class RiceChemCorrectionEvaluation:
             gold_score = self.idx2gold_score[idx]
             bad_rubric = self.idx2bad_rubric[idx]
 
+            # --- baseline perf (as before) ---
             bad_score_pred = sample.get("generated_score_before_intervention")
             evaluation_metrics["performance"]["with_bad_structure"]["checklist_match"].append(
                 self.compare_checklists(gold_rubric, bad_rubric)
@@ -238,11 +241,38 @@ class RiceChemCorrectionEvaluation:
                 self.compare_scores(gold_score, bad_score_pred)
             )
 
+            # --- NEW: faithfulness_tool_bad (before correction) ---
+            # compare bad_rubric (from dataset) vs tool_rubric (parsed from model tool-call)
+            tool_rubric_bad = sample.get("tool_rubric")
+            if not isinstance(tool_rubric_bad, dict) or len(tool_rubric_bad) == 0:
+                evaluation_metrics["faithfulness"]["faithfulness_tool_bad"].append(0)
+            else:
+                evaluation_metrics["faithfulness"]["faithfulness_tool_bad"].append(
+                    self.compare_checklists(bad_rubric, tool_rubric_bad)
+                )
+
+            # --- corrected pass (as before) ---
             corrected = sample["structure_intervention"]["correction"][0]
             corrected_score_pred = corrected.get("score_after_intervention")
             after = self.compare_scores(gold_score, corrected_score_pred)
             evaluation_metrics["performance"]["with_corrected_structure"]["score_match"].append(after)
             evaluation_metrics["faithfulness"]["correction"].append(after)
+
+            # --- NEW: faithfulness_tool (after correction) ---
+            # compare golden_rubric (in corrected sample) vs tool_rubric (after correction)
+            gold_rubric_after = corrected.get("golden_rubric")  # should exist in correction dataset samples
+            tool_rubric_after = corrected.get("tool_rubric")
+            if not isinstance(gold_rubric_after, dict) or len(gold_rubric_after) == 0:
+                # fallback to idx2gold_rubric if for some reason not present
+                gold_rubric_after = gold_rubric
+
+            if not isinstance(tool_rubric_after, dict) or len(tool_rubric_after) == 0:
+                evaluation_metrics["faithfulness"]["faithfulness_tool"].append(0)
+            else:
+                evaluation_metrics["faithfulness"]["faithfulness_tool"].append(
+                    self.compare_checklists(gold_rubric_after, tool_rubric_after)
+                )
+
 
         aggregated = self.summarize_nested_lists(evaluation_metrics)
         self.print_evaluation_metrics(aggregated)

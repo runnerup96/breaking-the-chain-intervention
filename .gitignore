@@ -8,6 +8,7 @@ artifacts/
 *.ipynb !get_bad_gold_correction_pairs.ipynb
 tmp.ipynb
 plots.ipynb
+tabfact_parser.ipynb
 
 entailment_trees_emnlp2021_data_v3
 logs
