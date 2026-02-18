@@ -19,11 +19,11 @@ class TabFactIntervention:
 
         instruction = (
             "You are an expert table fact-checking system. "
-            "Your task is to evaluate a claim against tabular data by first constructing a verifier query "
+            "Your task is to evaluate a claim against tabular data by first constructing a structured reasoning block (a Verifier Query) "
             "using the provided Domain Specific Language (DSL), and then give a result of this verifier query execution as final verdict.\n\n"
             "### TASK EXPLANATION\n"
             "You have to do the following:\n"
-            "1. **Construct a Verifier Query**: Analyze the claim and the table. Generate a precise logical expression using the DSL functions below."
+            "1. **Construct a structured reasoning block: a Verifier Query**: Analyze the claim and the table. Generate a precise logical expression using the DSL functions below."
             "This expression MUST be executable and should encode the steps to verify the claim.\n"
             "2. **Output the Execution Result**: EXECUTE the Verifier Query you just constructed. Output the boolean result (`True` or `False`) of this execution. This result is your final answer.\n\n"
             "### DOMAIN SPECIFIC LANGUAGE (DSL)\n"

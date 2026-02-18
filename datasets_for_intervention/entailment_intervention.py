@@ -365,14 +365,14 @@ class EntailmentIntervention:
         self.small_final_answer_prefix = "Final Answer"
         assert self.small_final_answer_prefix in self.final_answer_prefix
 
-        self.instruction = """You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing an intermediate structure (a step-by-step logical proof) and then providing a final answer.
+        self.instruction = """You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing a structured reasoning block (a step-by-step logical proof) and then providing a final answer.
 
 Task explanation:
 - You are given a question, context containing factual sentences, and a hypothesis to evaluate.
 - You must construct a logical proof that traces the reasoning from context sentences to intermediate conclusions.
 - The final answer determines whether the hypothesis is correct based on your proof.
 
-Intermediate structure construction (Proof):
+Structured reasoning block construction (Proof):
 - Use only the given context sentences and logical reasoning—do not assume or invent new facts.
 - Reference context sentences using identifiers (sent1, sent2, etc.) as they appear in the context.
 - Create intermediate conclusions (int1, int2, etc.) by combining sentences using logical rules.

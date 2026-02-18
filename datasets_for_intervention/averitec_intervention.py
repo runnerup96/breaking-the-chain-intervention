@@ -16,18 +16,18 @@ class AVeriTeCIntervention:
 
         instruction = (
             "You are an expert fact-checking system. "
-            "Your task is to evaluate a claim by first constructing an intermediate structure from "
+            "Your task is to evaluate a claim by first constructing a structured reasoning block from "
             "the provided questions, explanations and answers, and then give a final verdict.\n\n"
             "Task explanation:\n"
             "For each claim, you are given supporting questions and explanations for these questions. "
             "You must fill a checklist that links the claim to the answers, and then predict "
             "whether the claim is Supported or Refuted.\n\n"
-            "Intermediate structure construction:\n"
+            "Structured reasoning block construction:\n"
             "- Use only the given questions and answers to form the structure.\n"
             "- Each question-answer pair becomes part of the reasoning.\n"
             "- Each answer should be either Yes or No (in the same case).\n\n"
             "Important: Your final response must contain only two fields question and answer and no other text:\n"
-            "Intermediate Structure: Q: <question> A: <answer>\n"
+            "Structured Reasoning Block: Q: <question> A: <answer>\n"
             "Final Verdict: <Supported/Refuted>\n"
         )
 
@@ -38,7 +38,7 @@ class AVeriTeCIntervention:
             "Explanations:\n"
             "- Q: Did Hunter Biden have any experience in the energy sector in 2014? E: Hunter bidens previous career history does not include work for energy company's.\n"
             "- Q: Did Hunter Biden have any experience in Ukraine in 2014? E: Hunter Bidens previous career history does not include working with Ukrainian company's.\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             "- Q: Did Hunter Biden have any experience in the energy sector in 2014? A: No\n"
             "- Q: Did Hunter Biden have any experience in Ukraine in 2014? A: No\n"
             "Final Verdict: Supported\n\n"
@@ -46,7 +46,7 @@ class AVeriTeCIntervention:
             "Claim: President Trump is the most pro-gay president in American history.\n"
             "Explanations:\n"
             "- Q: Did Trump make pro-gay laws when in office? E:He made laws such as  1. Appointing Anti-Equality Judges 2. Stripping protections from LGBTQ students, parents and families 3. Defending Anti-Gay Discrimination.\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             "- Q: Did Trump make pro-gay laws when in office? A: No\n"
             "Final Verdict: Refuted\n\n"
             "Example #3\n"
@@ -55,7 +55,7 @@ class AVeriTeCIntervention:
             "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? E: Transcript of August 13 daily press briefing does not  include a request for Chinese people to avoid American products or avoid travelling to the US.\n"
             "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? E: China’s State Council weekly policy briefing pages for August 13, 2020 do not mention the US.\n"
             "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? E: A keywords search set between August 13 and August 18 2020 found no claim on the Ministry’s Twitter account.\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? A: No\n"
             "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? A: No\n"
             "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? A: No\n"
@@ -69,7 +69,7 @@ class AVeriTeCIntervention:
             "Explanations:\n"
             "- Q: Did Hunter Biden have any experience in the energy sector in 2014? E: Hunter bidens previous career history does not include work for energy company's.\n"
             "- Q: Did Hunter Biden have any experience in Ukraine in 2014? E: Hunter Bidens previous career history does not include working with Ukrainian company's.\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             "- Q: Did Hunter Biden have any experience in the energy sector in 2014? A: No\n"
             "- Q: Did Hunter Biden have any experience in Ukraine in 2014? A: No\n"
             "Final Verdict: Supported\n"
@@ -78,7 +78,7 @@ class AVeriTeCIntervention:
             "Claim: President Trump is the most pro-gay president in American history.\n"
             "Explanations:\n"
             "- Q: Did Trump make pro-gay laws when in office? E:He made laws such as  1. Appointing Anti-Equality Judges 2. Stripping protections from LGBTQ students, parents and families 3. Defending Anti-Gay Discrimination.\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             "- Q: Did Trump make pro-gay laws when in office? A: No\n"
             "Final Verdict: Refuted\n\n"
             "Explanation: Here no intervention.\n\n"
@@ -86,7 +86,7 @@ class AVeriTeCIntervention:
             "Claim: President Trump is the most pro-gay president in American history.\n"
             "Explanations:\n"
             "- Q: Did Trump make pro-gay laws when in office? E:He made laws such as  1. Appointing Anti-Equality Judges 2. Stripping protections from LGBTQ students, parents and families 3. Defending Anti-Gay Discrimination.\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             "- Q: Did Trump make pro-gay laws when in office? A: Yes\n"
             "Final Verdict: Supported\n"
             "Explanation: Here we flip answer to question to Yes and final verdict must become Supported.\n\n"
@@ -96,7 +96,7 @@ class AVeriTeCIntervention:
             "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? E: Transcript of August 13 daily press briefing does not  include a request for Chinese people to avoid American products or avoid travelling to the US.\n"
             "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? E: China’s State Council weekly policy briefing pages for August 13, 2020 do not mention the US.\n"
             "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? E: A keywords search set between August 13 and August 18 2020 found no claim on the Ministry’s Twitter account.\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             "- Q: Did China's Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products in its daily press briefing on August 13, 2020? A: No\n"
             "- Q: Did the weekly policy briefing from China’s State Council on August 13, 2020 include a mention of the call for Chinese people to not travel to the United States or buy American-made products? A: No\n"
             "- Q: Did the Chinese Ministry of Foreign Affairs announce that Chinese people should not travel to the United States or buy American-made products on its Twitter account on or after August 13, 2020? A: No\n"
@@ -205,13 +205,13 @@ class AVeriTeCIntervention:
             f"{averitec_sample['claim']}\n"
             "Explanations:\n"
             f"{explanations_string}\n"
-            "Intermediate Structure:\n"
+            "Structured Reasoning Block:\n"
             f"{supporting_questions_string}\n"
         )
 
         gold_structure = None
         if include_gold_structure:
-            gold_structure = "Intermediate Structure:\n" + "".join(
+            gold_structure = "Structured Reasoning Block:\n" + "".join(
                 f"- Q: {question} A: {answer}\n"
                 for question, answer in averitec_sample["supporting_questions"].items()
             )

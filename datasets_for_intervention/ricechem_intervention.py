@@ -111,7 +111,7 @@ class RiceChemIntervention:
         if self.prompt_type == 'baseline_structure_faithfulness':
             user_prompt = (
                 "You are an automated grader for a college-level chemistry class. "
-                "Your task is to evaluate a student's answer by first constructing an intermediate structure "
+                "Your task is to evaluate a student's answer by first constructing a structured reasoning block "
                 "(a checklist of reasoning steps with weights) and then compute a final grade.\n\n"
     
                 "Task explanation:\n"
@@ -119,7 +119,7 @@ class RiceChemIntervention:
                 "- You must fill the checklist (True/False) strictly based on the student's answer.\n"
                 "- The final grade equals the sum of the weights of the items marked True.\n\n"
     
-                "Intermediate structure construction (Checklist):\n"
+                "Structured reasoning block construction (Checklist):\n"
                 "- Use only the given question and student's answer—do not assume or invent new items.\n"
                 "- Keep the checklist text EXACTLY as provided (same order, wording, and weights). "
                 "Only replace the trailing <True/False> with True or False for each line.\n"
@@ -217,7 +217,7 @@ class RiceChemIntervention:
         elif self.prompt_type == "detailed_instruction":
             user_prompt = (
             "You are an automated grader for a college-level chemistry class. "
-            "Your task is to evaluate a student's answer by first constructing an intermediate structure "
+            "Your task is to evaluate a student's answer by first constructing a structured reasoning block "
             "(a checklist of reasoning steps with weights) and then compute a final grade.\n\n"
 
             "Task explanation:\n"
@@ -225,7 +225,7 @@ class RiceChemIntervention:
             "- You must fill the checklist (True/False) strictly based on the student's answer.\n"
             "- The final grade equals the sum of the weights of the items marked True.\n\n"
 
-            "Intermediate structure construction (Checklist):\n"
+            "Structured reasoning block construction (Checklist):\n"
             "- Use only the given question and student's answer—do not assume or invent new items.\n"
             "- Keep the checklist text EXACTLY as provided (same order, wording, and weights). "
             "Only replace the trailing <True/False> with True or False for each line.\n"

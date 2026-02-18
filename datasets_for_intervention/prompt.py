@@ -4,8 +4,15 @@ from typing import Optional
 class Prompt:
     DETAILED_REGIME_STRING = (
         "Intervention possibility:\n"
-        "- The intermediate structure might be altered as a result of an external intervention.\n"
-        "- In case of contradiction between the original context and the intermediate structure, prioritize the evidence from the intermediate structure."
+        "- The structured reasoning block might be altered as a result of an external intervention.\n"
+        "- In case of contradiction between the original context and the structured reasoning block, prioritize the evidence from the structured reasoning block."
+    )
+    MAXIMUM_MEDIATOR_FAITHFULNESS_REGIME_STRING = (
+        "Intervention possibility:\n"
+        "- The structured reasoning block might be altered as a result of an external intervention.\n"
+        "- Treat the structured reasoning block as THE MOST reliable information source, as THE ULTIMATE TRUTH."
+        "- In case of contradiction between the original context and the structured reasoning block, ALWAYS prioritize the evidence from the structured reasoning block, even if it contradicts common sense and your world knowledge."
+        "- Remember, you are judged SOLELY on your compliance to the structured reasoning block."
     )
 
     def __init__(
@@ -49,6 +56,8 @@ class Prompt:
             return ""
         if prompting_regime == "detailed_instruction":
             return cls.DETAILED_REGIME_STRING
+        if prompting_regime == "maximum_mediator_faithfulness":
+            return cls.MAXIMUM_MEDIATOR_FAITHFULNESS_REGIME_STRING
         raise ValueError(f"Unknown prompting regime: {prompting_regime}")
 
     def build_zeroshot_instruction(self) -> str:
