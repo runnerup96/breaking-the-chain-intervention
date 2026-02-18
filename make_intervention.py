@@ -56,7 +56,7 @@ def get_few_shot_examples(train_dataset_path: str, prompting_regime: str, n_few_
         stride = max(1, len(train_dataset) // (n_few_shot_examples * 2))
         examples = [deepcopy(train_dataset[idx]) for idx in range(0, len(train_dataset), stride)]
         examples = examples[:n_few_shot_examples]
-    elif prompting_regime == "detailed_instruction":
+    elif prompting_regime == "detailed_instruction" or prompting_regime == "maxumum_mediator_faithfulness":
         if len(train_dataset) == 0:
             raise ValueError("The train dataset is empty, cannot build few-shot examples.")
 
@@ -106,10 +106,10 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--evaluation_dataset", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--try_one_batch", action="store_true")
+    parser.add_argument("--try_one_batch", type=bool, default=False)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--prompting_regime", type=str,
-                        choices=["baseline_structure_faithfulness", "detailed_instruction"], default="baseline_structure_faithfulness")
+                        choices=["baseline_structure_faithfulness", "detailed_instruction", "maxumum_mediator_faithfulness"], default="baseline_structure_faithfulness")
     parser.add_argument("--use_api", action="store_true")
     parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
     parser.add_argument("--tokenizer_name", type=str, default=None)
@@ -123,6 +123,8 @@ if __name__ == "__main__":
     Main question: how does the model handle contradictions WITH clear instructions / demonstration?
     - In system prompt, we include an explicit phrase about possibility of intervention.
     - We show intervened few-shot examples (with contradictions)
+
+    Third regime is an extension of the second regime with focus on maximum compliance with the interventions.
     """
     args = parser.parse_args()
 
