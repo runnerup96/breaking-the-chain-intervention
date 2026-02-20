@@ -173,7 +173,7 @@ class RiceChemDataset:
                         "filled_rubric": data["filled_rubric"],#this this just a dict structure which we intervene upon
                         "score": data["score"],
                         "score_range": data["score_range"],
-                        "task_idx": task_idx
+                        "task_idx": task_idx,
                     }
                     self.data.append(sample)
 

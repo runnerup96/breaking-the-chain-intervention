@@ -1,250 +1,164 @@
-
+# make_intervention.py
 import argparse
-import hashlib
 import json
 import os
-from tqdm import tqdm
-from datetime import datetime
-import json
-from torch.utils.data import DataLoader
-from copy import deepcopy
-from transformers.utils import logging
 import random
 import numpy as np
 import torch
+from datetime import datetime
+from tqdm import tqdm
 from torch.utils.data import DataLoader
-from transformers.utils import logging
+from copy import deepcopy
 
 import llm_model
-from datasets_for_intervention import entailment_intervention, entailment_dataset, entailment_evaluation
-from datasets_for_intervention import ricechem_intervention, ricechem_dataset, ricechem_evaluation
-from datasets_for_intervention import averitec_intervention, averitec_dataset, averitec_evaluation
-from datasets_for_intervention import tabfact_intervention, tabfact_dataset, tabfact_evaluation
 
-logging.set_verbosity_error()
+# RiceChem — новый unified класс
+from datasets_for_intervention.ricechem_dataset import RiceChemDataset
+
+from datasets_for_intervention import (
+    ricechem_intervention, ricechem_dataset, ricechem_evaluation,
+    entailment_intervention, entailment_dataset, entailment_evaluation,
+    averitec_intervention, averitec_dataset, averitec_evaluation,
+    tabfact_intervention, tabfact_dataset, tabfact_evaluation,
+)
 
 def fix_seed(seed=42):
-    """Fix random seeds for reproducibility"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    os.environ['PYTHONHASHSEED'] = str(seed) 
 
-model_name2simple_model_name = {
-        "Qwen/Qwen3-1.7B": "qwen3-17B",
-        "Qwen/Qwen3-4B": "qwen3-4B",
-        "Qwen/Qwen3-8B": "qwen3-8B",
-        "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
-        "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
-        "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
-        "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
-        "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
-        "google/gemma-2-2b-it": "gemma2-2B",
-        "google/gemma-2-9b-it": "gemma2-9B",
-        "Openai/Gpt-oss-120b": "gpt-oss-120b",
-        "qwen/qwen3-235b-a22b": "qwen3-235b-a22b",
-        "Meta-llama/Llama-3.1-70B-Instruct": "llama-3.1-70b"
-    }
-
-def get_few_shot_examples(train_dataset_path: str, prompting_regime: str, n_few_shot_examples: int):
-    train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
-    if prompting_regime == "baseline_structure_faithfulness":
-        stride = max(1, len(train_dataset) // (n_few_shot_examples * 2))
-        examples = [deepcopy(train_dataset[idx]) for idx in range(0, len(train_dataset), stride)]
-        examples = examples[:n_few_shot_examples]
-    elif prompting_regime == "detailed_instruction":
-        if len(train_dataset) == 0:
-            raise ValueError("The train dataset is empty, cannot build few-shot examples.")
-
-        def stable_seed(sample_id: str, mode: str) -> int:
-            digest = hashlib.sha256(f"{sample_id}::{mode}".encode("utf-8")).digest()
-            return int.from_bytes(digest[:4], "big")
-
-        # intervention_modes = ["delete", "replace", "rewire", "global"]
-        intervention_modes = ["rewire", "global", "delete", "replace"]
-        mode_idx = 0
-        examples = []
-        n_pairs = (n_few_shot_examples + 1) // 2
-        stride = max(1, len(train_dataset) // max(1, n_pairs))
-
-        for idx in range(0, len(train_dataset), stride):
-            if len(examples) >= n_few_shot_examples:
-                break
-
-            original_sample = deepcopy(train_dataset[idx])
-            original_id = original_sample["id"]
-            original_sample["id"] = f"{original_id}::orig"
-            examples.append(original_sample)
-            if len(examples) >= n_few_shot_examples:
-                break
-
-            intervened_sample = deepcopy(train_dataset[idx])
-            mode = intervention_modes[mode_idx % len(intervention_modes)]
-            mode_idx += 1
-            intervened_sample["id"] = f"{original_id}::{mode}"
-            intervened_sample["proof"] = entailment_intervention.intervene_step_proof(
-                step_proof=intervened_sample["proof"],
-                hypothesis_id=intervened_sample["hypothesis_id"],
-                distractors=intervened_sample["distractors"],
-                mode=mode,
-                seed=stable_seed(original_id, mode),
-                verbose=False
-            )
-            intervened_sample["score"] = not intervened_sample["score"]
-            examples.append(intervened_sample)
-    else:
-        raise ValueError(f"Invalid prompting regime: {prompting_regime}")
-    assert len(examples) == n_few_shot_examples
-    return examples
+model_name2simple = {
+    "Qwen/Qwen3-1.7B": "qwen3-1.7b",
+    "Qwen/Qwen3-4B": "qwen3-4b",
+    "Qwen/Qwen3-8B": "qwen3-8b",
+    "tiiuae/Falcon3-3B-Instruct": "falcon3-3b",
+    "tiiuae/Falcon3-7B-Instruct": "falcon3-7b",
+    "alpindale/Llama-3.2-1B-Instruct": "llama32-1b",
+    "alpindale/Llama-3.2-3B-Instruct": "llama32-3b",
+    "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8b",
+    "google/gemma-2-2b-it": "gemma2-2b",
+    "Meta-llama/Llama-3.1-70B-Instruct": "llama-70b",
+}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--evaluation_dataset", type=str, required=True)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--try_one_batch", type=bool, default=False)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--evaluation_dataset", type=str, required=True,
+                        choices=["ricechem", "entailment", "averitec", "tabfact"])
+
+    # Новый флаг только для ricechem
     parser.add_argument("--prompting_regime", type=str,
-                        choices=["baseline_structure_faithfulness", "detailed_instruction"], default="baseline_structure_faithfulness")
+                        choices=["standard", "detailed", "tool_light", "tool_heavy"],
+                        default="standard")
+    # Старый флаг для других датасетов
+    # parser.add_argument("--prompting_regime", type=str,
+    #                     choices=["baseline_structure_faithfulness", "detailed_instruction"],
+    #                     default="baseline_structure_faithfulness")
+
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--try_one_batch", action="store_true")
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use_api", action="store_true")
-    parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
-    parser.add_argument("--tokenizer_name", type=str, default=None)
-    """We consider two prompting regimes.
-    First explores faithfulness / reasoning transparency (as opposed to e.g. steganography) as is.
-    Main question: how does the model handle contradictions WITHOUT clear instructions / demonstration?
-    - In system prompt, we don't include a phrase about possibility of intervention.
-    - We only show non-intervened few-shots (without contradictions)
+    parser.add_argument("--api_base_url", type=str, default="https://inference.airi.net:46783/v1")
 
-    Second regime explores the ability of an LLM to follow explicit faithfulness instructions.
-    Main question: how does the model handle contradictions WITH clear instructions / demonstration?
-    - In system prompt, we include an explicit phrase about possibility of intervention.
-    - We show intervened few-shot examples (with contradictions)
-    """
     args = parser.parse_args()
-
-    if args.model_name not in model_name2simple_model_name:
-        raise ValueError(f'Unknown model: {args.model_name}. Check model_name2simple_model_name dict in make_intervention.py')
-    
     fix_seed(args.seed)
 
-    torch._dynamo.config.cache_size_limit = 16000
-
-    llm_model = llm_model.LLMModel(
-        args.model_name,
-        use_api=args.use_api,
-        api_base_url=args.api_base_url,
-        tokenizer_name=args.tokenizer_name,
-    )
+    llm = llm_model.LLMModel(args.model_name, use_api=args.use_api, api_base_url=args.api_base_url)
 
     project_path = os.environ["PROJECT_PATH"]
 
-    dataset = None
-    intervention_logic = None
     evaluator = None
+
     if args.evaluation_dataset == "ricechem":
-        dataset_path = os.path.join(project_path, "statics/datasets/RiceChem/data")
-        dataset = ricechem_dataset.RiceChemDataset(dataset_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = ricechem_intervention.RiceChemIntervention(dataset, llm_model, prompt_type=args.prompting_regime)
-        evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, intervention_logic)
-    elif args.evaluation_dataset == "entailment":
-        train_dataset_path = os.path.join(project_path, "statics/datasets/EntailmentBank/data/train.jsonl")
-        few_shot_examples = get_few_shot_examples(
-            train_dataset_path=train_dataset_path,
-            prompting_regime=args.prompting_regime,
-            n_few_shot_examples=5,
+        dataset = ricechem_dataset.RiceChemDataset(
+            data_path=os.path.join(project_path, "statics/datasets/RiceChem/data"),
+            use_corrections=True,
+            correction_only=False
         )
-        dataset_path = os.path.join(project_path, "statics/datasets/EntailmentBank/data/test.jsonl")
-        paraphrases_path = os.path.join(project_path, "statics/datasets/EntailmentBank/aligned_test_question_paraphases.json")
-        dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase", prompting_regime=args.prompting_regime)
-        evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
+        intervention_logic = ricechem_intervention.RiceChemIntervention(
+            dataset=dataset,
+            llm_model=llm,
+            prompting_regime=args.prompting_regime
+        )
+        evaluator = ricechem_evaluation.RiceChemEvaluation(dataset)
+
+    elif args.evaluation_dataset == "entailment":
+        pass
+
     elif args.evaluation_dataset == "averitec":
-        dataset_path = os.path.join(project_path, "statics/datasets/AVeriTeC/data")
-        dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model, prompt_type=args.prompting_regime)
-        evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
+        pass
+
     elif args.evaluation_dataset == "tabfact":
-        dataset_path = os.path.join(project_path, "statics/datasets/TabFact")
-        dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap_full.json',
-                                                 f'{dataset_path}/data/all_csv')
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model, args.prompting_regime)
-        evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
-    else:
-        raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, entailment, averitec, tabfact]")
+        pass
 
-    print(f"Loaded dataset {args.evaluation_dataset}")
+    print(f"Loaded {args.evaluation_dataset} | prompting_regime={args.prompting_regime if args.evaluation_dataset=='ricechem' else args.prompting_regime}")
 
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda b: b, shuffle=False)
     if args.try_one_batch:
         dataloader = [next(iter(dataloader))]
-        # dataloader = [list(dataloader)[-1]]
 
-    processed_samples_list, fails_list = [], []
-    for batch in tqdm(dataloader, desc="Running inference", total=len(dataloader)):
-        
-        # batch_idx_list = [sample["idx"] for sample in batch]
-        prompted_batch_with_structure_prediction = [intervention_logic.make_prompt(sample, include_gold_structure=False) for sample in batch]
-        structure_prediction_outputs = llm_model.generate(prompted_batch_with_structure_prediction,
-                                                          max_new_tokens=1024,
-                                                          skip_special_tokens=False)
-        promted_batch_with_gold_structure = [intervention_logic.make_prompt(sample, include_gold_structure=True) for sample in batch]
-        gold_structure_outputs = llm_model.generate(promted_batch_with_gold_structure,
-                                                    max_new_tokens=10,
-                                                    skip_special_tokens=False)
-        # Combine outputs and completion types
-        batched_model_outputs = structure_prediction_outputs + gold_structure_outputs
-        all_batch = prompted_batch_with_structure_prediction + promted_batch_with_gold_structure
-        completion_type_list = ["structure_prediction"] * len(prompted_batch_with_structure_prediction) + ["gold_structure"] * len(promted_batch_with_gold_structure)
-        # here we have just generation, we do the intervention independent from the gold/predicted structure
-        doubled_batch = batch + [deepcopy(s) for s in batch]
-        for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
+    processed_samples_list = []
+
+    for batch in tqdm(dataloader, desc=f"Intervention {args.evaluation_dataset}"):
+        # 1. Predicted structure
+        pred_prompts = [intervention_logic.make_prompt(s, include_gold_structure=False) for s in batch]
+        pred_outputs = llm.generate(pred_prompts, max_new_tokens=1024 if args.evaluation_dataset == "ricechem" else 512, skip_special_tokens=False)
+
+        # 2. Gold structure
+        gold_prompts = [intervention_logic.make_prompt(s, include_gold_structure=True) for s in batch]
+        gold_outputs = llm.generate(gold_prompts, max_new_tokens=10, skip_special_tokens=False)
+
+        # 3. Объединяем
+        all_outputs = pred_outputs + gold_outputs
+        all_samples = [deepcopy(s) for s in batch] + [deepcopy(s) for s in batch]
+        completion_types = ["structure_prediction"] * len(batch) + ["gold_structure"] * len(batch)
+
+        for orig_sample, model_out, completion_type in zip(all_samples, all_outputs, completion_types):
+            sample = deepcopy(orig_sample)
             sample['completion_type'] = completion_type
-            # Mediator(DO_X)
+
             try:
-                sample_with_interventions = intervention_logic.make_intervention(sample, model_output)
-                prompt_list = intervention_logic.interventions_to_prompt(sample_with_interventions)
-                intervened_completion_outputs = llm_model.generate(prompt_list, max_new_tokens=10,
-                                                                skip_special_tokens=True)
-                # parse completions to final structure
-                final_sample = intervention_logic.collect_intervention_completion(sample_with_interventions, intervened_completion_outputs)
+                sample_with_interv = intervention_logic.make_intervention(sample, {"completion": model_out})
+                prompt_list = intervention_logic.interventions_to_prompt(sample_with_interv)
+                interv_outputs = llm.generate(prompt_list, max_new_tokens=10, skip_special_tokens=True)
+                final_sample = intervention_logic.collect_intervention_completion(sample_with_interv, interv_outputs)
                 processed_samples_list.append(final_sample)
-            except Exception as e:# here only KeyError
-                error_type, error_message = type(e).__name__, str(e)
-                error_string = f"{error_type}: {error_message}"
-                fails_list.append([sample, error_string])
 
-    evaluation_metrics = None
-    try:
-        evaluation_metrics = evaluator.evaluate(processed_samples_list)
-    except Exception as e:
-        error_type, error_message = type(e).__name__, str(e)
-        print(f"[WARNING] Evaluation failed with {error_type}: {error_message}")
-        evaluation_metrics = {
-            "error": f"{error_type}: {error_message}"
-        }
+            except Exception as e:
+                print(f"[ERROR] {e}")
 
-    final_dataset_dict = {"metrics": evaluation_metrics, "result": processed_samples_list, "fails": fails_list}
-    print('Processed: ', len(processed_samples_list))
-    print('Failed: ', len(fails_list))
-    dataset_name = args.evaluation_dataset
-    path2save = os.path.join(project_path, "intervention_analysis", "intervention_predictions", dataset_name)
-    os.makedirs(path2save, exist_ok=True)
+    print("\n=== Running evaluation ===")
+    if evaluator is not None:
+        try:
+            evaluation_metrics = evaluator.evaluate(processed_samples_list)
+            print("Evaluation completed successfully")
+        except Exception as e:
+            print(f"[WARNING] Evaluation failed: {type(e).__name__}: {e}")
+            evaluation_metrics = {"error": str(e)}
+    else:
+        evaluation_metrics = {"note": "No evaluator configured for this dataset"}
+        print("No evaluator for this dataset")
 
-    model_name = model_name2simple_model_name[args.model_name]
+    save_dir = os.path.join(project_path, "intervention_analysis", "intervention_predictions", args.evaluation_dataset)
+    os.makedirs(save_dir, exist_ok=True)
 
-    curr_time = datetime.now().strftime("%Y-%m-%d@%H:%M")
-    prompt_regime = "dt" if args.prompting_regime == "detailed_instruction" else "bsf"
-    file_name = f"{model_name}_{curr_time}_{prompt_regime}_one_batch.json" if args.try_one_batch else f"{model_name}_{curr_time}_{prompt_regime}.json"
-    path2save = os.path.join(path2save, file_name)
+    filename = f"{model_name2simple[args.model_name]}_{args.prompting_regime}_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
 
-    with open(path2save, "w") as f:
-        json.dump(final_dataset_dict, f, ensure_ascii=False, indent=4)
-    print(f"The results are saved to {path2save}!")
+    final_dict = {
+        "meta": {
+            "model": args.model_name,
+            "dataset": args.evaluation_dataset,
+            "prompting_regime": args.prompting_regime,
+            "total_samples": len(processed_samples_list)
+        },
+        "metrics": evaluation_metrics,
+        "results": processed_samples_list
+    }
+
+    with open(os.path.join(save_dir, filename), "w", encoding="utf-8") as f:
+        json.dump(final_dict, f, ensure_ascii=False, indent=2)
+
+    print(f"\nSaved {len(processed_samples_list)} samples + metrics → {filename}")
