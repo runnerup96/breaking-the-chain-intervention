@@ -115,7 +115,7 @@ class RiceChemTool:
 
 
 
-class MediatorProcessor:
+class RiceChemMediatorProcessor:
     LINE_RE = re.compile(
         r"""
         ^\s*
