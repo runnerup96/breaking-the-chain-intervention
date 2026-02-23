@@ -85,6 +85,69 @@ def mean_per_sample(token_metrics_list: Optional[list], key: str) -> Optional[fl
     return _mean(vals) if vals else None
 
 
+def count_tokens(token_metrics_list: Optional[list]) -> int:
+    """Return the number of tokens in the token_metrics list."""
+    if not token_metrics_list:
+        return 0
+    return len(token_metrics_list)
+
+
+def count_tokens_from_skeleton(token_metrics_list: Optional[list]) -> int:
+    """
+    Return the number of tokens starting from ===SKELETON===.
+    Uses the same logic as mean_from_skeleton to find the starting point.
+    """
+    if not token_metrics_list:
+        return 0
+    
+    # Find the LAST index where ===SKELETON=== appears (same logic as mean_from_skeleton)
+    skeleton_idx = None
+    
+    # Strategy 1: Try to find exact match for ===SKELETON=== in a single token (from end)
+    for i in range(len(token_metrics_list) - 1, -1, -1):
+        token_str = token_metrics_list[i].get("token", "")
+        if "===SKELETON===" in token_str:
+            skeleton_idx = i
+            break
+    
+    # Strategy 2: If not found, try to find it across multiple tokens (from end, up to 10 tokens)
+    if skeleton_idx is None:
+        for i in range(len(token_metrics_list) - 1, -1, -1):
+            for window_size in range(2, min(11, i + 2)):
+                start_idx = max(0, i - window_size + 1)
+                combined = "".join([token_metrics_list[j].get("token", "") 
+                                   for j in range(start_idx, i + 1)])
+                if "===SKELETON===" in combined:
+                    skeleton_idx = start_idx
+                    break
+            if skeleton_idx is not None:
+                break
+    
+    # Strategy 3: Fallback - try to find any token with "SKELETON" (case-insensitive, from end)
+    if skeleton_idx is None:
+        for i in range(len(token_metrics_list) - 1, -1, -1):
+            token_str = token_metrics_list[i].get("token", "").upper()
+            if "SKELETON" in token_str:
+                skeleton_idx = i
+                break
+    
+    # Strategy 4: Last resort - look for "===" followed by "SKELETON" nearby (from end)
+    if skeleton_idx is None:
+        for i in range(len(token_metrics_list) - 1, 0, -1):
+            token1 = token_metrics_list[i].get("token", "")
+            token2 = token_metrics_list[i - 1].get("token", "") if i > 0 else ""
+            combined = token2 + token1
+            if "===" in token1 and "SKELETON" in combined:
+                skeleton_idx = i - 1 if "===" in token2 else i
+                break
+    
+    if skeleton_idx is None:
+        return 0
+    
+    # Count tokens from skeleton_idx onwards
+    return len(token_metrics_list) - skeleton_idx
+
+
 def mean_last_fraction(token_metrics_list: Optional[list], key: str, fraction: float = 0.25) -> Optional[float]:
     """
     Return the mean of `key` over the last `fraction` of tokens in the list.
@@ -168,16 +231,17 @@ def extract_per_sample_metrics(results: list) -> Dict[str, Dict[str, List[float]
     
     Scenarios:
         generation/gold_structure, generation/predicted_structure,
-        prompt/gold_structure, prompt/predicted_structure,
+        prompt/gold_structure (only for gold_structure, no prompt/predicted_structure because there's no ===SKELETON=== in predicted_structure prompts),
         HSVT/generation/gold_structure, HSVT/generation/predicted_structure,
-        HSVT/prompt/gold_structure, HSVT/prompt/predicted_structure,
+        HSVT/prompt/gold_structure (only for gold_structure base samples),
         Local Edits/generation/gold_structure, Local Edits/generation/predicted_structure,
-        Local Edits/prompt/gold_structure, Local Edits/prompt/predicted_structure,
+        Local Edits/prompt/gold_structure (only for gold_structure base samples),
         Global/generation/gold_structure, Global/generation/predicted_structure,
-        Global/prompt/gold_structure, Global/prompt/predicted_structure,
+        Global/prompt/gold_structure (only for gold_structure base samples),
     """
     keys = ("cross_entropy", "max_logit", "gt_logit")
     data = defaultdict(lambda: defaultdict(list))
+    token_counts = defaultdict(list)  # scenario_name -> [token counts per sample]
 
     for sample in results:
         ct = sample.get("completion_type", "")
@@ -185,33 +249,56 @@ def extract_per_sample_metrics(results: list) -> Dict[str, Dict[str, List[float]
 
         # --- Main generation ---
         if sample.get("token_metrics"):
+            num_tokens = count_tokens(sample["token_metrics"])
+            if num_tokens > 0:
+                token_counts[f"generation/{suffix}"].append(num_tokens)
             for k in keys:
                 v = mean_per_sample(sample["token_metrics"], k)
                 if v is not None:
                     data[f"generation/{suffix}"][k].append(v)
 
         # --- Main prompt (from ===SKELETON=== only) ---
-        if sample.get("prompt_metrics"):
+        # Only measure prompt metrics for gold_structure (where ===SKELETON=== is in the prompt)
+        # For predicted_structure, there's no ===SKELETON=== in the prompt, so skip it
+        if ct == "gold_structure" and sample.get("prompt_metrics"):
+            num_tokens = count_tokens_from_skeleton(sample["prompt_metrics"])
+            if num_tokens > 0:
+                token_counts[f"prompt/gold_structure"].append(num_tokens)
             for k in keys:
                 v = mean_from_skeleton(sample["prompt_metrics"], k)
                 if v is not None:
-                    data[f"prompt/{suffix}"][k].append(v)
+                    data[f"prompt/gold_structure"][k].append(v)
 
         # --- Interventions (separated by completion_type) ---
         si = sample.get("structure_intervention", {})
         for itype in ("HSVT", "Local Edits", "Global"):
             for interv in si.get(itype, []):
                 if interv.get("token_metrics"):
+                    num_tokens = count_tokens(interv["token_metrics"])
+                    if num_tokens > 0:
+                        token_counts[f"{itype}/generation/{suffix}"].append(num_tokens)
                     for k in keys:
                         v = mean_per_sample(interv["token_metrics"], k)
                         if v is not None:
                             data[f"{itype}/generation/{suffix}"][k].append(v)
-                if interv.get("prompt_metrics"):
+                # For interventions, prompt always has ===SKELETON=== (include_gold_structure=True)
+                # But we only measure prompt metrics for gold_structure base samples
+                # (interventions for predicted_structure samples still have ===SKELETON=== in prompt,
+                # but we skip measuring them for consistency)
+                if ct == "gold_structure" and interv.get("prompt_metrics"):
+                    num_tokens = count_tokens_from_skeleton(interv["prompt_metrics"])
+                    if num_tokens > 0:
+                        token_counts[f"{itype}/prompt/gold_structure"].append(num_tokens)
                     for k in keys:
                         # Use mean_from_skeleton for prompt metrics (from ===SKELETON===)
                         v = mean_from_skeleton(interv["prompt_metrics"], k)
                         if v is not None:
-                            data[f"{itype}/prompt/{suffix}"][k].append(v)
+                            data[f"{itype}/prompt/gold_structure"][k].append(v)
+    
+    # Add token counts to data structure
+    for scenario, counts in token_counts.items():
+        if counts:
+            data[scenario]["num_tokens"] = counts
 
     return data
 
@@ -231,11 +318,13 @@ def extract_changed_prompt_metrics(results: list) -> Dict[str, Dict[str, List[fl
         suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
 
         # --- Main prompt (changed part only, from ===SKELETON===) ---
-        if sample.get("prompt_metrics"):
+        # Only measure prompt metrics for gold_structure (where ===SKELETON=== is in the prompt)
+        # For predicted_structure, there's no ===SKELETON=== in the prompt, so skip it
+        if ct == "gold_structure" and sample.get("prompt_metrics"):
             for k in keys:
                 v = mean_from_skeleton(sample["prompt_metrics"], k)
                 if v is not None:
-                    data[f"prompt/{suffix}"][k].append(v)
+                    data[f"prompt/gold_structure"][k].append(v)
 
         # --- Interventions (changed part only, from ===SKELETON===, separated by completion_type) ---
         si = sample.get("structure_intervention", {})
@@ -348,18 +437,15 @@ def plot_prompt_cross_entropy_bars(
     output_dir: str,
 ):
     """
-    Bar chart of mean cross-entropy for prompt tokens (gold vs predicted)
-    and each intervention type, separated by completion_type.
+    Bar chart of mean cross-entropy for prompt tokens (from ===SKELETON===)
+    for gold_structure and each intervention type.
+    Note: predicted_structure is not included because there's no ===SKELETON=== in the prompt.
     """
     scenarios_prompt = [
         ("prompt/gold_structure",           "Base (Gold)"),
-        ("prompt/predicted_structure",      "Base (Predicted)"),
         ("HSVT/prompt/gold_structure",      "HSVT (Gold)"),
-        ("HSVT/prompt/predicted_structure", "HSVT (Predicted)"),
         ("Local Edits/prompt/gold_structure",      "Local Edits (Gold)"),
-        ("Local Edits/prompt/predicted_structure", "Local Edits (Predicted)"),
         ("Global/prompt/gold_structure",      "Global (Gold)"),
-        ("Global/prompt/predicted_structure", "Global (Predicted)"),
     ]
 
     labels, means, stds = [], [], []
@@ -397,16 +483,13 @@ def plot_changed_prompt_cross_entropy_bars(
     Bar chart of mean cross-entropy for the CHANGED part of prompt tokens only
     (last `fraction` of tokens, where interventions occur).
     This shows how much the model is "surprised" by the specific changes.
+    Note: predicted_structure is not included because there's no ===SKELETON=== in the prompt.
     """
     scenarios_prompt = [
         ("prompt/gold_structure",           "Base (Gold)"),
-        ("prompt/predicted_structure",      "Base (Predicted)"),
         ("HSVT/prompt/gold_structure",      "HSVT (Gold)"),
-        ("HSVT/prompt/predicted_structure", "HSVT (Predicted)"),
         ("Local Edits/prompt/gold_structure",      "Local Edits (Gold)"),
-        ("Local Edits/prompt/predicted_structure", "Local Edits (Predicted)"),
         ("Global/prompt/gold_structure",      "Global (Gold)"),
-        ("Global/prompt/predicted_structure", "Global (Predicted)"),
     ]
 
     labels, means, stds = [], [], []
@@ -440,11 +523,11 @@ def plot_prompt_vs_generation(
     output_dir: str,
 ):
     """
-    Grouped bar chart: prompt vs generation cross-entropy for gold / predicted.
+    Grouped bar chart: prompt vs generation cross-entropy for gold structure.
+    Note: predicted_structure is not included because there's no ===SKELETON=== in the prompt.
     """
     groups = [
         ("Gold Structure",      "prompt/gold_structure",      "generation/gold_structure"),
-        ("Predicted Structure",  "prompt/predicted_structure", "generation/predicted_structure"),
     ]
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -686,23 +769,19 @@ def plot_metrics_heatmap(
         "Global/generation/gold_structure",
         "Global/generation/predicted_structure",
         "prompt/gold_structure",
-        "prompt/predicted_structure",
         "HSVT/prompt/gold_structure",
-        "HSVT/prompt/predicted_structure",
         "Local Edits/prompt/gold_structure",
-        "Local Edits/prompt/predicted_structure",
         "Global/prompt/gold_structure",
-        "Global/prompt/predicted_structure",
     ]
     scenario_labels = [
         "Gen (Gold)", "Gen (Predicted)",
         "HSVT Gen (Gold)", "HSVT Gen (Predicted)",
         "Local Edits Gen (Gold)", "Local Edits Gen (Predicted)",
         "Global Gen (Gold)", "Global Gen (Predicted)",
-        "Prompt (Gold)", "Prompt (Predicted)",
-        "HSVT Prompt (Gold)", "HSVT Prompt (Predicted)",
-        "Local Edits Prompt (Gold)", "Local Edits Prompt (Predicted)",
-        "Global Prompt (Gold)", "Global Prompt (Predicted)",
+        "Prompt (Gold)",
+        "HSVT Prompt (Gold)",
+        "Local Edits Prompt (Gold)",
+        "Global Prompt (Gold)",
     ]
     metric_names = ["cross_entropy", "max_logit", "gt_logit"]
     metric_labels = ["Cross-Entropy", "Max Logit", "GT Logit"]
@@ -942,19 +1021,33 @@ def _format_scenario_name(key: str) -> str:
     if len(parts) == 2:
         category, structure = parts
         structure_name = "Gold" if structure == "gold_structure" else "Predicted"
-        return f"{category.capitalize()} ({structure_name})"
+        explanation = ""
+        if category == "generation":
+            if structure_name == "Gold":
+                explanation = "Y"
+            elif structure_name == "Predicted":
+                explanation = "M + Y"
+        if category == "prompt":
+            if structure_name == "Gold":
+                explanation = "M"
+        return f"{category.capitalize()} ({structure_name}) ({explanation})"
     elif len(parts) == 3:
         intervention, category, structure = parts
         structure_name = "Gold" if structure == "gold_structure" else "Predicted"
-        return f"{intervention} {category.capitalize()} ({structure_name})"
+        explanation = ""
+        if category == "generation":
+            explanation = "Y"
+        elif category == "prompt":
+            explanation = "M"
+        return f"{intervention} {category.capitalize()} ({structure_name}) ({explanation})"
     return key
 
 
 def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_name: str):
     """Print a formatted table of aggregated metrics with grouping."""
-    print(f"\n{'=' * 90}")
+    print(f"\n{'=' * 100}")
     print(f"  Token Metrics Summary — {model_name}")
-    print(f"{'=' * 90}")
+    print(f"{'=' * 100}")
     
     # Group scenarios by category
     base_generation = []
@@ -970,9 +1063,9 @@ def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_nam
             interventions.append(key)
     
     # Print header
-    header = f"{'Scenario':<50} {'CE mean':>10} {'CE std':>10} {'MaxLogit':>12} {'GTLogit':>12} {'N':>6}"
+    header = f"{'Scenario':<50} {'CE mean':>10} {'CE std':>10} {'MaxLogit':>12} {'GTLogit':>12} {'N':>6} {'AvgTokens':>10}"
     print(header)
-    print("-" * 90)
+    print("-" * 100)
     
     # Print base generation
     if base_generation:
@@ -982,16 +1075,19 @@ def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_nam
             ce = metrics.get("cross_entropy", [])
             ml = metrics.get("max_logit", [])
             gt = metrics.get("gt_logit", [])
+            num_tokens = metrics.get("num_tokens", [])
             n = len(ce)
             if n == 0:
                 continue
             scenario_name = _format_scenario_name(key)
+            avg_tokens = _mean(num_tokens) if num_tokens else 0
             row = (
                 f"    {scenario_name:<46} "
                 f"{_mean(ce):>10.4f} {(_pstdev(ce) if n >= 2 else 0):>10.4f} "
                 f"{(_mean(ml) if ml else 0):>12.4f} "
                 f"{(_mean(gt) if gt else 0):>12.4f} "
-                f"{n:>6}"
+                f"{n:>6} "
+                f"{avg_tokens:>10.1f}"
             )
             print(row)
         print()
@@ -1004,16 +1100,19 @@ def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_nam
             ce = metrics.get("cross_entropy", [])
             ml = metrics.get("max_logit", [])
             gt = metrics.get("gt_logit", [])
+            num_tokens = metrics.get("num_tokens", [])
             n = len(ce)
             if n == 0:
                 continue
             scenario_name = _format_scenario_name(key)
+            avg_tokens = _mean(num_tokens) if num_tokens else 0
             row = (
                 f"    {scenario_name:<46} "
                 f"{_mean(ce):>10.4f} {(_pstdev(ce) if n >= 2 else 0):>10.4f} "
                 f"{(_mean(ml) if ml else 0):>12.4f} "
                 f"{(_mean(gt) if gt else 0):>12.4f} "
-                f"{n:>6}"
+                f"{n:>6} "
+                f"{avg_tokens:>10.1f}"
             )
             print(row)
         print()
@@ -1038,21 +1137,24 @@ def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_nam
                 ce = metrics.get("cross_entropy", [])
                 ml = metrics.get("max_logit", [])
                 gt = metrics.get("gt_logit", [])
+                num_tokens = metrics.get("num_tokens", [])
                 n = len(ce)
                 if n == 0:
                     continue
                 scenario_name = _format_scenario_name(key)
+                avg_tokens = _mean(num_tokens) if num_tokens else 0
                 row = (
                     f"      {scenario_name:<44} "
                     f"{_mean(ce):>10.4f} {(_pstdev(ce) if n >= 2 else 0):>10.4f} "
                     f"{(_mean(ml) if ml else 0):>12.4f} "
                     f"{(_mean(gt) if gt else 0):>12.4f} "
-                    f"{n:>6}"
+                    f"{n:>6} "
+                    f"{avg_tokens:>10.1f}"
                 )
                 print(row)
             print()
     
-    print(f"{'=' * 90}\n")
+    print(f"{'=' * 100}\n")
 
 
 # ──────────────────────── main ────────────────────────

@@ -39,9 +39,13 @@ class PAUQIntervention:
             sample['structure_intervention'][intervention_type][idx]['generated_output'] = completion
             sample['structure_intervention'][intervention_type][idx]['generated_sql'] = extracted
             if "token_metrics" in generation:
-                sample['structure_intervention'][intervention_type][idx]['token_metrics'] = generation["token_metrics"]
+                token_metrics = generation["token_metrics"]
+                if token_metrics:
+                    sample['structure_intervention'][intervention_type][idx]['token_metrics'] = self.llm_model.clean_token_metrics(token_metrics)
             if "prompt_metrics" in generation:
-                sample['structure_intervention'][intervention_type][idx]['prompt_metrics'] = generation["prompt_metrics"]
+                prompt_metrics = generation["prompt_metrics"]
+                if prompt_metrics:
+                    sample['structure_intervention'][intervention_type][idx]['prompt_metrics'] = self.llm_model.clean_token_metrics(prompt_metrics)
         return sample
 
     def update_slots(self, sample: dict, name: str, new_name: str):

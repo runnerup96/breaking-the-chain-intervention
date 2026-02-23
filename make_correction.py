@@ -77,6 +77,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_api", action="store_true")
     parser.add_argument("--api_base_url", type=str, default="https://inference.airi.net:46783/v1")
     parser.add_argument("--tokenizer_name", type=str, default=None)
+    parser.add_argument("--save_token_metrics", action="store_true")
+    parser.add_argument("--save_prompt_metrics", action="store_true")
+    parser.add_argument("--device", type=str, default="auto")
 
 
     args = parser.parse_args()
@@ -89,6 +92,7 @@ if __name__ == "__main__":
 
     llm = llm_model.LLMModel(
         args.model_name,
+        device_map=args.device,
         use_api=args.use_api,
         api_base_url=args.api_base_url,
         tokenizer_name=args.tokenizer_name,
@@ -140,7 +144,13 @@ if __name__ == "__main__":
             else:  # averitec_correction
                 tmp["supporting_questions"] = tmp["bad_supporting_questions"]
             bad_prompts.append(intervention_logic.make_prompt(tmp, include_gold_structure=True))
-        bad_outputs = llm.generate(bad_prompts, max_new_tokens=100, skip_special_tokens=True)
+        bad_outputs = llm.generate(
+            bad_prompts, 
+            max_new_tokens=100, 
+            skip_special_tokens=False,
+            return_token_metrics=args.save_token_metrics,
+            return_prompt_metrics=args.save_prompt_metrics
+        )
 
         # 2) Build corrected prompts + run again with GOLD mediator
         corrected_prompts = []
@@ -151,9 +161,35 @@ if __name__ == "__main__":
             samples_with_interventions.append(s2)
             corrected_prompts.append(intervention_logic.make_prompt(s2['structure_intervention']['correction'][0], include_gold_structure=True))
 
-        corrected_outputs = llm.generate(corrected_prompts, max_new_tokens=100, skip_special_tokens=True)
+        corrected_outputs = llm.generate(
+            corrected_prompts, 
+            max_new_tokens=100, 
+            skip_special_tokens=False,
+            return_token_metrics=args.save_token_metrics,
+            return_prompt_metrics=args.save_prompt_metrics
+        )
 
-        for s2, out2 in zip(samples_with_interventions, corrected_outputs):
+        for s, out, s2, out2 in zip(batch, bad_outputs, samples_with_interventions, corrected_outputs):
+            # Save bad structure metrics to s2 (which will become final)
+            if args.save_token_metrics:
+                bad_token_metrics = out.get("token_metrics")
+                if bad_token_metrics:
+                    s2["bad_token_metrics"] = llm.clean_token_metrics(bad_token_metrics)
+            if args.save_prompt_metrics:
+                bad_prompt_metrics = out.get("prompt_metrics")
+                if bad_prompt_metrics:
+                    s2["bad_prompt_metrics"] = llm.clean_token_metrics(bad_prompt_metrics)
+            
+            # Save corrected structure metrics
+            if args.save_token_metrics:
+                corrected_token_metrics = out2.get("token_metrics")
+                if corrected_token_metrics:
+                    s2["structure_intervention"]["correction"][0]["corrected_token_metrics"] = llm.clean_token_metrics(corrected_token_metrics)
+            if args.save_prompt_metrics:
+                corrected_prompt_metrics = out2.get("prompt_metrics")
+                if corrected_prompt_metrics:
+                    s2["structure_intervention"]["correction"][0]["corrected_prompt_metrics"] = llm.clean_token_metrics(corrected_prompt_metrics)
+            
             final = intervention_logic.collect_correction_completion(s2, [out2])
             processed_samples_list.append(final)
 
@@ -168,8 +204,72 @@ if __name__ == "__main__":
                 "error": f"{error_type}: {error_message}"
             }
 
+    # --- Aggregate token-level metrics ---------------------------------------------------
+    def _mean_metric(metrics_list, key):
+        """Return the mean of `key` over a list-of-dicts, or None."""
+        if not metrics_list:
+            return None
+        vals = [m[key] for m in metrics_list if key in m]
+        return sum(vals) / len(vals) if vals else None
+
+    token_metrics_summary = None
+    if args.save_token_metrics or args.save_prompt_metrics:
+        # Buckets: scenario -> metric_name -> list[float]
+        scenarios = [
+            "bad_structure__generation", "bad_structure__prompt",
+            "corrected_structure__generation", "corrected_structure__prompt",
+        ]
+        agg = {s: {"cross_entropy": [], "max_logit": [], "gt_logit": []} for s in scenarios}
+
+        for sample in processed_samples_list:
+            # Bad structure generation
+            if sample.get("bad_token_metrics"):
+                for key in ("cross_entropy", "max_logit", "gt_logit"):
+                    val = _mean_metric(sample["bad_token_metrics"], key)
+                    if val is not None:
+                        agg["bad_structure__generation"][key].append(val)
+
+            # Bad structure prompt
+            if sample.get("bad_prompt_metrics"):
+                for key in ("cross_entropy", "max_logit", "gt_logit"):
+                    val = _mean_metric(sample["bad_prompt_metrics"], key)
+                    if val is not None:
+                        agg["bad_structure__prompt"][key].append(val)
+
+            # Corrected structure generation
+            correction = sample.get("structure_intervention", {}).get("correction", [])
+            if correction and correction[0].get("corrected_token_metrics"):
+                for key in ("cross_entropy", "max_logit", "gt_logit"):
+                    val = _mean_metric(correction[0]["corrected_token_metrics"], key)
+                    if val is not None:
+                        agg["corrected_structure__generation"][key].append(val)
+
+            # Corrected structure prompt
+            if correction and correction[0].get("corrected_prompt_metrics"):
+                for key in ("cross_entropy", "max_logit", "gt_logit"):
+                    val = _mean_metric(correction[0]["corrected_prompt_metrics"], key)
+                    if val is not None:
+                        agg["corrected_structure__prompt"][key].append(val)
+
+        # Summarise into mean ± std
+        from statistics import mean as _mean, pstdev as _pstdev
+        token_metrics_summary = {}
+        for scenario, metrics_dict in agg.items():
+            token_metrics_summary[scenario] = {}
+            for metric_name, values in metrics_dict.items():
+                if values:
+                    token_metrics_summary[scenario][metric_name] = {
+                        "mean": round(_mean(values), 6),
+                        "std": round(_pstdev(values), 6),
+                        "n": len(values),
+                    }
+                else:
+                    token_metrics_summary[scenario][metric_name] = {"mean": None, "std": None, "n": 0}
+    # -------------------------------------------------------------------------------------
+
     final_dict = {
         "metrics": evaluation_metrics,
+        "token_metrics_summary": token_metrics_summary,
         "result": processed_samples_list,
         "fails": [],
     }

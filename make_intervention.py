@@ -223,9 +223,13 @@ if __name__ == "__main__":
         for sample, model_output, completion_type in zip(doubled_batch, batched_model_outputs, completion_type_list):
             sample['completion_type'] = completion_type
             if args.save_token_metrics:
-                sample["token_metrics"] = model_output.get("token_metrics")
+                token_metrics = model_output.get("token_metrics")
+                if token_metrics:
+                    sample["token_metrics"] = llm_model.clean_token_metrics(token_metrics)
             if args.save_prompt_metrics:
-                sample["prompt_metrics"] = model_output.get("prompt_metrics")
+                prompt_metrics = model_output.get("prompt_metrics")
+                if prompt_metrics:
+                    sample["prompt_metrics"] = llm_model.clean_token_metrics(prompt_metrics)
             # Mediator(DO_X)
             try:
                 sample_with_interventions = intervention_logic.make_intervention(sample, model_output)

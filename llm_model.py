@@ -540,3 +540,39 @@ class LLMModel:
         else:
             raise NotImplementedError(f"Model family for {self.model_name} not yet implemented")
         return output
+
+    def clean_token_metrics(self, metrics_list: List[Dict]) -> List[Dict]:
+        """
+        Remove special tokens from token metrics list.
+        Filters out entries where the token is a special token.
+        """
+        if not metrics_list:
+            return metrics_list
+        
+        # Common special tokens to filter
+        special_tokens = [
+            "<|im_end|>", "<|endoftext|>", "</s>", "<eos>", 
+            "<pad>", "<|eot_id|>", "<|pad|>", "<end_of_turn>", "<|return|>"
+        ]
+        
+        # Add model-specific EOS token if available
+        if self.tokenizer and self.tokenizer.eos_token:
+            special_tokens.append(self.tokenizer.eos_token)
+        
+        # Create a set for fast lookup
+        special_tokens_set = set(special_tokens)
+        
+        # Filter out metrics for special tokens
+        cleaned_metrics = []
+        for metric in metrics_list:
+            token_str = metric.get("token", "")
+            # Check if token is a special token (exact match or contains special token)
+            is_special = False
+            for special in special_tokens_set:
+                if token_str == special or special in token_str:
+                    is_special = True
+                    break
+            if not is_special:
+                cleaned_metrics.append(metric)
+        
+        return cleaned_metrics
