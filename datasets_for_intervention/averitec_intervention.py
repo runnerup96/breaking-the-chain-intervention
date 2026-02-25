@@ -6,10 +6,10 @@ from datasets_for_intervention.prompt import Prompt
 
 
 class AVeriTeCIntervention:
-    def __init__(self, dataset, llm_model, prompting_regime='baseline_structure_faithfulness'):
+    def __init__(self, dataset, llm_model, prompting_regime='standard'):
         self.dataset = dataset
         self.llm_model = llm_model
-        assert prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
+        assert prompting_regime in ["standard", "detailed", "max_detailed"], (
             "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
         )
         self.prompting_regime = prompting_regime
@@ -104,7 +104,7 @@ class AVeriTeCIntervention:
             "Explanation: Here we flip all 3 answers to question to Yes and final verdict must become Supported.\n\n"
         )
 
-        few_shot = baseline_few_shot if self.prompting_regime == "baseline_structure_faithfulness" else detailed_few_shot
+        few_shot = baseline_few_shot if self.prompting_regime == "standard" else detailed_few_shot
         self.prompt = Prompt(
             prompting_regime=self.prompting_regime,
             use_tool_call=False,

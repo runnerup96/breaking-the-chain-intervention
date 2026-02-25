@@ -190,9 +190,15 @@ class RiceChemStructureProcessor:
             return ""
         s = s.strip()
         s = s.replace("{{", "{").replace("}}", "}")
+
+        # strip optional code fences
+        s = re.sub(r"(?is)^\s*```[a-z0-9_-]*\s*", "", s)
+        s = re.sub(r"(?is)\s*```\s*$", "", s)
+
+        # IMPORTANT: collapse double escaping BEFORE turning \n into newline
+        s = s.replace("\\\\", "\\")
         s = s.replace("\\r\\n", "\n").replace("\\n", "\n")
         s = s.replace('\\"', '"')
-        s = s.replace("\\\\", "\\")
         return s.strip()
 
     def _parse_checklist_block(self, block):

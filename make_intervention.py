@@ -45,11 +45,11 @@ model_name2simple = {
 
 def get_few_shot_examples(train_dataset_path: str, prompting_regime: str, n_few_shot_examples: int):
     train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
-    if prompting_regime == "baseline_structure_faithfulness":
+    if prompting_regime == "standard":
         stride = max(1, len(train_dataset) // (n_few_shot_examples * 2))
         examples = [deepcopy(train_dataset[idx]) for idx in range(0, len(train_dataset), stride)]
         examples = examples[:n_few_shot_examples]
-    elif prompting_regime == "detailed_instruction" or prompting_regime == "maxumum_mediator_faithfulness":
+    elif prompting_regime == "detailed" or prompting_regime == "max_detailed":
         if len(train_dataset) == 0:
             raise ValueError("The train dataset is empty, cannot build few-shot examples.")
 
@@ -215,7 +215,7 @@ if __name__ == "__main__":
             # try:
             sample_with_interv = intervention_logic.make_intervention(sample, model_out)
             prompt_list = intervention_logic.interventions_to_prompt(sample_with_interv)
-            interv_outputs = llm.generate(prompt_list, max_new_tokens=512 if args.tool_mode else 10, skip_special_tokens=True)
+            interv_outputs = llm.generate(prompt_list, max_new_tokens=512 if args.tool_mode else 10, skip_special_tokens=False)
             final_sample = intervention_logic.collect_intervention_completion(sample_with_interv, interv_outputs)
             processed_samples_list.append(final_sample)
 

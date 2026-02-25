@@ -52,11 +52,11 @@ class Prompt:
 
     @classmethod
     def _get_regime_string(cls, prompting_regime: str) -> str:
-        if prompting_regime == "baseline_structure_faithfulness":
+        if prompting_regime == "standard": #"baseline_structure_faithfulness"
             return ""
-        if prompting_regime == "detailed_instruction":
+        if prompting_regime == "detailed": # "detailed_instruction"
             return cls.DETAILED_REGIME_STRING
-        if prompting_regime == "maximum_mediator_faithfulness":
+        if prompting_regime == "max_detailed": # "maximum_mediator_faithfulness"
             return cls.MAXIMUM_MEDIATOR_FAITHFULNESS_REGIME_STRING
         raise ValueError(f"Unknown prompting regime: {prompting_regime}")
 

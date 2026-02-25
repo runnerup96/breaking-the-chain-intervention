@@ -102,28 +102,29 @@ class RiceChemEvaluation:
 
             # MEDIATOR–TOOL MATCH
             # predicted (до интервенций): mediator_rubric vs tool_rubric
-            metrics["mediator_tool_match"][mode_key]["predicted"].append(
-                self.processor.compare_structures(sample.get("mediator_rubric"), sample.get("tool_rubric"))
-            )
-
-            # HSVT
-            if hsvt is not None:
-                metrics["mediator_tool_match"][mode_key]["HSVT"].append(
-                    self.processor.compare_structures(hsvt.get("mediator_rubric"), hsvt.get("tool_rubric_after_intervention"))
+            if self.tool_mode:
+                metrics["mediator_tool_match"][mode_key]["predicted"].append(
+                    self.processor.compare_structures(sample.get("mediator_rubric"), sample.get("tool_rubric"))
                 )
 
-            # Local
-            for item in local_edits:
-                metrics["mediator_tool_match"][mode_key]["Local Edits"].append(
-                    self.processor.compare_structures(item.get("mediator_rubric"), item.get("tool_rubric_after_intervention"))
-                )
+                # HSVT
+                if hsvt is not None:
+                    metrics["mediator_tool_match"][mode_key]["HSVT"].append(
+                        self.processor.compare_structures(hsvt.get("mediator_rubric"), hsvt.get("tool_rubric_after_intervention"))
+                    )
 
-            # Correction
-            if len(correction) > 0:
-                corr = correction[0]
-                metrics["mediator_tool_match"][mode_key]["Correction"].append(
-                    self.processor.compare_structures(corr.get("mediator_rubric"), corr.get("tool_rubric_after_intervention"))
-                )
+                # Local
+                for item in local_edits:
+                    metrics["mediator_tool_match"][mode_key]["Local Edits"].append(
+                        self.processor.compare_structures(item.get("mediator_rubric"), item.get("tool_rubric_after_intervention"))
+                    )
+
+                # Correction
+                if len(correction) > 0:
+                    corr = correction[0]
+                    metrics["mediator_tool_match"][mode_key]["Correction"].append(
+                        self.processor.compare_structures(corr.get("mediator_rubric"), corr.get("tool_rubric_after_intervention"))
+                    )
 
         # Aggregation
         result = {
@@ -138,7 +139,7 @@ class RiceChemEvaluation:
             "mediator_tool_match": {
                 mk: {k: self.summarize(v) for k, v in metrics["mediator_tool_match"][mk].items()}
                 for mk in ("with_gold_structure", "with_predicted_structure")
-            },
+            } if self.tool_mode else {},
         }
 
         self.print_evaluation_metrics(result)

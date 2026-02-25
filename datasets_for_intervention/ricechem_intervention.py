@@ -1,5 +1,4 @@
 from copy import deepcopy
-from datasets_for_intervention.ricechem_structure_processor import RiceChemStructureProcessor, RiceChemTool
 from datasets_for_intervention.prompt import Prompt
 
 
@@ -8,7 +7,7 @@ class RiceChemIntervention:
         self.dataset = dataset
         self.llm_model = llm_model
 
-        assert prompting_regime in ["standard", "detailed"]
+        assert prompting_regime in ["standard", "detailed", "max_detailed"]
         assert tool_mode in [None, 'simple', 'structured']
 
         self.prompting_regime = prompting_regime
@@ -214,7 +213,7 @@ class RiceChemIntervention:
             lines.append(f"{k}: {'True' if v else 'False'}")
         return "\n".join(lines)
 
-    def _tool_call_string(self, checklist: dict) -> str:
+    def _get_tool_call_string(self, checklist: dict) -> str:
         if not self.tool_mode:
             return ""
 
@@ -231,13 +230,6 @@ class RiceChemIntervention:
         args = f'{{"rubric": [{items}]}}'
         return "Final tool call:\nTOOL: calculate_score\nARGS: " + args + "\n\n"
 
-    def _final_grade_string(self, checklist: dict, score_range: str = None) -> str:
-        score = float(sum(1 for _, v in checklist.items() if v is True))
-        sr = score_range
-        if not sr:
-            sr = f"0-{len(checklist) if isinstance(checklist, dict) else 0}"
-        return f"Final grade ({sr}): {score:.1f}\n\n"
-
     def make_prompt(self, ricechem_sample: dict, include_gold_structure: bool = False) -> str:
         checklist = []
         # item2weight = self.dataset.task2rubric_weights[ricechem_sample['task_idx']]
@@ -247,7 +239,7 @@ class RiceChemIntervention:
             checklist.append(checklist_item)
         checklist_string = "".join(checklist)
 
-        instruction_standard = (
+        instruction = (
             "You are an automated grader for a college-level chemistry class. "
             "Your task is to evaluate a student's answer by first constructing a structured reasoning block "
             "(a checklist of reasoning steps with weights) and then compute a final grade.\n\n"
@@ -263,28 +255,8 @@ class RiceChemIntervention:
             "- If the checklist contains mutually exclusive items (e.g., FULLY vs PARTIALLY), never mark both True.\n\n"
         )
 
-        tool_usage_simple = (
-            "Tool usage (REQUIRED):\n"
-            "- After you fill the checklist, you MUST call the tool to compute the final grade.\n"
-            "- Tool name: calculate_score\n"
-            "- IMPORTANT: The tool input must be the RAW filled rubric/checklist in EXACTLY the same format that you generated.\n"
-            "- Provide ARGS as valid JSON. Escape newlines in the rubric string as \\n.\n\n"
-        )
-
-        tool_usage_structured = (
-            "Tool usage (REQUIRED):\n"
-            "- After you fill the checklist, you MUST call the tool to compute the final grade.\n"
-            "- Tool name: calculate_score\n"
-            "- IMPORTANT: tool input is a boolean list aligned with your checklist lines:\n"
-            "  * same ORDER as the checklist lines\n"
-            "  * same LENGTH as the checklist lines\n"
-            "  * element i corresponds to checklist line i\n"
-            "- Do NOT compute the grade yourself.\n\n"
-        )
-
-        output_rule = None
         if not self.tool_mode:
-            output_rule = (
+            standard_output_rule = (
                 "After filling the checklist, compute the final grade as the number of True items."
                 "Express the grade as a float.\n\n"
 
@@ -293,31 +265,52 @@ class RiceChemIntervention:
                 "1) Checklist: (the filled checklist, line-for-line in the same format)\n"
                 "2) Final grade: <float>\n\n"
             )
-        else:
-            if self.tool_mode == "simple":
-                output_rule = (
-                    "Important output rule:\n"
-                    "Your final response must contain ONLY the following fields and no other text:\n"
-                    "1) Checklist: (the filled checklist, line-for-line in the same format)\n"
-                    "2) Final tool call:\n"
-                    "   TOOL: calculate_score\n"
-                    "   ARGS: {\"rubric\": \"FILLED RICECHEM CHECKLIST\"}\n\n"
-                    "IMPORTANT: in the final answer, you only have to call the tool, do NOT try to count the score yourself and do NOT output it after the Final Grade.\n\n"
-                )
-            else:
-                output_rule = (
-                    "Important output rule:\n"
-                    "Your final response must contain ONLY the following fields and no other text:\n"
-                    "1) Checklist: (the filled checklist, line-for-line in the same format)\n"
-                    "2) Final tool call:\n"
-                    "   TOOL: calculate_score\n"
-                    "   ARGS: {\"rubric\": [True, False, ...]}\n\n"
-                    "IMPORTANT: in the final answer, you only have to call the tool, do NOT try to count the score yourself and do NOT output it after the Final Grade.\n\n"
-                )
+
+            instruction += standard_output_rule
+
+        
+        tool_call_instruction = ""
+        if self.tool_mode == "simple":
+            tool_call_instruction = (
+                "Tool usage (REQUIRED):\n"
+                "- After you fill the checklist, you MUST call the tool to compute the final grade.\n"
+                "- Tool name: calculate_score\n"
+                "- IMPORTANT: The tool input must be the RAW filled rubric/checklist in EXACTLY the same format that you generated.\n"
+                "- Provide ARGS as valid JSON. Escape newlines in the rubric string as \\n.\n\n"
+
+                "Important output rule:\n"
+                "Your final response must contain ONLY the following fields and no other text:\n"
+                "1) Checklist: (the filled checklist, line-for-line in the same format)\n"
+                "2) Final tool call:\n"
+                "   TOOL: calculate_score\n"
+                "   ARGS: {\"rubric\": \"FILLED RICECHEM CHECKLIST\"}\n\n"
+                "IMPORTANT: in the final answer, you only have to call the tool, do NOT try to count the score yourself and do NOT output it after the Final Grade.\n\n"
+            )
+        elif self.tool_mode == "structured":
+            tool_call_instruction = (
+                "Tool usage (REQUIRED):\n"
+                "- After you fill the checklist, you MUST call the tool to compute the final grade.\n"
+                "- Tool name: calculate_score\n"
+                "- IMPORTANT: tool input is a boolean list aligned with your checklist lines:\n"
+                "  * same ORDER as the checklist lines\n"
+                "  * same LENGTH as the checklist lines\n"
+                "  * element i corresponds to checklist line i\n"
+                "- Do NOT compute the grade yourself.\n\n"
+
+                "Important output rule:\n"
+                "Your final response must contain ONLY the following fields and no other text:\n"
+                "1) Checklist: (the filled checklist, line-for-line in the same format)\n"
+                "2) Final tool call:\n"
+                "   TOOL: calculate_score\n"
+                "   ARGS: {\"rubric\": [True, False, ...]}\n\n"
+                "IMPORTANT: in the final answer, you only have to call the tool, do NOT try to count the score yourself and do NOT output it after the Final Grade.\n\n"
+            )
 
         tool_spec_block = ""
         if self.tool_mode:
             tool_spec_block = "Tool specification:\n" + self.tool.spec_json() + "\n\n"
+
+        tool_call_instruction += tool_spec_block
 
         few_shot_text = "FEW-SHOT EXAMPLES:\n\n"
         for ex_name in ["Example 1", "Example 2", "Example 3", "Example 4"]:
@@ -332,7 +325,6 @@ class RiceChemIntervention:
                 explanation = ""
 
             checklist_str = self._checklist_dict_to_string(checklist)
-            score_range = f"0-{len(checklist)}"
 
             ex_block = (
                 f"Example #{ex_num}\n"
@@ -345,68 +337,49 @@ class RiceChemIntervention:
             )
 
             if not self.tool_mode:
-                ex_block += self._final_grade_string(checklist, score_range=score_range)
+                score = float(sum(1 for _, v in checklist.items() if v is True))
+                ex_block += f"Final grade ({ricechem_sample['score_range']}): {score:.1f}\n\n"
             else:
-                ex_block += self._tool_call_string(checklist)
+                ex_block += self._get_tool_call_string(checklist)
 
-            if self.prompting_regime == "detailed":
+            if self.prompting_regime in ["detailed", "max_detailed"]:
                 ex_block += "Explanation:\n" + explanation + "\n"
 
             few_shot_text += ex_block
 
-        user_prompt = instruction_standard
-
-        if self.tool_mode == "simple":
-            user_prompt += tool_usage_simple
-        elif self.tool_mode == "structured":
-            user_prompt += tool_usage_structured
-
-        user_prompt = (
-            user_prompt
-            + output_rule
-            + tool_spec_block
-            + few_shot_text
-            + "Now follow the same structure for the given input.\n\n"
-            + "Question:\n"
-            + f"{ricechem_sample['task']}\n\n"
-            + "Answer:\n"
-            + f"{ricechem_sample['student_answer']}\n\n"
-            + "Checklist:\n"
-            + checklist_string
-            + "\n"
+        current_sample = (
+            "Now follow the same structure for the given input.\n\n"
+            "Question:\n"
+            f"{ricechem_sample['task']}\n\n"
+            "Answer:\n"
+            f"{ricechem_sample['student_answer']}\n\n"
+            "Checklist:\n"
+            f"{checklist_string}"
         )
 
-        messages = [{"role": "user", "content": user_prompt}]
-        add_generation_prompt_status = True
+        prompt = Prompt(
+            prompting_regime=self.prompting_regime,
+            use_tool_call=self.tool_mode is not None,
+            tool_call_instruction=tool_call_instruction,
+            instruction=instruction,
+            few_shot=few_shot_text,
+            llm_model=self.llm_model,
+        )
+
+        gold_structure = None
         if include_gold_structure:
-            checklist_string = "Checklist:\n"
+            gold_structure = "Checklist:\n"
             for rubric_item, answer in ricechem_sample['mediator_rubric'].items():
                 # checklist_item = f"{rubric_item} (weight: {item2weight[rubric_item]}) (True/False): {answer}\n"
-                checklist_item = f"{rubric_item} (True/False): {answer}\n"
-                checklist_string += checklist_item
+                gold_structure += f"{rubric_item} (True/False): {answer}\n"
             #checklist_string += "Final grade (0-8): "
             if self.tool_mode:
-                checklist_string += "Final tool call: "
+                gold_structure += "Final tool call:\n"
             else:
-                checklist_string += f"Final grade ({ricechem_sample['score_range']}): "
-            messages.append({"role": "assistant", "content": checklist_string})
+                gold_structure += f"Final grade ({ricechem_sample['score_range']}): "
 
-            add_generation_prompt_status = False
-
-        # instruction = before_few_shot.rstrip() + "\n\nFEW-SHOT EXAMPLES:\n"
-        # current_sample = "Now follow the same structure for the given input.\n\n" + current_tail.lstrip("\n")
-
-        # prompt = Prompt(
-        #     prompting_regime=self.prompting_regime,
-        #     use_tool_call=False,
-        #     tool_call_instruction="",
-        #     instruction=instruction,
-        #     few_shot=few_shot,
-        #     llm_model=self.llm_model,
-        # )
-
-        # # remove the end token if it is present since we need to continue the generation
-        # if add_generation_prompt_status is False:
-        #     prompt = self.llm_model.clean_model_specific_completion(prompt)
-
-        # return prompt
+        return prompt.make_prompt(
+            current_sample=current_sample,
+            include_gold_structure=include_gold_structure,
+            gold_structure=gold_structure,
+        )

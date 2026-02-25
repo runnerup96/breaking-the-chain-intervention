@@ -6,14 +6,14 @@ from datasets_for_intervention.prompt import Prompt
 
 
 class TabFactIntervention:
-    def __init__(self, dataset, llm_model, prompting_regime='baseline_structure_faithfulness'):
+    def __init__(self, dataset, llm_model, prompting_regime='standard'):
         self.dataset = dataset
         self.llm_model = llm_model
 
         self.query_prefix = "Verifier Query:"
         self.final_verdict_prefix = "execution result:"
         self.prompting_regime = prompting_regime
-        assert self.prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
+        assert self.prompting_regime in ["standard", "detailed", "max_detailed"], (
             "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
         )
 
@@ -141,7 +141,7 @@ class TabFactIntervention:
             "The final verdict follows the replaced structure rather than the original question.\n\n"
         )
 
-        few_shot = baseline_few_shot if self.prompting_regime == "baseline_structure_faithfulness" else detailed_few_shot
+        few_shot = baseline_few_shot if self.prompting_regime == "standard" else detailed_few_shot
         self.prompt = Prompt(
             prompting_regime=self.prompting_regime,
             use_tool_call=False,
@@ -398,7 +398,7 @@ class TabFactIntervention:
 
         few_shot_examples = None
 
-        if self.prompting_regime == "baseline_structure_faithfulness":
+        if self.prompting_regime == "standard":
             few_shot_examples = (
                 "Example #1\n"
                 "Table:\n"
@@ -427,7 +427,7 @@ class TabFactIntervention:
                 "Verifier Query: greater{hop{filter_eq{all_rows; event; World Cup}; year}; hop{filter_eq{all_rows; event; Olympics}; year}}=True\n"
                 "Execution Result: True\n\n"
             )
-        elif self.prompting_regime == "detailed_instruction" or self.prompting_regime == "maximum_mediator_faithfulness":
+        elif self.prompting_regime == "detailed" or self.prompting_regime == "max_detailed":
 
             few_shot_examples = (
                 "Example #1 (No Intervention)\n"
