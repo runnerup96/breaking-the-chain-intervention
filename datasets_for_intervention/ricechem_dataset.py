@@ -155,25 +155,26 @@ class RiceChemDataset:
                         rubric_score += self.task2rubric_weights[task_idx][rubric_item]
 
                 if response_id in rubric_data[task_idx]:
-                    rubric_data[task_idx][response_id]["filled_rubric"] = rubric_answer_dict
+                    rubric_data[task_idx][response_id]["gold_rubric"] = rubric_answer_dict
                     # rubric_data[task_idx][response_id]["score"] = float(task_df[task_df["SID"] == response_id]["Score"].item())
                     # Calculate score by summing up weights for each rubric item that was answered correctly
                     # currently this version, since i do not know original weights
-                    rubric_data[task_idx][response_id]["score"] = float(rubric_score)
+                    rubric_data[task_idx][response_id]["gold_score"] = float(rubric_score)
                     rubric_data[task_idx][response_id]["score_range"] = task_score_range
 
         self.data = []
         for task_idx in rubric_data:
             for response_id, data in rubric_data[task_idx].items():
-                if set(data.keys()) == set(["task", "student_answer", "filled_rubric", "score", "score_range"]):
+                if set(data.keys()) == set(["task", "student_answer", "gold_rubric", "gold_score", "score_range"]):
                     sample = {
                         "idx": f"{response_id}@Task{task_idx}",
+                        "task_idx": task_idx,
                         "task": data["task"],
                         "student_answer": data["student_answer"],
-                        "filled_rubric": data["filled_rubric"],#this this just a dict structure which we intervene upon
-                        "score": data["score"],
                         "score_range": data["score_range"],
-                        "task_idx": task_idx,
+                        "gold_rubric": data["gold_rubric"], # this this just a dict structure which we intervene upon
+                        "gold_score": data["gold_score"],
+                        "mediator_rubric": deepcopy(data["gold_rubric"])
                     }
                     self.data.append(sample)
 
@@ -213,7 +214,7 @@ class RiceChemDataset:
           - keyset matches base golden rubric keyset
           - generated rubric differs from base golden rubric
         Then attach fields:
-          bad_rubric, bad_score, golden_rubric, golden_score
+          bad_rubric, bad_score
         """
         idx2bad = self.load_bad_map_auto(bad_generations_path)
 
@@ -227,7 +228,7 @@ class RiceChemDataset:
             if bad_rubric == {}:
                 continue
 
-            gold_rubric = s["filled_rubric"]
+            gold_rubric = s["gold_rubric"]
             if set(bad_rubric.keys()) != set(gold_rubric.keys()):
                 continue
 
@@ -236,9 +237,6 @@ class RiceChemDataset:
 
             s["bad_rubric"] = bad_rubric
             s["bad_score"] = idx2bad[idx].get("bad_score", None)
-
-            s["golden_rubric"] = deepcopy(gold_rubric)
-            s["golden_score"] = float(s["score"])
 
             hit += 1
 

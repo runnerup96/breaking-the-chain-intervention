@@ -3,14 +3,14 @@ import json
 
 
 class RiceChemTool:
-    def __init__(self, dataset, prompting_regime):
+    def __init__(self, dataset, tool_mode):
         self.dataset = dataset
-        self.prompting_regime = prompting_regime
+        self.tool_mode = tool_mode
         self.name = "calculate_score"
 
     @property
     def spec(self):
-        if self.prompting_regime == "tool_heavy":
+        if self.tool_mode == "structured":
             return {
                 "title": self.name,
                 "type": "object",
@@ -59,7 +59,7 @@ class RiceChemTool:
 
         r = args["rubric"]
 
-        if self.prompting_regime == "tool_heavy":
+        if self.tool_mode == "structured":
             if not isinstance(r, list) or len(r) == 0:
                 return False
             for x in r:
@@ -85,24 +85,34 @@ class RiceChemTool:
         if weights is None:
             return None
 
-        if self.prompting_regime == "tool_heavy":
-            bools_list = args["rubric"]
-            keys = list(weights.keys())
-            if len(bools_list) != len(keys):
+        rubric = args.get("rubric")
+
+        # structured: list[bool]
+        if isinstance(rubric, list):
+            gold = sample_meta.get("gold_rubric")
+            if isinstance(gold, dict) and gold:
+                keys = list(gold.keys())
+            else:
+                keys = list(weights.keys())
+
+            if len(rubric) != len(keys):
                 return None
 
             score = 0.0
-            for i in range(len(keys)):
-                if bools_list[i]:
-                    score += float(weights[keys[i]])
+            for i, key in enumerate(keys):
+                if rubric[i]:
+                    score += float(weights[key])
             return float(score)
 
-        rubric_dict = args["rubric"]
-        score = 0.0
-        for k, v in rubric_dict.items():
-            if v and k in weights:
-                score += float(weights[k])
-        return float(score)
+        # simple: dict[item -> bool]
+        if isinstance(rubric, dict):
+            score = 0.0
+            for k, v in rubric.items():
+                if v and k in weights:
+                    score += float(weights[k])
+            return float(score)
+
+        return None
 
     def _get_weights(self, sample_meta):
         if sample_meta is None:
@@ -114,14 +124,13 @@ class RiceChemTool:
         return None
 
 
-
-class RiceChemMediatorProcessor:
+class RiceChemStructureProcessor:
     LINE_RE = re.compile(
         r"""
         ^\s*
         (?P<question>.+?)
         (?:\s*\(\s*weight:\s*(?P<weight>[-+]?\d+(?:\.\d+)?)\s*\))?
-        \s*\(\s*(?P<options>[^()]+?)\s*\)
+        (?:\s*\(\s*(?P<options>[^()]+?)\s*\))?          # <-- options now OPTIONAL
         \s*[:\-]\s*(?P<answer>True|False)\s*$
         """,
         re.IGNORECASE | re.VERBOSE,
@@ -143,9 +152,38 @@ class RiceChemMediatorProcessor:
         r'(?is)"rubric"\s*:\s*\[(?P<items>.*?)(?:\]|\}|$)'
     )
 
-    def __init__(self, dataset, prompting_regime):
+    FINAL_GRADE_RE = re.compile(
+        r"""(?i)\bfinal\s*grade(?:\s*\([^)]*\))?\s*[:\-]\s*(?P<grade>[-+]?\d+(?:\.\d+)?)\b"""
+    )
+
+    NUM_ONLY_RE = re.compile(r"^\s*(?P<num>[-+]?\d+(?:\.\d+)?)\s*$")
+
+    def __init__(self, dataset, tool_mode='none'):
         self.dataset = dataset
-        self.prompting_regime = prompting_regime
+        self.tool_mode = tool_mode
+
+    def extract_final_answer(self, text: str, short_completion: bool = False) -> float | None:
+        s = (text or "").strip()
+        if not s:
+            return None
+
+        m = self.FINAL_GRADE_RE.search(s)
+        if m:
+            try:
+                return float(m.group("grade"))
+            except ValueError:
+                return None
+
+        if short_completion:
+            m2 = self.NUM_ONLY_RE.match(s)
+            if not m2:
+                return None
+            try:
+                return float(m2.group("num"))
+            except ValueError:
+                return None
+
+        return None
 
     def _clean_tool_text(self, s):
         if not s:
@@ -172,7 +210,7 @@ class RiceChemMediatorProcessor:
             checklist[q] = a
         return checklist if checklist else None
 
-    def parse_mediator_checklist(self, completion_text):
+    def extract_mediator(self, completion_text):
         m = self.MEDIATOR_BLOCK_RE.search(completion_text or "")
         if not m:
             return None
@@ -181,36 +219,40 @@ class RiceChemMediatorProcessor:
             return None
         return self._parse_checklist_block(block)
 
-    def extract_final_grade(self, text: str) -> float | None:
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            m = re.search(r"(?i)final\s*grade.*?[:\-]\s*([\d.]+)", line)
-            if m:
-                try:
-                    return float(m.group(1))
-                except ValueError:
-                    pass
-        return None
-
-    def parse_tool_payload(self, completion_text):
-        m = self.TOOL_ARGS_BLOCK_RE.search(completion_text or "")
-        if not m:
+    def extract_tool_args(self, completion_text, short_completion: bool = False):
+        """
+        Returns TOOL arguments in the format expected by Tool.calculate_score:
+        - tool_mode == "simple"     -> dict checklist {item: bool}
+        - tool_mode == "structured" -> list[bool]
+        """
+        if not self.tool_mode:
             return None
 
-        block = self._clean_tool_text(m.group("block"))
+        raw = completion_text or ""
+
+        if short_completion:
+            block = self._clean_tool_text(raw)
+        else:
+            m = self.TOOL_ARGS_BLOCK_RE.search(raw)
+            if not m:
+                return None
+            block = self._clean_tool_text(m.group("block"))
+
         if not block:
             return None
 
-        if self.prompting_regime != "tool_heavy":
+        # SIMPLE: {"rubric": "<raw checklist string>"} -> parse into dict checklist
+        if self.tool_mode == "simple":
             ms = self.TOOL_RUBRIC_STRING_RE.search(block)
             if not ms:
                 return None
-            rubric = self._clean_tool_text(ms.group("rubric"))
-            return rubric if rubric else None
+            rubric_str = self._clean_tool_text(ms.group("rubric"))
+            if not rubric_str:
+                return None
+            return self._parse_checklist_block(rubric_str)
 
-        else:
+        # STRUCTURED: {"rubric": [True, False, ...]} -> list[bool]
+        if self.tool_mode == "structured":
             ml = self.TOOL_RUBRIC_BOOL_LIST_RE.search(block)
             if not ml:
                 return None
@@ -218,9 +260,7 @@ class RiceChemMediatorProcessor:
             if not items:
                 return None
 
-            parts = [p.strip() for p in items.split(",")]
-            parts = [p for p in parts if p != ""]
-
+            parts = [p.strip() for p in items.split(",") if p.strip() != ""]
             out = []
             for p in parts:
                 pl = p.lower()
@@ -233,21 +273,38 @@ class RiceChemMediatorProcessor:
 
             return out if out else None
 
-    def tool_payload_to_checklist(self, sample, payload):
+        return None
+
+    def boollist_to_checklist(self, sample, payload):
+        """
+        STRUCTURED ONLY HELPER:
+        payload: list[bool] -> {rubric_item_text: bool}
+        Used for logging/tool_rubric canonicalization and comparisons.
+        """
         if payload is None:
             return None
+        if not isinstance(payload, list) or len(payload) == 0:
+            return None
+        for x in payload:
+            if not isinstance(x, bool):
+                return None
 
-        if self.prompting_regime != "tool_heavy":
-            return self._parse_checklist_block(payload)
+        gold = sample.get("gold_rubric")
+        if isinstance(gold, dict) and gold:
+            keys = list(gold.keys())
+        else:
+            keys = list(self.dataset.task2rubric_weights[sample["task_idx"]].keys())
 
-        keys = list(self.dataset.task2rubric_weights[sample["task_idx"]].keys())
         if len(payload) != len(keys):
             return None
+
         return {keys[i]: payload[i] for i in range(len(keys))}
 
-    def compare_checklists(self, checklist_a, checklist_b):
+    def compare_structures(self, checklist_a, checklist_b):
         if checklist_a is None or checklist_b is None:
             return None
+        if len(checklist_a) != len(checklist_b):
+            return 0
         for k, v in checklist_a.items():
             if k not in checklist_b or checklist_b[k] != v:
                 return 0
