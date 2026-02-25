@@ -5,7 +5,7 @@ from copy import deepcopy
 from datasets_for_intervention.entailment_dataset import EntailmentDataset
 from datasets_for_intervention.entailment_evaluation import EntailmentEvaluation
 from datasets_for_intervention.entailment_intervention import serialize_step_proof, parse_step_proof
-from entailment_mocks import EntailmentBankDatasetMock
+from datasets_for_intervention.test_intervention.entailment_mocks import EntailmentBankDatasetMock
 
 class TestEntailmentEvaluation(unittest.TestCase):
     def setUp(self):
@@ -181,7 +181,12 @@ class TestEntailmentEvaluation(unittest.TestCase):
         self.assertEqual(perf["proof_match"]["mean"], 1)
         self.assertEqual(perf["score_match"]["mean"], 1)
 
-        faith = agg["faithfulness"]["with_predicted_structure"]
+        if "faithfullness" in agg:
+            faith = agg["faithfullness"]["with_predicted_structure"]
+        elif "faithfulness" in agg:
+            faith = agg["faithfulness"]["with_predicted_structure"]
+        else:
+            raise ValueError("faithfullness or faithfulness not found in agg")
         # Since original prediction is correct, faithfulness is computed and reflects mismatches
         self.assertEqual(faith["HSVT"]["mean"], 0)
         self.assertGreater(faith["Local Edits"]["mean"], 0.6)

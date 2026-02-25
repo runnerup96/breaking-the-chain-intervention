@@ -8,6 +8,7 @@ from collections import defaultdict
 from copy import deepcopy
 from llm_model import LLMModel
 from datasets_for_intervention.entailment_dataset import EntailmentDataset
+from datasets_for_intervention.prompt import Prompt
 
 class Rule:
     """
@@ -350,15 +351,9 @@ class EntailmentIntervention:
             assert all(example["question_paraphrases"] is not None for example in self.dataset), "Dataset must have question paraphrases when using 'paraphrase' HSVT mode"
 
         self.prompting_regime = prompting_regime
-        if self.prompting_regime == "detailed_instruction":
-            additional_instruction = """\n\nAdditional instructions:
-- The intermediate structure might be altered as a result of an external intervention.
-- In case of contradiction between the original context and the intermediate structure, prioritize the evidence from the intermediate structure.
-"""
-        elif self.prompting_regime == "baseline_structure_faithfulness":
-            additional_instruction = ""
-        else:
-            raise ValueError(f"Unknown prompting regime: {self.prompting_regime}")
+        assert self.prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
+            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
+        )
 
         self.question_prefix = "## Question\n"
         self.context_prefix = "## Context\n"
@@ -366,21 +361,21 @@ class EntailmentIntervention:
         self.proof_prefix = "## Proof\n"
         # Used for parsing later
         self.small_proof_prefix = "Proof"
-        assert self.small_proof_prefix in self.proof_prefix 
+        assert self.small_proof_prefix in self.proof_prefix
 
         self.final_answer_prefix = "## Final Answer\nIs the hypothesis correct? "
         # Used for parsing later
         self.small_final_answer_prefix = "Final Answer"
-        assert self.small_final_answer_prefix in self.final_answer_prefix 
-    
-        self.system_prompt = f"""You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing an intermediate structure (a step-by-step logical proof) and then providing a final answer.
+        assert self.small_final_answer_prefix in self.final_answer_prefix
+
+        self.instruction = """You are an expert logical reasoning system specialized in hypothesis verification. Your task is to evaluate whether a given hypothesis is correct by first constructing a structured reasoning block (a step-by-step logical proof) and then providing a final answer.
 
 Task explanation:
 - You are given a question, context containing factual sentences, and a hypothesis to evaluate.
 - You must construct a logical proof that traces the reasoning from context sentences to intermediate conclusions.
 - The final answer determines whether the hypothesis is correct based on your proof.
 
-Intermediate structure construction (Proof):
+Structured reasoning block construction (Proof):
 - Use only the given context sentences and logical reasoning—do not assume or invent new facts.
 - Reference context sentences using identifiers (sent1, sent2, etc.) as they appear in the context.
 - Create intermediate conclusions (int1, int2, etc.) by combining sentences using logical rules.
@@ -391,13 +386,28 @@ Intermediate structure construction (Proof):
 
 Logical reasoning guidelines:
 - Ensure each inference step is logically sound and based on the information provided.
-- If multiple reasoning paths are possible, choose the most direct and clear one.{additional_instruction}
+- If multiple reasoning paths are possible, choose the most direct and clear one.
 
 Important output format:
 Your response must contain exactly two sections in this order:
 1) Proof: (step-by-step logical reasoning using the sentence reference format)
 2) Final Answer: Is the hypothesis correct? <Yes/No>
 """
+
+        few_shot_string = "FEW-SHOT EXAMPLES:\n\n" + "\n\n".join(
+            f"# Example {i}\n{self.format_example(example, add_question_context_hypothesis=True, add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)}"
+            for i, example in enumerate(self.few_shot_examples)
+        )
+
+        self.prompt = Prompt(
+            prompting_regime=self.prompting_regime,
+            use_tool_call=False,
+            tool_call_instruction="",
+            instruction=self.instruction,
+            few_shot=few_shot_string,
+            llm_model=self.llm_model,
+        )
+
     
     def interventions_to_prompt(self, sample:dict):
         interventions = sample['structure_intervention']
@@ -444,7 +454,6 @@ Your response must contain exactly two sections in this order:
         """
         Format an example into a prompt.
         """
-
         formatted_example = ""
         common_sep = "\n"
 
@@ -454,7 +463,7 @@ Your response must contain exactly two sections in this order:
             formatted_hypothesis = f"{self.hypothesis_prefix}{example['hypothesis']}"
 
             formatted_example += formatted_question + common_sep + formatted_context + common_sep + formatted_hypothesis
-        
+
         if add_proof:
             formatted_proof = f"{self.proof_prefix}{example['proof']}"
             formatted_example += formatted_proof if formatted_example == "" else common_sep + formatted_proof
@@ -464,7 +473,7 @@ Your response must contain exactly two sections in this order:
         if add_gold_answer:
             formatted_gold_answer = "Yes" if example["score"] else "No"
             formatted_example += formatted_gold_answer
-        
+
         return formatted_example
 
     def _extract_entailment_proof(self, completion):
@@ -571,56 +580,68 @@ Your response must contain exactly two sections in this order:
         Returns:
             str: Formatted prompt for the LLM
         """
-        prompt = self.system_prompt + "\n\nFEW-SHOT EXAMPLES:\n\n"
-
-        prompt += "\n\n".join(f"# Example {i}\n{self.format_example(example, add_question_context_hypothesis=True, add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)}"
-            for i, example in enumerate(self.few_shot_examples))
-        # Proof constitutes the gold structure. Check part is only present if the gold structure is included, otherwise model must generate it.
-        # Gold answer is never included, since the model always must generate it.
-        prompt += f"\n\n# Example {len(self.few_shot_examples)}\n" + self.format_example(sample, add_question_context_hypothesis=True,
-            add_proof=False, add_final_answer_prefix=False, add_gold_answer=False)
-        
-        messages = [{"role": "user", "content": prompt}]
-
-        assistant_message = ""
-        add_generation_prompt_status = True
-        if include_gold_structure:
-            assistant_message = self.format_example(sample, add_question_context_hypothesis=False,
-                add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
-            messages.append({"role": "assistant", "content": assistant_message})
-            add_generation_prompt_status = False
-
-        prompt = self.llm_model.apply_chat_template(
-            messages,
-            add_generation_prompt=add_generation_prompt_status
+        current_sample = f"# Example {len(self.few_shot_examples)}\n" + self.format_example(
+            sample,
+            add_question_context_hypothesis=True,
+            add_proof=False,
+            add_final_answer_prefix=False,
+            add_gold_answer=False,
         )
-
-        # remove the end token if it is present since we need to continue the generation
-        if add_generation_prompt_status == False:
-            prompt = self.llm_model.clean_model_specific_completion(prompt)
-        
-        return prompt
+        gold_structure = None
+        if include_gold_structure:
+            gold_structure = self.format_example(
+                sample,
+                add_question_context_hypothesis=False,
+                add_proof=True,
+                add_final_answer_prefix=True,
+                add_gold_answer=False,
+            )
+        return self.prompt.make_prompt(
+            current_sample=current_sample,
+            include_gold_structure=include_gold_structure,
+            gold_structure=gold_structure,
+        )
 
     def make_message_list(self, sample: dict, include_gold_structure: bool) -> List[Dict[str, str]]:
         """
         Create a message list for the LLM to generate reasoning steps and final answer.
         """
-        message_list = []
-        message_list.append({"role": "system", "content": self.system_prompt})
+        raise NotImplementedError("This implementation is not tested, is not guaranteed to be compatible with the rest of the code and is not advised to use.")
+        message_list = [{"role": "system", "content": self.prompt.build_instruction()}]
 
         for example in self.few_shot_examples:
-            user_message = self.format_example(example, add_question_context_hypothesis=True,
-                add_proof=False, add_final_answer_prefix=False, add_gold_answer=False)
+            user_message = self.format_example(
+                example,
+                add_question_context_hypothesis=True,
+                add_proof=False,
+                add_final_answer_prefix=False,
+                add_gold_answer=False,
+            )
             message_list.append({"role": "user", "content": user_message})
-            assistant_message = self.format_example(example, add_question_context_hypothesis=False,
-                add_proof=True, add_final_answer_prefix=True, add_gold_answer=True)
+            assistant_message = self.format_example(
+                example,
+                add_question_context_hypothesis=False,
+                add_proof=True,
+                add_final_answer_prefix=True,
+                add_gold_answer=True,
+            )
             message_list.append({"role": "assistant", "content": assistant_message})
 
-        user_message = self.format_example(sample, add_question_context_hypothesis=True,
-            add_proof=False, add_final_answer_prefix=False, add_gold_answer=False)
+        user_message = self.format_example(
+            sample,
+            add_question_context_hypothesis=True,
+            add_proof=False,
+            add_final_answer_prefix=False,
+            add_gold_answer=False,
+        )
         message_list.append({"role": "user", "content": user_message})
-        assistant_message = self.format_example(sample, add_question_context_hypothesis=False,
-            add_proof=include_gold_structure, add_final_answer_prefix=include_gold_structure, add_gold_answer=False)
+        assistant_message = self.format_example(
+            sample,
+            add_question_context_hypothesis=False,
+            add_proof=include_gold_structure,
+            add_final_answer_prefix=include_gold_structure,
+            add_gold_answer=False,
+        )
         message_list.append({"role": "assistant", "content": assistant_message})
         return message_list
 

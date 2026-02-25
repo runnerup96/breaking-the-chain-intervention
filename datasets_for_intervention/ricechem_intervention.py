@@ -1,6 +1,6 @@
 from copy import deepcopy
 from datasets_for_intervention.ricechem_structure_processor import RiceChemStructureProcessor, RiceChemTool
-# from datasets_for_intervention.prompt import Prompt
+from datasets_for_intervention.prompt import Prompt
 
 
 class RiceChemIntervention:
@@ -38,9 +38,9 @@ class RiceChemIntervention:
         if self.tool_mode:
             tool_args = self.processor.extract_tool_args(completion, short_completion)
             if self.tool_mode == "structured":
-                tool_rubric = self.processor.boollist_to_checklist(sample, tool_args)  # dict for logs
+                tool_rubric = self.processor.boollist_to_checklist(sample, tool_args)
             else:
-                tool_rubric = tool_args  # already dict
+                tool_rubric = tool_args
             score = self.tool.calculate_score({"rubric": tool_args}, sample)
             return score, tool_rubric
         final_grade = self.processor.extract_final_answer(completion, short_completion)
@@ -249,7 +249,7 @@ class RiceChemIntervention:
 
         instruction_standard = (
             "You are an automated grader for a college-level chemistry class. "
-            "Your task is to evaluate a student's answer by first constructing an intermediate structure "
+            "Your task is to evaluate a student's answer by first constructing a structured reasoning block "
             "(a checklist of reasoning steps with weights) and then compute a final grade.\n\n"
             "Task explanation:\n"
             "- You are given a question, a student's answer, and a checklist of rubric items.\n"
@@ -393,14 +393,20 @@ class RiceChemIntervention:
 
             add_generation_prompt_status = False
 
+        # instruction = before_few_shot.rstrip() + "\n\nFEW-SHOT EXAMPLES:\n"
+        # current_sample = "Now follow the same structure for the given input.\n\n" + current_tail.lstrip("\n")
 
-        prompt = self.llm_model.apply_chat_template(
-            messages,
-            add_generation_prompt=add_generation_prompt_status
-        )
+        # prompt = Prompt(
+        #     prompting_regime=self.prompting_regime,
+        #     use_tool_call=False,
+        #     tool_call_instruction="",
+        #     instruction=instruction,
+        #     few_shot=few_shot,
+        #     llm_model=self.llm_model,
+        # )
 
-        # remove the end token if it is present since we need to continue the generation
-        if add_generation_prompt_status is False:
-            prompt = self.llm_model.clean_model_specific_completion(prompt)
+        # # remove the end token if it is present since we need to continue the generation
+        # if add_generation_prompt_status is False:
+        #     prompt = self.llm_model.clean_model_specific_completion(prompt)
 
-        return prompt
+        # return prompt

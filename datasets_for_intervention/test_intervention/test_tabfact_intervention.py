@@ -1,8 +1,8 @@
 import unittest
 import re
 from copy import deepcopy
-from llm_mocks import FakeLLMModel
-from tabfact_mocks import TabFactDatasetMock
+from datasets_for_intervention.test_intervention.llm_mocks import FakeLLMModel
+from datasets_for_intervention.test_intervention.tabfact_mocks import TabFactDatasetMock
 from datasets_for_intervention.tabfact_intervention import TabFactIntervention
 
 

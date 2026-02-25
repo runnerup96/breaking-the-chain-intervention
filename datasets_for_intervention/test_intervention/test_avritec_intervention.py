@@ -1,11 +1,8 @@
 import unittest
 from copy import deepcopy
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from llm_mocks import FakeLLMModel
-from averitec_mocks import AVeriTeCDatasetMock, FakeCapture
+from datasets_for_intervention.test_intervention.llm_mocks import FakeLLMModel
+from datasets_for_intervention.test_intervention.averitec_mocks import AVeriTeCDatasetMock, FakeCapture
 from datasets_for_intervention.averitec_intervention import AVeriTeCIntervention
 
 
@@ -133,7 +130,7 @@ class TestAVeriTeCIntervention(unittest.TestCase):
 
     def test_make_prompt_includes_gold_structure(self):
         prompt = self.ic.make_prompt(self.sample, include_gold_structure=True)
-        self.assertIn("Intermediate Structure:", prompt)
+        self.assertIn("Structured Reasoning Block:", prompt)
         self.assertIn("Final Verdict:", prompt)
         self.assertIn(self.sample["claim"], prompt)
 
@@ -141,7 +138,7 @@ class TestAVeriTeCIntervention(unittest.TestCase):
         prompt = self.ic.make_prompt(self.sample, include_gold_structure=False)
         self.assertIn(self.sample["claim"], prompt)
         # The prompt contains "Intermediate Structure:" and "Final Verdict:" in the instructions
-        self.assertIn("Intermediate Structure:", prompt)  # This is in the instructions
+        self.assertIn("Structured Reasoning Block:", prompt)  # This is in the instructions
         self.assertIn("Final Verdict:", prompt)  # This is also in the instructions
 
     def test_make_structure_intervention_hsvt_uses_paraphrase(self):
