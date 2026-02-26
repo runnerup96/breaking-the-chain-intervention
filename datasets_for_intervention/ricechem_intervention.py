@@ -274,7 +274,7 @@ class RiceChemIntervention:
 
             instruction += standard_output_rule
 
-        
+
         tool_call_instruction = ""
         if self.tool_mode == "simple":
             tool_call_instruction = (
@@ -352,7 +352,7 @@ class RiceChemIntervention:
                 ex_block += "Explanation:\n" + explanation + "\n"
 
             few_shot_text += ex_block
-        
+
         return instruction, tool_call_instruction, few_shot_text
 
 
@@ -364,7 +364,7 @@ class RiceChemIntervention:
             checklist_item = f"{rubric_item} (True/False): <True/False>\n"
             checklist.append(checklist_item)
         checklist_string = "".join(checklist)
-        
+
         current_sample = (
             "Now follow the same structure for the given input.\n\n"
             "Question:\n"
