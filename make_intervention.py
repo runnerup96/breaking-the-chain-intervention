@@ -145,7 +145,7 @@ if __name__ == "__main__":
             data_path=os.path.join(project_path, "statics/datasets/RiceChem/data"),
             correction_path=os.path.join(project_path, f"intervention_analysis/intervention_predictions/ricechem/{model_name2simple[args.model_name]}.json"),
             use_corrections=True,
-            correction_only=True
+            correction_only=False
         )
         tool = ricechem_structure_processor.RiceChemTool(dataset, args.tool_mode)
         processor = ricechem_structure_processor.RiceChemStructureProcessor(dataset, args.tool_mode)
@@ -199,10 +199,10 @@ if __name__ == "__main__":
 
     for batch in tqdm(dataloader, desc=f"Intervention {args.evaluation_dataset}"):
         pred_prompts = [intervention_logic.make_prompt(s, include_gold_structure=False) for s in batch]
-        pred_outputs = llm.generate(pred_prompts, max_new_tokens=1024, skip_special_tokens=False)
+        pred_outputs = llm.generate(pred_prompts, max_new_tokens=350, skip_special_tokens=False)
 
         gold_prompts = [intervention_logic.make_prompt(s, include_gold_structure=True) for s in batch]
-        gold_outputs = llm.generate(gold_prompts, max_new_tokens=512 if args.tool_mode else 10, skip_special_tokens=False)
+        gold_outputs = llm.generate(gold_prompts, max_new_tokens=200 if args.tool_mode else 10, skip_special_tokens=False)
 
         all_outputs = pred_outputs + gold_outputs
         all_samples = [deepcopy(s) for s in batch] + [deepcopy(s) for s in batch]
@@ -215,7 +215,7 @@ if __name__ == "__main__":
             # try:
             sample_with_interv = intervention_logic.make_intervention(sample, model_out)
             prompt_list = intervention_logic.interventions_to_prompt(sample_with_interv)
-            interv_outputs = llm.generate(prompt_list, max_new_tokens=512 if args.tool_mode else 10, skip_special_tokens=False)
+            interv_outputs = llm.generate(prompt_list, max_new_tokens=200 if args.tool_mode else 10, skip_special_tokens=False)
             final_sample = intervention_logic.collect_intervention_completion(sample_with_interv, interv_outputs)
             processed_samples_list.append(final_sample)
 
