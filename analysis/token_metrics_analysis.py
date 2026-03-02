@@ -1013,6 +1013,432 @@ def extract_all_tokenized_texts(results: list) -> List[Dict]:
     return tokenized_samples
 
 
+# ──────────────────────── entropy vs token position plot ────────────────────────
+
+def find_marker_index(metrics_list: Optional[list], marker: str) -> Optional[int]:
+    """
+    Find the index of the LAST occurrence of a marker (e.g., ===SKELETON===, ===SCHEMA_LINKS===, ===SLOT_MATCHING===)
+    in the metrics list. Returns None if not found.
+    """
+    if not metrics_list:
+        return None
+    
+    # Normalize marker (remove === if present, for flexible matching)
+    marker_clean = marker.replace("===", "").upper()
+    marker_full = marker if marker.startswith("===") else f"==={marker}==="
+    
+    # Strategy 1: Try to find exact match in a single token (from end)
+    for i in range(len(metrics_list) - 1, -1, -1):
+        token_str = metrics_list[i].get("token", "")
+        if marker_full in token_str:
+            return i
+    
+    # Strategy 2: If not found, try to find it across multiple tokens (from end, up to 10 tokens)
+    for i in range(len(metrics_list) - 1, -1, -1):
+        for window_size in range(2, min(11, i + 2)):
+            start_idx = max(0, i - window_size + 1)
+            combined = "".join([metrics_list[j].get("token", "") 
+                               for j in range(start_idx, i + 1)])
+            if marker_full in combined:
+                return start_idx
+    
+    # Strategy 3: Fallback - try to find any token with marker text (case-insensitive, from end)
+    for i in range(len(metrics_list) - 1, -1, -1):
+        token_str = metrics_list[i].get("token", "").upper()
+        if marker_clean in token_str:
+            return i
+    
+    # Strategy 4: Last resort - look for "===" followed by marker text nearby (from end)
+    for i in range(len(metrics_list) - 1, 0, -1):
+        token1 = metrics_list[i].get("token", "")
+        token2 = metrics_list[i - 1].get("token", "") if i > 0 else ""
+        combined = token2 + token1
+        if "===" in token1 and marker_clean in combined.upper():
+            return i - 1 if "===" in token2 else i
+    
+    return None
+
+
+def find_skeleton_start_index(metrics_list: Optional[list]) -> Optional[int]:
+    """
+    Find the index of the LAST ===SKELETON=== in the metrics list.
+    Returns None if not found.
+    """
+    return find_marker_index(metrics_list, "===SKELETON===")
+
+
+def extract_combined_sequence(prompt_metrics: Optional[list], token_metrics: Optional[list]) -> Tuple[List[float], Dict[str, Optional[int]], Optional[int]]:
+    """
+    Combine prompt_metrics and token_metrics into a single sequence of cross_entropy values.
+    Returns:
+        - List of cross_entropy values (prompt + generation)
+        - Dictionary with marker indices: {"skeleton": idx, "schema_links": idx, "slot_matching": idx}
+          (indices are relative to combined sequence, None if not found)
+        - Index where generation starts (relative to combined sequence)
+    """
+    combined_ce = []
+    marker_indices = {"skeleton": None, "schema_links": None, "slot_matching": None}
+    generation_start_idx = None
+    
+    # Add prompt metrics
+    if prompt_metrics:
+        # Find all marker positions in prompt
+        skeleton_idx = find_marker_index(prompt_metrics, "===SKELETON===")
+        schema_links_idx = find_marker_index(prompt_metrics, "===SCHEMA_LINKS===")
+        slot_matching_idx = find_marker_index(prompt_metrics, "===SLOT_MATCHING===")
+        
+        for m in prompt_metrics:
+            if "cross_entropy" in m:
+                combined_ce.append(m["cross_entropy"])
+        
+        # Convert marker indices to combined sequence indices
+        if skeleton_idx is not None:
+            marker_indices["skeleton"] = skeleton_idx
+        if schema_links_idx is not None:
+            marker_indices["schema_links"] = schema_links_idx
+        if slot_matching_idx is not None:
+            marker_indices["slot_matching"] = slot_matching_idx
+        
+        # Generation starts after prompt
+        generation_start_idx = len(combined_ce)
+    else:
+        generation_start_idx = 0
+    
+    # Add generation metrics
+    if token_metrics:
+        for m in token_metrics:
+            if "cross_entropy" in m:
+                combined_ce.append(m["cross_entropy"])
+    
+    return combined_ce, marker_indices, generation_start_idx
+
+
+def moving_average(data: np.ndarray, window_size: int) -> np.ndarray:
+    """
+    Apply moving average to 1D array, handling NaN values.
+    Uses a centered window when possible, otherwise uses trailing window.
+    """
+    if len(data) == 0:
+        return data
+    
+    result = np.full_like(data, np.nan)
+    half_window = window_size // 2
+    
+    for i in range(len(data)):
+        # Use centered window when possible
+        start = max(0, i - half_window)
+        end = min(len(data), i + half_window + 1)
+        
+        # If we're near the beginning, use trailing window
+        if i < half_window:
+            start = 0
+            end = min(window_size, len(data))
+        
+        # If we're near the end, use leading window
+        if i >= len(data) - half_window:
+            start = max(0, len(data) - window_size)
+            end = len(data)
+        
+        window_data = data[start:end]
+        # Only compute mean if we have at least one non-NaN value
+        if not np.all(np.isnan(window_data)):
+            result[i] = np.nanmean(window_data)
+    
+    return result
+
+
+def _extract_sequences_for_scenario(
+    results: list,
+    intervention_type: Optional[str],
+    structure_type: str,
+) -> Tuple[List[Tuple[List[float], Dict[str, Optional[int]], Optional[int]]], Dict[str, List[int]]]:
+    """
+    Extract sequences for a given scenario (intervention type and structure type).
+    Returns:
+        - List of (ce_values, marker_indices, generation_start) tuples
+        - Dictionary with marker position lists for averaging
+    """
+    all_sequences = []
+    marker_positions = {
+        "skeleton": [],
+        "schema_links": [],
+        "slot_matching": [],
+        "generation": [],
+    }
+    
+    for sample in results:
+        ct = sample.get("completion_type", "")
+        suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
+        
+        # Only process samples matching the structure type
+        if suffix != structure_type:
+            continue
+        
+        if intervention_type is None:
+            # Base generation (no intervention)
+            prompt_metrics = sample.get("prompt_metrics")
+            token_metrics = sample.get("token_metrics")
+        else:
+            # Intervention
+            si = sample.get("structure_intervention", {})
+            interventions = si.get(intervention_type, [])
+            if not interventions:
+                continue
+            # Use first intervention
+            interv = interventions[0]
+            prompt_metrics = interv.get("prompt_metrics")
+            token_metrics = interv.get("token_metrics")
+        
+        # Need at least token_metrics to plot
+        if not token_metrics:
+            continue
+        
+        ce_seq, marker_indices, gen_start = extract_combined_sequence(prompt_metrics, token_metrics)
+        if ce_seq and len(ce_seq) > 0:
+            all_sequences.append((ce_seq, marker_indices, gen_start))
+            if marker_indices.get("skeleton") is not None:
+                marker_positions["skeleton"].append(marker_indices["skeleton"])
+            if marker_indices.get("schema_links") is not None:
+                marker_positions["schema_links"].append(marker_indices["schema_links"])
+            if marker_indices.get("slot_matching") is not None:
+                marker_positions["slot_matching"].append(marker_indices["slot_matching"])
+            if gen_start is not None:
+                marker_positions["generation"].append(gen_start)
+    
+    return all_sequences, marker_positions
+
+
+def _compute_smoothed_metrics(all_sequences: list, window_size: int) -> Tuple[np.ndarray, np.ndarray, int]:
+    """
+    Compute smoothed mean and std from sequences.
+    Returns: (mean_ce, std_ce, max_len)
+    """
+    if not all_sequences:
+        return np.array([]), np.array([]), 0
+    
+    # Find max length for alignment
+    max_len = max(len(seq[0]) for seq in all_sequences)
+    
+    # Align sequences (pad with NaN)
+    aligned_sequences = []
+    for ce_seq, _, _ in all_sequences:
+        padded = ce_seq + [np.nan] * (max_len - len(ce_seq))
+        aligned_sequences.append(padded)
+    
+    # Calculate mean and std across samples for each position
+    aligned_array = np.array(aligned_sequences)
+    mean_ce_raw = np.nanmean(aligned_array, axis=0)
+    std_ce_raw = np.nanstd(aligned_array, axis=0)
+    
+    # Apply moving average smoothing
+    mean_ce = moving_average(mean_ce_raw, window_size)
+    std_ce = moving_average(std_ce_raw, window_size)
+    
+    return mean_ce, std_ce, max_len
+
+
+def plot_entropy_vs_token_position(
+    results: list,
+    model_name: str,
+    output_dir: str,
+    window_size: int = 12,
+):
+    """
+    Plot cross-entropy vs token position for prompt + generation sequences.
+    Creates 3 comparison plots:
+    1. All interventions (HSVT, Local Edits, Global) for gold_structure
+    2. All interventions (HSVT, Local Edits, Global) for predicted_structure
+    3. Base generation for gold_structure and predicted_structure
+    
+    Args:
+        results: List of sample dictionaries with token metrics
+        model_name: Name of the model for title
+        output_dir: Directory to save plots
+        window_size: Size of the moving average window (default: 12 tokens)
+    """
+    intervention_types = ["HSVT", "Local Edits", "Global"]
+    intervention_colors = {
+        "HSVT": "#55A868",
+        "Local Edits": "#C44E52",
+        "Global": "#8172B2",
+    }
+    base_colors = {
+        "gold_structure": "#4C72B0",
+        "predicted_structure": "#64B5CD",
+    }
+    
+    # ──────────────────────── Picture 1: Interventions for gold_structure (3 subplots) ────────────────────────
+    fig1, axes1 = plt.subplots(3, 1, figsize=(14, 18))
+    structure_type = "gold_structure"
+    
+    for idx, intervention_type in enumerate(intervention_types):
+        ax = axes1[idx]
+        all_sequences, marker_positions = _extract_sequences_for_scenario(
+            results, intervention_type, structure_type
+        )
+        
+        if not all_sequences:
+            ax.text(0.5, 0.5, f"No data for {intervention_type}", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"{intervention_type} — Gold Structure — {model_name}")
+            continue
+        
+        mean_ce, std_ce, max_len = _compute_smoothed_metrics(all_sequences, window_size)
+        positions = np.arange(len(mean_ce))
+        
+        # Plot smoothed mean line
+        color = intervention_colors.get(intervention_type, "#999999")
+        ax.plot(positions, mean_ce, linewidth=2, color=color, 
+                label=f"{intervention_type} (smoothed)", zorder=3)
+        
+        # Plot std band
+        ax.fill_between(positions, mean_ce - std_ce, mean_ce + std_ce, 
+                        alpha=0.15, color=color, zorder=2)
+        
+        # Calculate average marker positions for this intervention
+        avg_skeleton = int(_mean(marker_positions["skeleton"])) if marker_positions["skeleton"] else None
+        avg_schema_links = int(_mean(marker_positions["schema_links"])) if marker_positions["schema_links"] else None
+        avg_slot_matching = int(_mean(marker_positions["slot_matching"])) if marker_positions["slot_matching"] else None
+        avg_generation = int(_mean(marker_positions["generation"])) if marker_positions["generation"] else None
+        
+        # Highlight mediator region
+        if avg_skeleton is not None and avg_generation is not None:
+            if avg_generation > avg_skeleton:
+                ax.axvspan(avg_skeleton, avg_generation, alpha=0.1, color="#FFA500", 
+                          label="Mediator Region", zorder=1)
+        
+        # Mark section boundaries
+        if avg_skeleton is not None:
+            ax.axvline(avg_skeleton, color="#FF8C00", linestyle="--", linewidth=1.5, 
+                      label="===SKELETON===", zorder=4)
+        if avg_schema_links is not None:
+            ax.axvline(avg_schema_links, color="#9B59B6", linestyle="--", linewidth=1.5, 
+                      label="===SCHEMA_LINKS===", zorder=4)
+        if avg_slot_matching is not None:
+            ax.axvline(avg_slot_matching, color="#E67E22", linestyle="--", linewidth=1.5, 
+                      label="===SLOT_MATCHING===", zorder=4)
+        if avg_generation is not None:
+            ax.axvline(avg_generation, color="#55A868", linestyle="--", linewidth=1.5, 
+                      label="Generation Start", zorder=4)
+        
+        ax.set_xlabel("Token Position (Prompt + Generation)")
+        ax.set_ylabel("Cross-Entropy")
+        ax.set_title(f"{intervention_type} — Gold Structure — {model_name}")
+        ax.legend(loc="upper right")
+        ax.grid(axis="y", alpha=0.3)
+    
+    fig1.tight_layout()
+    _save(fig1, output_dir, f"{model_name}_entropy_vs_position_interventions_gold")
+    
+    # ──────────────────────── Picture 2: Interventions for predicted_structure (3 subplots) ────────────────────────
+    fig2, axes2 = plt.subplots(3, 1, figsize=(14, 18))
+    structure_type = "predicted_structure"
+    
+    for idx, intervention_type in enumerate(intervention_types):
+        ax = axes2[idx]
+        all_sequences, marker_positions = _extract_sequences_for_scenario(
+            results, intervention_type, structure_type
+        )
+        
+        if not all_sequences:
+            ax.text(0.5, 0.5, f"No data for {intervention_type}", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"{intervention_type} — Predicted Structure — {model_name}")
+            continue
+        
+        mean_ce, std_ce, max_len = _compute_smoothed_metrics(all_sequences, window_size)
+        positions = np.arange(len(mean_ce))
+        
+        # Plot smoothed mean line
+        color = intervention_colors.get(intervention_type, "#999999")
+        ax.plot(positions, mean_ce, linewidth=2, color=color, 
+                label=f"{intervention_type} (smoothed)", zorder=3)
+        
+        # Plot std band
+        ax.fill_between(positions, mean_ce - std_ce, mean_ce + std_ce, 
+                        alpha=0.15, color=color, zorder=2)
+        
+        # Calculate average marker positions for this intervention
+        avg_skeleton = int(_mean(marker_positions["skeleton"])) if marker_positions["skeleton"] else None
+        avg_schema_links = int(_mean(marker_positions["schema_links"])) if marker_positions["schema_links"] else None
+        avg_slot_matching = int(_mean(marker_positions["slot_matching"])) if marker_positions["slot_matching"] else None
+        avg_generation = int(_mean(marker_positions["generation"])) if marker_positions["generation"] else None
+        
+        # Highlight mediator region
+        if avg_skeleton is not None and avg_generation is not None:
+            if avg_generation > avg_skeleton:
+                ax.axvspan(avg_skeleton, avg_generation, alpha=0.1, color="#FFA500", 
+                          label="Mediator Region", zorder=1)
+        
+        # Mark section boundaries
+        if avg_skeleton is not None:
+            ax.axvline(avg_skeleton, color="#FF8C00", linestyle="--", linewidth=1.5, 
+                      label="===SKELETON===", zorder=4)
+        if avg_schema_links is not None:
+            ax.axvline(avg_schema_links, color="#9B59B6", linestyle="--", linewidth=1.5, 
+                      label="===SCHEMA_LINKS===", zorder=4)
+        if avg_slot_matching is not None:
+            ax.axvline(avg_slot_matching, color="#E67E22", linestyle="--", linewidth=1.5, 
+                      label="===SLOT_MATCHING===", zorder=4)
+        if avg_generation is not None:
+            ax.axvline(avg_generation, color="#55A868", linestyle="--", linewidth=1.5, 
+                      label="Generation Start", zorder=4)
+        
+        ax.set_xlabel("Token Position (Prompt + Generation)")
+        ax.set_ylabel("Cross-Entropy")
+        ax.set_title(f"{intervention_type} — Predicted Structure — {model_name}")
+        ax.legend(loc="upper right")
+        ax.grid(axis="y", alpha=0.3)
+    
+    fig2.tight_layout()
+    _save(fig2, output_dir, f"{model_name}_entropy_vs_position_interventions_predicted")
+    
+    # ──────────────────────── Picture 3: Base generation for gold and predicted (2 subplots) ────────────────────────
+    fig3, axes3 = plt.subplots(2, 1, figsize=(14, 12))
+    
+    for idx, structure_type in enumerate(["gold_structure", "predicted_structure"]):
+        ax = axes3[idx]
+        all_sequences, marker_positions = _extract_sequences_for_scenario(
+            results, None, structure_type
+        )
+        
+        if not all_sequences:
+            label = "Gold Structure" if structure_type == "gold_structure" else "Predicted Structure"
+            ax.text(0.5, 0.5, f"No data for Base {label}", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"Base {label} — {model_name}")
+            continue
+        
+        mean_ce, std_ce, max_len = _compute_smoothed_metrics(all_sequences, window_size)
+        positions = np.arange(len(mean_ce))
+        
+        # Plot smoothed mean line
+        color = base_colors.get(structure_type, "#999999")
+        label = "Gold Structure" if structure_type == "gold_structure" else "Predicted Structure"
+        ax.plot(positions, mean_ce, linewidth=2, color=color, 
+                label=f"Base {label} (smoothed)", zorder=3)
+        
+        # Plot std band
+        ax.fill_between(positions, mean_ce - std_ce, mean_ce + std_ce, 
+                        alpha=0.15, color=color, zorder=2)
+        
+        # Mark generation start if available
+        avg_generation = int(_mean(marker_positions["generation"])) if marker_positions["generation"] else None
+        
+        if avg_generation is not None:
+            ax.axvline(avg_generation, color="#55A868", linestyle="--", linewidth=1.5, 
+                      label="Generation Start", zorder=4)
+        
+        ax.set_xlabel("Token Position (Prompt + Generation)")
+        ax.set_ylabel("Cross-Entropy")
+        ax.set_title(f"Base {label} — {model_name}")
+        ax.legend(loc="upper right")
+        ax.grid(axis="y", alpha=0.3)
+    
+    fig3.tight_layout()
+    _save(fig3, output_dir, f"{model_name}_entropy_vs_position_base")
+
+
 # ──────────────────────── summary table (text) ────────────────────────
 
 def _format_scenario_name(key: str) -> str:
@@ -1217,6 +1643,7 @@ def main():
         plot_generation_cross_entropy_bars(per_sample, model_name, args.output_dir)
         plot_metrics_heatmap(per_sample, model_name, args.output_dir)
         plot_prompt_vs_generation(per_sample, model_name, args.output_dir)
+        plot_entropy_vs_token_position(results, model_name, args.output_dir)
 
     print(f"\nAll figures saved to {args.output_dir}/")
 
