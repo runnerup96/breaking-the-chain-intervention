@@ -53,7 +53,7 @@ class LLMModel:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 device_map=device_map,
-                torch_dtype=torch_dtype
+                dtype=torch_dtype
             )
             
             self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id

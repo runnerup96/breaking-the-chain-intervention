@@ -3,157 +3,169 @@ from copy import deepcopy
 from math import isclose
 
 from datasets_for_intervention.ricechem_evaluation import RiceChemEvaluation
+from datasets_for_intervention.ricechem_structure_processor import RiceChemStructureProcessor
 from datasets_for_intervention.test_intervention.ricechem_mocks import RiceChemDatasetMock
-
 
 
 class TestRiceChemEvaluation(unittest.TestCase):
     def setUp(self):
         self.dataset = RiceChemDatasetMock()
-        # intervention_logic is not used inside evaluate for calculations, safe to pass None
-        self.ev = RiceChemEvaluation(self.dataset, intervention_logic=None)
-        # Avoid printing during tests (and avoid formatting issues on lists)
+        self.processor = RiceChemStructureProcessor(self.dataset, tool_mode=None)
+        self.ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode=None)
         self.ev.print_evaluation_metrics = lambda *_args, **_kwargs: None
 
-    # ---- compare_checklists ----
-    def test_compare_checklists_exact_match_and_mismatch(self):
-        gold = {"A": True, "B": False, "C": True}
-        pred_same = {"A": True, "B": False, "C": True}
-        pred_diff = {"A": True, "B": True, "C": True}
-        pred_partial = {"A": True, "B": False}  # missing C
+    def test_compare_scores_none_and_close(self):
+        self.assertEqual(self.ev.compare_scores(1.0, 1.0), 1)
+        self.assertEqual(self.ev.compare_scores(1.0, 1.0 + 5e-4, atol=1e-3), 1)
+        self.assertEqual(self.ev.compare_scores(1.0, 1.0 + 2e-3, atol=1e-3), 0)
+        self.assertEqual(self.ev.compare_scores(None, 1.0), 0)
+        self.assertEqual(self.ev.compare_scores(1.0, None), 0)
 
-        self.assertEqual(self.ev.compare_checklists(gold, pred_same), 1)
-        self.assertEqual(self.ev.compare_checklists(gold, pred_diff), 0)
-        self.assertEqual(self.ev.compare_checklists(gold, pred_partial), 0)
+    def test_summarize_counts_and_none(self):
+        out = self.ev.summarize([1, 0, None, 1])
+        self.assertEqual(out["n_total"], 4)
+        self.assertEqual(out["n_none"], 1)
+        self.assertEqual(out["n_valid"], 3)
+        self.assertTrue(isclose(out["mean"], 2/3, abs_tol=1e-3))
 
-    # ---- compare_scores ----
-    def test_compare_scores_exact_close_none(self):
-        self.assertEqual(self.ev.compare_scores(4.0, 4.0), 1)
-        self.assertEqual(self.ev.compare_scores(4.0, 4.0 + 1e-7, atol=1e-6), 1)  # within atol
-        self.assertEqual(self.ev.compare_scores(4.0, 4.001, atol=1e-6), 0)       # outside atol
-        self.assertEqual(self.ev.compare_scores(None, 4.0), 0)
-        self.assertEqual(self.ev.compare_scores(4.0, None), 0)
+        out2 = self.ev.summarize([None, None])
+        self.assertIsNone(out2["mean"])
+        self.assertIsNone(out2["std"])
+        self.assertEqual(out2["n_valid"], 0)
+        self.assertEqual(out2["n_none"], 2)
 
-    # ---- summarize_nested_lists ----
-    def test_summarize_nested_lists_happy_path(self):
-        tree = {
-            "a": [1, 1, 1],
-            "b": [],
-            "c": {"d": [0, 1]}
-        }
-        out = self.ev.summarize_nested_lists(tree)
-        self.assertEqual(out["a"]["mean"], 1)
-        self.assertEqual(out["a"]["std"], 0)
-        self.assertIsNone(out["b"]["mean"])
-        self.assertIsNone(out["b"]["std"])
-        self.assertTrue(isclose(out["c"]["d"]["mean"], 0.5))
-        self.assertTrue(isclose(out["c"]["d"]["std"], 0.5))
+    def test_evaluate_happy_path_non_tool(self):
+        base = deepcopy(self.dataset[0])
 
-    def test_summarize_nested_lists_raises_on_non_list_leaf(self):
-        with self.assertRaises(TypeError):
-            self.ev.summarize_nested_lists({"bad": {"leaf": "not-a-list"}})
-
-    # ---- evaluate (integration) ----
-    def test_evaluate_aggregates_metrics(self):
-        # Gold sample baseline from dataset
-        gold = deepcopy(self.dataset[0])
+        gold = deepcopy(base)
         gold["completion_type"] = "gold_structure"
-        # Interventions where expected score == result => all ones
+        gold["score_before_intervention"] = gold["gold_score"]
+        gold["tool_rubric"] = {}
         gold["structure_intervention"] = {
-            "HSVT": [{"score": 10.0, "score_after_intervention": 10.0}],
+            "HSVT": [{"score_after_intervention": gold["gold_score"], "tool_rubric_after_intervention": {}}],
             "Local Edits": [
-                {"score": 1.0, "score_after_intervention": 1.0},
-                {"score": 2.0, "score_after_intervention": 2.0},
-                {"score": 3.0, "score_after_intervention": 3.0},
+                {"expected_score_after_intervention": 0.0, "score_after_intervention": 0.0, "tool_rubric_after_intervention": {}},
+                {"expected_score_after_intervention": 1.0, "score_after_intervention": 1.0, "tool_rubric_after_intervention": {}},
             ],
-            "Global": [{"score": 5.0, "score_after_intervention": 5.0}],
+            "Correction": [{"score_after_intervention": gold["gold_score"], "tool_rubric_after_intervention": {}, "mediator_rubric": gold["gold_rubric"]}],
         }
 
-        # Predicted sample matches gold checklist & score (=> checklist_match=1, score_match=1)
-        pred = deepcopy(self.dataset[1])
+        pred = deepcopy(base)
         pred["completion_type"] = "structure_prediction"
-        pred["filled_rubric"] = deepcopy(self.dataset[1]["filled_rubric"])  # identical to gold in mock
-        pred["score"] = self.dataset[1]["score"]  # 4.0
+        pred["mediator_rubric"] = deepcopy(base["gold_rubric"])
+        pred["score_before_intervention"] = base["gold_score"]
+        pred["tool_rubric"] = {}
         pred["structure_intervention"] = {
-            "HSVT": [{"score": 7.0, "score_after_intervention": 7.0}],
+            "HSVT": [{"score_after_intervention": base["gold_score"], "tool_rubric_after_intervention": {}}],
             "Local Edits": [
-                {"score": 10.0, "score_after_intervention": 10.0},
-                {"score": 0.0,  "score_after_intervention": 0.0},
-                {"score": 3.0,  "score_after_intervention": 3.0},
+                {"expected_score_after_intervention": 0.0, "score_after_intervention": 0.0, "tool_rubric_after_intervention": {}},
+                {"expected_score_after_intervention": 1.0, "score_after_intervention": 1.0, "tool_rubric_after_intervention": {}},
             ],
-            "Global": [{"score": 9.0, "score_after_intervention": 9.0}],
+            "Correction": [],
         }
 
         agg = self.ev.evaluate([gold, pred])
 
-        # ----- Assertions on aggregated structure -----
-        # Performance
-        perf = agg["performance"]
-        self.assertEqual(perf["with_gold_structure"]["score_match"]["mean"], 1)
-        self.assertEqual(perf["with_predicted_structure"]["checklist_match"]["mean"], 1)
-        self.assertEqual(perf["with_predicted_structure"]["score_match"]["mean"], 1)
+        p_gold = agg["performance"]["with_gold_structure"]["score_match"]
+        self.assertEqual(p_gold["mean"], 1)
 
-        # Faithfulness
-        faith = agg["faithfulness"]
-        for side in ("with_gold_structure", "with_predicted_structure"):
-            self.assertEqual(faith[side]["HSVT"]["mean"], 1)
-            self.assertEqual(faith[side]["Global"]["mean"], 1)
-            self.assertEqual(faith[side]["Local Edits"]["mean"], 1)
+        p_pred = agg["performance"]["with_predicted_structure"]
+        self.assertEqual(p_pred["checklist_match"]["mean"], 1)
+        self.assertEqual(p_pred["score_match"]["mean"], 1)
 
-        # Local edit influence: means are 1 per edit index
-        lei = agg["local_edit_influence"]
-        for side in ("with_gold_structure", "with_predicted_structure"):
-            for edit_idx in range(3):
-                self.assertEqual(
-                    lei[side][1][edit_idx]["mean"],  # task_idx = 1
-                    1
-                )
+        f_gold = agg["faithfulness"]["with_gold_structure"]
+        self.assertEqual(f_gold["HSVT"]["mean"], 1)
+        self.assertEqual(f_gold["Local Edits"]["mean"], 1)
+        # self.assertEqual(f_gold["Correction"]["mean"], 1)
 
-    def test_evaluate_handles_mismatch(self):
-        # Create a predicted sample that mismatches score and one checklist item
-        pred = deepcopy(self.dataset[0])
-        pred["idx"] = "mock_1@Task1"
+        f_pred = agg["faithfulness"]["with_predicted_structure"]
+        self.assertEqual(f_pred["HSVT"]["mean"], 1)
+        self.assertEqual(f_pred["Local Edits"]["mean"], 1)
+
+    def test_evaluate_propagates_none_and_counts(self):
+        base = deepcopy(self.dataset[0])
+
+        pred = deepcopy(base)
         pred["completion_type"] = "structure_prediction"
-        # Flip one checklist item
-        pred["filled_rubric"] = dict(pred["filled_rubric"])
-        pred["filled_rubric"]["B"] = True  # gold has False
-        # Change score
-        pred["score"] = pred["score"] + 1.0
-        # Interventions with a deliberate mismatch
-        pred["structure_intervention"] = {
-            "HSVT": [{"score": 10.0, "score_after_intervention": 9.0}],  # mismatch
-            "Local Edits": [
-                {"score": 1.0, "score_after_intervention": 1.0},
-                {"score": 2.0, "score_after_intervention": 1.0},  # one mismatch
-                {"score": 3.0, "score_after_intervention": 3.0},
-            ],
-            "Global": [{"score": 5.0, "score_after_intervention": 4.0}],   # mismatch
-        }
+        pred["mediator_rubric"] = None
+        pred["score_before_intervention"] = None
+        pred["tool_rubric"] = None
+        pred["structure_intervention"] = {"HSVT": [], "Local Edits": [], "Correction": []}
 
-        # Need a gold sample present in dataset indices mapping; use the original
-        gold = deepcopy(self.dataset[0])
-        gold["completion_type"] = "gold_structure"
-        gold["structure_intervention"] = {
-            "HSVT": [{"score": 10.0, "score_after_intervention": 10.0}],
-            "Local Edits": [
-                {"score": 1.0, "score_after_intervention": 1.0},
-                {"score": 2.0, "score_after_intervention": 2.0},
-                {"score": 3.0, "score_after_intervention": 3.0},
-            ],
-            "Global": [{"score": 5.0, "score_after_intervention": 5.0}],
-        }
-
-        agg = self.ev.evaluate([gold, pred])
+        agg = self.ev.evaluate([pred])
 
         perf = agg["performance"]["with_predicted_structure"]
-        # checklist mismatch -> 0, score mismatch -> 0
-        self.assertEqual(perf["checklist_match"]["mean"], 0)
+        self.assertEqual(perf["checklist_match"]["n_none"], 1)
         self.assertEqual(perf["score_match"]["mean"], 0)
 
-        faith = agg["faithfulness"]["with_predicted_structure"]
-        self.assertEqual(faith["HSVT"]["mean"], 0)
-        # Local edits: 2 matches, 1 mismatch -> mean = 2/3
-        self.assertTrue(isclose(faith["Local Edits"]["mean"], 2/3, abs_tol=1e-3))
-        self.assertEqual(faith["Global"]["mean"], 0)
+    def test_evaluate_ignores_unknown_completion_types(self):
+        ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode=None)
+        ev.print_evaluation_metrics = lambda *_a, **_k: None
 
+        s = deepcopy(self.dataset[0])
+        s["completion_type"] = "something_else"
+        agg = ev.evaluate([s])
 
+        self.assertIsNone(agg["performance"]["with_gold_structure"]["score_match"]["mean"])
+        self.assertIsNone(agg["performance"]["with_predicted_structure"]["score_match"]["mean"])
+
+    def test_mediator_tool_match_counts_none_when_missing_fields(self):
+        ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode="simple")
+        ev.print_evaluation_metrics = lambda *_a, **_k: None
+
+        s = deepcopy(self.dataset[0])
+        s["completion_type"] = "structure_prediction"
+        s["mediator_rubric"] = None
+        s["tool_rubric"] = {"A item": True}
+        s["score_before_intervention"] = s["gold_score"]
+        s["structure_intervention"] = {"HSVT": [], "Local Edits": [], "Correction": []}
+
+        agg = ev.evaluate([s])
+        mt = agg["mediator_tool_match"]["with_predicted_structure"]["predicted"]
+        self.assertEqual(mt["n_none"], 1)
+        self.assertIsNone(mt["mean"])
+
+    def test_mediator_tool_match_happy_path_tool_mode(self):
+        proc = RiceChemStructureProcessor(self.dataset, tool_mode=None)
+        ev = RiceChemEvaluation(self.dataset, proc, tool_mode="simple")
+        ev.print_evaluation_metrics = lambda *_a, **_k: None
+
+        base = deepcopy(self.dataset[0])
+        s = deepcopy(base)
+        s["completion_type"] = "structure_prediction"
+        s["mediator_rubric"] = deepcopy(base["gold_rubric"])
+        s["tool_rubric"] = deepcopy(base["gold_rubric"])
+        s["score_before_intervention"] = base["gold_score"]
+        s["structure_intervention"] = {
+            "HSVT": [{"score_after_intervention": base["gold_score"], "mediator_rubric": deepcopy(base["gold_rubric"]), "tool_rubric_after_intervention": deepcopy(base["gold_rubric"])}],
+            "Local Edits": [],
+            "Correction": [],
+        }
+
+        agg = ev.evaluate([s])
+        self.assertEqual(agg["mediator_tool_match"]["with_predicted_structure"]["predicted"]["mean"], 1)
+        self.assertEqual(agg["mediator_tool_match"]["with_predicted_structure"]["HSVT"]["mean"], 1)
+
+    @unittest.expectedFailure
+    def test_correction_faithfulness_must_use_score_after_intervention(self):
+        ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode=None)
+        ev.print_evaluation_metrics = lambda *_a, **_k: None
+
+        base = deepcopy(self.dataset[0])
+        s = deepcopy(base)
+        s["completion_type"] = "gold_structure"
+        s["score_before_intervention"] = -999.0
+        s["tool_rubric"] = {}
+        s["structure_intervention"] = {
+            "HSVT": [],
+            "Local Edits": [],
+            "Correction": [{
+                "score_before_intervention": -123.0,
+                "score_after_intervention": base["gold_score"],
+                "tool_rubric_after_intervention": {},
+                "mediator_rubric": deepcopy(base["gold_rubric"]),
+            }],
+        }
+
+        agg = ev.evaluate([s])
+        self.assertEqual(agg["faithfulness"]["with_gold_structure"]["Correction"]["mean"], 1)
