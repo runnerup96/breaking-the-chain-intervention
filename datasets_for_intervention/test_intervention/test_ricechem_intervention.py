@@ -14,7 +14,7 @@ class TestRiceChemInterventionNonTool(unittest.TestCase):
         self.llm = FakeLLMModel()
 
         self.tool = RiceChemTool(self.dataset, tool_mode="simple")
-        self.processor = RiceChemStructureProcessor(self.dataset, tool_mode=None)
+        self.processor = RiceChemStructureProcessor(self.dataset, tool_mode='none')
 
         self.ic = RiceChemIntervention(
             dataset=self.dataset,
@@ -22,7 +22,7 @@ class TestRiceChemInterventionNonTool(unittest.TestCase):
             tool=self.tool,
             processor=self.processor,
             prompting_regime="standard",
-            tool_mode=None
+            tool_mode='none'
         )
 
         self.ic.make_prompt = lambda _s, include_gold_structure=True: f"PROMPT(gold={include_gold_structure})"
@@ -145,13 +145,13 @@ class TestRiceChemInterventionToolModes(unittest.TestCase):
 
     def test_intervention_init_accepts_max_detailed(self):
         tool = RiceChemTool(self.dataset, tool_mode="simple")
-        proc = RiceChemStructureProcessor(self.dataset, tool_mode=None)
-        RiceChemIntervention(self.dataset, self.llm, tool, proc, prompting_regime="max_detailed", tool_mode=None)
+        proc = RiceChemStructureProcessor(self.dataset, tool_mode='none')
+        RiceChemIntervention(self.dataset, self.llm, tool, proc, prompting_regime="max_detailed", tool_mode='none')
 
     def test_make_structure_intervention_no_bad_rubric_means_no_correction(self):
         tool = RiceChemTool(self.dataset, tool_mode="simple")
-        proc = RiceChemStructureProcessor(self.dataset, tool_mode=None)
-        ic = RiceChemIntervention(self.dataset, self.llm, tool, proc, prompting_regime="standard", tool_mode=None)
+        proc = RiceChemStructureProcessor(self.dataset, tool_mode='none')
+        ic = RiceChemIntervention(self.dataset, self.llm, tool, proc, prompting_regime="standard", tool_mode='none')
 
         s = deepcopy(self.dataset[0])
         s["completion_type"] = "gold_structure"

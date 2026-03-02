@@ -9,7 +9,7 @@ class TestRiceChemProcessorAndTool(unittest.TestCase):
     def setUp(self):
         self.dataset = RiceChemDatasetMock()
 
-        self.proc_none = RiceChemStructureProcessor(self.dataset, tool_mode=None)
+        self.proc_none = RiceChemStructureProcessor(self.dataset, tool_mode='none')
         self.proc_simple = RiceChemStructureProcessor(self.dataset, tool_mode="simple")
         self.proc_struct = RiceChemStructureProcessor(self.dataset, tool_mode="structured")
 

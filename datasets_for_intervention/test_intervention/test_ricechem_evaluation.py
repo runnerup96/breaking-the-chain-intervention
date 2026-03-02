@@ -10,8 +10,8 @@ from datasets_for_intervention.test_intervention.ricechem_mocks import RiceChemD
 class TestRiceChemEvaluation(unittest.TestCase):
     def setUp(self):
         self.dataset = RiceChemDatasetMock()
-        self.processor = RiceChemStructureProcessor(self.dataset, tool_mode=None)
-        self.ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode=None)
+        self.processor = RiceChemStructureProcessor(self.dataset, tool_mode='none')
+        self.ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode='none')
         self.ev.print_evaluation_metrics = lambda *_args, **_kwargs: None
 
     def test_compare_scores_none_and_close(self):
@@ -99,7 +99,7 @@ class TestRiceChemEvaluation(unittest.TestCase):
         self.assertEqual(perf["score_match"]["mean"], 0)
 
     def test_evaluate_ignores_unknown_completion_types(self):
-        ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode=None)
+        ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode='none')
         ev.print_evaluation_metrics = lambda *_a, **_k: None
 
         s = deepcopy(self.dataset[0])
@@ -126,7 +126,7 @@ class TestRiceChemEvaluation(unittest.TestCase):
         self.assertIsNone(mt["mean"])
 
     def test_mediator_tool_match_happy_path_tool_mode(self):
-        proc = RiceChemStructureProcessor(self.dataset, tool_mode=None)
+        proc = RiceChemStructureProcessor(self.dataset, tool_mode='none')
         ev = RiceChemEvaluation(self.dataset, proc, tool_mode="simple")
         ev.print_evaluation_metrics = lambda *_a, **_k: None
 
@@ -148,7 +148,7 @@ class TestRiceChemEvaluation(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_correction_faithfulness_must_use_score_after_intervention(self):
-        ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode=None)
+        ev = RiceChemEvaluation(self.dataset, self.processor, tool_mode='none')
         ev.print_evaluation_metrics = lambda *_a, **_k: None
 
         base = deepcopy(self.dataset[0])
