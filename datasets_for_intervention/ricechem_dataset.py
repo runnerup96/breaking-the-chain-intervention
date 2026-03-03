@@ -2,10 +2,12 @@ import pandas as pd
 import os
 from collections import defaultdict
 import random
+from copy import deepcopy
+import json
 pd.options.mode.chained_assignment = None
 
 class RiceChemDataset:
-    def __init__(self, data_path: str):
+    def __init__(self, data_path: str, correction_path: str = None, use_corrections: bool = False, correction_only: bool = False,):
         """
         Args:
             data_path: path to the folder with csv files
@@ -23,8 +25,8 @@ class RiceChemDataset:
             '3rd and 4th electrons ionized from n=3 shell and have same radius': 1.0,
             '5th electron ionized from n=2 shell and feels higher core charge': 1.0,
             '5th electron ionized from n=2 shell and has smaller radius': 1.0,
-            'correctly explains relationship of potential energy to ionization energy': 1.5,
-            'partially explains relationship between potential energy and ionization energy': 0.5
+            'correctly explains relationship of potential energy to ionization energy': 1.0, # 1.5,
+            'partially explains relationship between potential energy and ionization energy': 1.0 #0.5
         }
         gr_q1 = gr_q1.dropna(subset=list(q1_rubric.keys()) + ['Score'])
         q1_score_range = "0-8"
@@ -32,15 +34,15 @@ class RiceChemDataset:
         gr_q2 = pd.read_csv(os.path.join(data_path, "Graded Rubric Q2.csv"))
         q2_rubric = {
             'Correctly states that frequency is proportional to energy of light': 1.0,
-            'Explaining sentence 1: energy levels of an electron in an atom are quantized': 1.5,
-            'Explaining sentence 1: FULLY explains energy/frequency absorbed must equal the difference in energy levels in an electron': 2.0,
+            'Explaining sentence 1: energy levels of an electron in an atom are quantized': 1.0, # 1.5,
+            'Explaining sentence 1: FULLY explains energy/frequency absorbed must equal the difference in energy levels in an electron': 1.0, # 2.0,
             'Explaining sentence 1: PARTIALLY explains energy/frequency absorbed must equal the difference in energy levels in an electron': 1.0,
-            'Explaining sentence 2: a minimum amount of energy is needed to eject an electron': 1.5,
+            'Explaining sentence 2: a minimum amount of energy is needed to eject an electron': 1.0, # 1.5,
             'Explaining sentence 2: any additional energy becomes kinetic energy': 1.0
         }
         # we also drop the rows with None values in the rubric or score
         gr_q2 = gr_q2.dropna(subset=list(q2_rubric.keys()) + ['Score'])
-        q2_score_range = "0-8"
+        q2_score_range = "0-6" #"0-8"
 
         gr_q3 = pd.read_csv(os.path.join(data_path, "Graded Rubric Q3.csv"))
         q3_rubric = {
@@ -49,23 +51,23 @@ class RiceChemDataset:
             'Sentence 2: Correct type of hybrid orbitals. Carbon must form sp2 hybrid orbitals (from using a 2s and two 2p orbitals)': 1.0,
             'Sentence 3: Correctly states that nitrogen is hybridized': 1.0,
             'Sentence 3: Correct type of hybridization. Nitrogen is sp2 hybridized to form 3 electron domains': 1.0,
-            'Sentence 3: Correct description of hybrid orbital bonds in nitrogen. Two sp2 orbitals form two sigma bonds.': 1.5,
-            'Sentence 3: Correct description of unhybridized orbital bonds in nitrogen. Unhybridized p orbital forms pi bond': 1.5
+            'Sentence 3: Correct description of hybrid orbital bonds in nitrogen. Two sp2 orbitals form two sigma bonds.': 1.0, # 1.5,
+            'Sentence 3: Correct description of unhybridized orbital bonds in nitrogen. Unhybridized p orbital forms pi bond': 1.0 # 1.5
         }
         gr_q3 = gr_q3.dropna(subset=list(q3_rubric.keys()) + ['Score'])
-        q3_score_range = "0-8"
+        q3_score_range = "0-7" # "0-8"
 
         gr_q4 = pd.read_csv(os.path.join(data_path, "Graded Rubric Q4.csv"))
         q4_rubric = {
             'Fixed mass of one element': 1.0,
             'Mass data in LoMP': 1.0,
-            'Combine to form compounds': 1.5,
-            'Integer/whole number ratio': 1.5,
-            'Whole numbers mean indivisible/discrete': 1.5,
-            'Indivisible unit of mass = atom': 1.5
+            'Combine to form compounds': 1.0, # 1.5,
+            'Integer/whole number ratio': 1.0, # 1.5,
+            'Whole numbers mean indivisible/discrete': 1.0, # 1.5,
+            'Indivisible unit of mass = atom': 1.0 # 1.5
         }
         gr_q4 = gr_q4.dropna(subset=list(q4_rubric.keys()) + ['Score'])
-        q4_score_range = "0-8"
+        q4_score_range = "0-6" # "0-8"
 
         self.graded_rubric_list = [[gr_q1, q1_rubric, q1_score_range], [gr_q2, q2_rubric, q2_score_range], 
                                    [gr_q3, q3_rubric, q3_score_range], [gr_q4, q4_rubric, q4_score_range]]
@@ -116,6 +118,12 @@ class RiceChemDataset:
 
         self.process_data()
 
+        if use_corrections:
+            if correction_path is None:
+                raise ValueError("use_corrections=True but correction_path=None")
+            self.attach_bad_generations(correction_path, correction_only=correction_only)
+
+
     def get_random_student_answer(self, task_idx):
         return random.choice(self.task2student_answers[task_idx])
 
@@ -147,35 +155,99 @@ class RiceChemDataset:
                         rubric_score += self.task2rubric_weights[task_idx][rubric_item]
 
                 if response_id in rubric_data[task_idx]:
-                    rubric_data[task_idx][response_id]["filled_rubric"] = rubric_answer_dict
+                    rubric_data[task_idx][response_id]["gold_rubric"] = rubric_answer_dict
                     # rubric_data[task_idx][response_id]["score"] = float(task_df[task_df["SID"] == response_id]["Score"].item())
                     # Calculate score by summing up weights for each rubric item that was answered correctly
                     # currently this version, since i do not know original weights
-                    rubric_data[task_idx][response_id]["score"] = float(rubric_score)
+                    rubric_data[task_idx][response_id]["gold_score"] = float(rubric_score)
                     rubric_data[task_idx][response_id]["score_range"] = task_score_range
 
         self.data = []
         for task_idx in rubric_data:
             for response_id, data in rubric_data[task_idx].items():
-                if set(data.keys()) == set(["task", "student_answer", "filled_rubric", "score", "score_range"]):
+                if set(data.keys()) == set(["task", "student_answer", "gold_rubric", "gold_score", "score_range"]):
                     sample = {
                         "idx": f"{response_id}@Task{task_idx}",
+                        "task_idx": task_idx,
                         "task": data["task"],
                         "student_answer": data["student_answer"],
-                        "filled_rubric": data["filled_rubric"],#this this just a dict structure which we intervene upon
-                        "score": data["score"],
                         "score_range": data["score_range"],
-                        "task_idx": task_idx
+                        "gold_rubric": data["gold_rubric"], # this this just a dict structure which we intervene upon
+                        "gold_score": data["gold_score"],
+                        "mediator_rubric": deepcopy(data["gold_rubric"])
                     }
                     self.data.append(sample)
 
         print('Total samples =', len(self.data))
+
+    def load_bad_map_auto(self, path: str):
+        """
+        Returns mapping:
+          idx -> {"bad_rubric": dict[item->bool], "bad_score": float|None}
+        """
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+
+        # A) raw predictions
+        out = {}
+        for rec in obj["result"]:
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("completion_type") == "gold_structure":
+                continue
+
+            idx = rec.get("idx", None)
+            filled = rec.get("filled_rubric", None)
+            score = rec.get("score", None)
+
+            if idx is None or not isinstance(filled, dict) or filled == {}:
+                continue
+
+            out[str(idx)] = {"bad_rubric": filled, "bad_score": score}
+        return out
+
+    def attach_bad_generations(self, bad_generations_path: str, correction_only: bool = False):
+        """
+        Build correction pairs by your filtering logic:
+          - idx exists in generated
+          - generated rubric non-empty
+          - keyset matches base golden rubric keyset
+          - generated rubric differs from base golden rubric
+        Then attach fields:
+          bad_rubric, bad_score
+        """
+        idx2bad = self.load_bad_map_auto(bad_generations_path)
+
+        hit = 0
+        for s in self.data:
+            idx = str(s["idx"])
+            if idx not in idx2bad:
+                continue
+
+            bad_rubric = idx2bad[idx]["bad_rubric"]
+            if bad_rubric == {}:
+                continue
+
+            gold_rubric = s["gold_rubric"]
+            if set(bad_rubric.keys()) != set(gold_rubric.keys()):
+                continue
+
+            if bad_rubric == gold_rubric:
+                continue
+
+            s["bad_rubric"] = bad_rubric
+            s["bad_score"] = idx2bad[idx].get("bad_score", None)
+
+            hit += 1
+
+        if correction_only:
+            self.data = [s for s in self.data if "bad_rubric" in s]
+
+        print(f"[RiceChemDataset] attached bad rubrics: {hit} / {len(self.data)} (correction_only={correction_only})")
+
    
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, i):
         return self.data[i]
-    
-    
-
