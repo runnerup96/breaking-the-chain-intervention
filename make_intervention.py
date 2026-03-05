@@ -27,7 +27,7 @@ def fix_seed(seed=42):
     torch.backends.cudnn.deterministic = True
 
 model_name2simple = {
-    "Qwen/Qwen3-1.7B": "qwen3-17B",
+    "Qwen/Qwen3-1.7B": "qwen3-1.7B",
     "Qwen/Qwen3-4B": "qwen3-4B",
     "Qwen/Qwen3-8B": "qwen3-8B",
     "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
