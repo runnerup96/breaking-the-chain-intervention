@@ -59,22 +59,24 @@ class RiceChemTool:
 
         r = args["rubric"]
 
-        if self.tool_mode == "structured":
-            if not isinstance(r, list) or len(r) == 0:
-                return False
+        if len(r) == 0:
+            return False
+
+        if isinstance(r, list):
             for x in r:
                 if x is not True and x is not False:
                     return False
             return True
 
-        if not isinstance(r, dict) or len(r) == 0:
-            return False
-        for k, v in r.items():
-            if not isinstance(k, str) or not k:
-                return False
-            if v is not True and v is not False:
-                return False
-        return True
+        if isinstance(r, dict):
+            for k, v in r.items():
+                if not isinstance(k, str) or not k:
+                    return False
+                if v is not True and v is not False:
+                    return False
+            return True
+
+        return False
 
 
     def calculate_score(self, args, sample_meta):
@@ -191,7 +193,6 @@ class RiceChemStructureProcessor:
         s = s.strip()
         s = s.replace("{{", "{").replace("}}", "}")
 
-        # strip optional code fences
         s = re.sub(r"(?is)^\s*```[a-z0-9_-]*\s*", "", s)
         s = re.sub(r"(?is)\s*```\s*$", "", s)
 
@@ -315,3 +316,26 @@ class RiceChemStructureProcessor:
             if k not in checklist_b or checklist_b[k] != v:
                 return 0
         return 1
+
+    def check_generation_format_mistakes(self, completion: str) -> bool:
+        """
+        Checks for garbage in the XM part of the completion.
+
+        Garbage is ONLY a preamble before the Checklist: block
+        (any text the model inserted before the structure starts).
+
+        The tail after Y (truncated ARGS, repeated tool calls, extra lines)
+        is not considered garbage: infer_completion will either parse the score
+        or return None. We only care about the cleanliness of XM' — because XM'
+        is what gets compared to XM_gold substituted in Correction.
+
+        Returns True -> garbage detected -> generation_status = "error".
+        """
+        s = completion.strip()
+        if not s:
+            return True
+
+        if not re.match(r'(?i)checklist\s*:', s):
+            return True
+
+        return False
