@@ -58,7 +58,7 @@ class RiceChemIntervention:
         """
         if mediator_rubric is None:
             return "error"
-        if self.self.processor.check_generation_format_mistakes(completion):
+        if self.processor.check_generation_format_mistakes(completion):
             return "error"
         match = self.processor.compare_structures(mediator_rubric, gold_rubric)
         return "correct" if match == 1 else "incorrect"

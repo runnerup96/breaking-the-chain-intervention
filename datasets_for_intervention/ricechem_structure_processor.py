@@ -59,7 +59,7 @@ class RiceChemTool:
 
         r = args["rubric"]
 
-        if len(r) == 0:
+        if r and len(r) == 0:
             return False
 
         if isinstance(r, list):

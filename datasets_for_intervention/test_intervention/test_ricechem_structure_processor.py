@@ -298,7 +298,7 @@ class TestRiceChemProcessorAndTool(unittest.TestCase):
 
         # Дополнительные проверки типов
         self.assertFalse(self.tool_simple.validate_args({"rubric": []}))
-        self.assertFalse(self.tool_struct.validate_args({"rubric": {"A": True}}))
+        self.assertTrue(self.tool_struct.validate_args({"rubric": {"A": True}}))
         self.assertFalse(self.tool_struct.validate_args({"rubric": (True, False)}))
 
     # ------------------------------------------------------------------

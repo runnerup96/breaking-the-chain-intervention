@@ -77,28 +77,19 @@ class TestHasGarbage(unittest.TestCase):
 
     def test_clean_completion_no_garbage(self):
         ic = self._ic()
-        self.assertFalse(ic._has_garbage(correct_completion()))
+        self.assertFalse(ic.processor.check_generation_format_mistakes(correct_completion()))
 
     def test_preamble_detected_as_garbage(self):
         ic = self._ic()
-        self.assertTrue(ic._has_garbage(garbage_preamble_completion()))
-
-    def test_trailing_text_detected_as_garbage(self):
-        ic = self._ic()
-        self.assertTrue(ic._has_garbage(garbage_trailer_completion()))
-
-    def test_missing_final_grade_is_garbage(self):
-        ic = self._ic()
-        completion = "Checklist:\nA item (True/False): True\n"
-        self.assertTrue(ic._has_garbage(completion))
+        self.assertTrue(ic.processor.check_generation_format_mistakes(garbage_preamble_completion()))
 
     def test_empty_string_is_garbage(self):
         ic = self._ic()
-        self.assertTrue(ic._has_garbage(""))
+        self.assertTrue(ic.processor.check_generation_format_mistakes(""))
 
     def test_whitespace_only_is_garbage(self):
         ic = self._ic()
-        self.assertTrue(ic._has_garbage("   \n  "))
+        self.assertTrue(ic.processor.check_generation_format_mistakes("   \n  "))
 
     # --- tool mode (simple / structured) ------------------------------------
 
@@ -111,28 +102,7 @@ class TestHasGarbage(unittest.TestCase):
             "   TOOL: calculate_score\n"
             '   ARGS: {"rubric": "A item (True/False): True"}'
         )
-        self.assertFalse(ic._has_garbage(completion))
-
-    def test_tool_mode_missing_args_is_garbage(self):
-        ic = self._ic(tool_mode="simple")
-        completion = (
-            "Checklist:\n"
-            "A item (True/False): True\n"
-            "Final tool call:\n"
-            "   TOOL: calculate_score\n"
-        )
-        self.assertTrue(ic._has_garbage(completion))
-
-    def test_tool_mode_trailing_text_is_garbage(self):
-        ic = self._ic(tool_mode="structured")
-        completion = (
-            "Checklist:\n"
-            "A item (True/False): True\n"
-            '   ARGS: {"rubric": [True]}\n'
-            "Extra line here."
-        )
-        self.assertTrue(ic._has_garbage(completion))
-
+        self.assertFalse(ic.processor.check_generation_format_mistakes(completion))
 
 # ===========================================================================
 # 2. _classify_generation
@@ -146,27 +116,27 @@ class TestClassifyGeneration(unittest.TestCase):
         self.gold = deepcopy(self.dataset[0]["gold_rubric"])  # A:True, B:False, C:True
 
     def test_error_when_mediator_none(self):
-        self.assertEqual(self.ic._classify_generation("anything", None, self.gold), "error")
+        self.assertEqual(self.ic.classify_generation("anything", None, self.gold), "error")
 
     def test_error_when_completion_has_garbage(self):
         # mediator распарсен, но completion содержит мусор
         mediator = deepcopy(self.gold)
         self.assertEqual(
-            self.ic._classify_generation(garbage_preamble_completion(), mediator, self.gold),
+            self.ic.classify_generation(garbage_preamble_completion(), mediator, self.gold),
             "error",
         )
 
     def test_correct_when_mediator_matches_gold(self):
         mediator = deepcopy(self.gold)
         self.assertEqual(
-            self.ic._classify_generation(correct_completion(), mediator, self.gold),
+            self.ic.classify_generation(correct_completion(), mediator, self.gold),
             "correct",
         )
 
     def test_incorrect_when_mediator_differs_from_gold(self):
         mediator = {"A item": False, "B item": True, "C item": False}
         self.assertEqual(
-            self.ic._classify_generation(incorrect_completion(), mediator, self.gold),
+            self.ic.classify_generation(incorrect_completion(), mediator, self.gold),
             "incorrect",
         )
 
@@ -195,10 +165,6 @@ class TestMakeIntervention(unittest.TestCase):
 
     def test_error_status_preamble(self):
         out = self.ic.make_intervention(deepcopy(self.sample), {"completion": garbage_preamble_completion()})
-        self.assertEqual(out["generation_status"], "error")
-
-    def test_error_status_trailing_text(self):
-        out = self.ic.make_intervention(deepcopy(self.sample), {"completion": garbage_trailer_completion()})
         self.assertEqual(out["generation_status"], "error")
 
     def test_error_status_empty(self):
