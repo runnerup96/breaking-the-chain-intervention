@@ -1,4 +1,3 @@
-# make_intervention.py
 import argparse
 import json
 import os
@@ -28,7 +27,7 @@ def fix_seed(seed=42):
     torch.backends.cudnn.deterministic = True
 
 model_name2simple = {
-    "Qwen/Qwen3-1.7B": "qwen3-17B",
+    "Qwen/Qwen3-1.7B": "qwen3-1.7B",
     "Qwen/Qwen3-4B": "qwen3-4B",
     "Qwen/Qwen3-8B": "qwen3-8B",
     "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
@@ -44,27 +43,22 @@ model_name2simple = {
 GEN_MAX_NEW_TOKENS = {
     "default": {
         "pred": {"none": 512, "simple": 512, "structured": 512},
-        "gold": {"none": 10, "simple": 200, "structured": 200},
         "interv": {"none": 10, "simple": 200, "structured": 200},
     },
     "ricechem": {
         "pred": {"none": 350, "simple": 350, "structured": 350},
-        "gold": {"none": 10, "simple": 200, "structured": 200},
         "interv": {"none": 10, "simple": 200, "structured": 200},
     },
     "averitec": {
         "pred": {"none": 512, "simple": 512, "structured": 512},
-        "gold": {"none": 10, "simple": 200, "structured": 200},
         "interv": {"none": 10, "simple": 200, "structured": 200},
     },
     "entailment": {
         "pred": {"none": 768, "simple": 768, "structured": 768},
-        "gold": {"none": 16, "simple": 256, "structured": 256},
         "interv": {"none": 16, "simple": 256, "structured": 256},
     },
     "tabfact": {
         "pred": {"none": 512, "simple": 512, "structured": 512},
-        "gold": {"none": 10, "simple": 200, "structured": 200},
         "interv": {"none": 10, "simple": 200, "structured": 200},
     },
 }
@@ -84,7 +78,6 @@ def get_few_shot_examples(train_dataset_path: str, prompting_regime: str, n_few_
             digest = hashlib.sha256(f"{sample_id}::{mode}".encode("utf-8")).digest()
             return int.from_bytes(digest[:4], "big")
 
-        # intervention_modes = ["delete", "replace", "rewire", "global"]
         intervention_modes = ["rewire", "global", "delete", "replace"]
         mode_idx = 0
         examples = []
@@ -127,36 +120,14 @@ if __name__ == "__main__":
     parser.add_argument("--evaluation_dataset", type=str, required=True,
                         choices=["ricechem", "entailment", "averitec", "tabfact"])
 
-    # Новый флаг только для ricechem
     parser.add_argument("--prompting_regime", type=str, choices=["standard", "detailed", "max_detailed"], default="standard")
-    # Старый флаг для других датасетов
-    # parser.add_argument("--prompting_regime", type=str,
-    #                     choices=["baseline_structure_faithfulness", "detailed_instruction"],
-    #                     default="baseline_structure_faithfulness")
     parser.add_argument("--tool_mode", type=str, choices=["none", "simple", "structured"], default="none")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--try_one_batch", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
-    # parser.add_argument("--prompting_regime", type=str,
-    #                     choices=["baseline_structure_faithfulness", "detailed_instruction", "maxumum_mediator_faithfulness"], default="baseline_structure_faithfulness")
     parser.add_argument("--use_api", action="store_true")
     parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
     parser.add_argument("--tokenizer_name", type=str, default=None)
-    """
-    We consider two prompting regimes.
-    First explores faithfulness / reasoning transparency (as opposed to e.g. steganography) as is.
-    Main question: how does the model handle contradictions WITHOUT clear instructions / demonstration?
-    - In system prompt, we don't include a phrase about possibility of intervention.
-    - We only show non-intervened few-shots (without contradictions)
-
-    Second regime explores the ability of an LLM to follow explicit faithfulness instructions.
-    Main question: how does the model handle contradictions WITH clear instructions / demonstration?
-    - In system prompt, we include an explicit phrase about possibility of intervention.
-    - We show intervened few-shot examples (with contradictions)
-
-    Third regime is an extension of the second regime with focus on maximum compliance with the interventions.
-    """
-    args = parser.parse_args()
 
     args = parser.parse_args()
     fix_seed(args.seed)
@@ -170,9 +141,6 @@ if __name__ == "__main__":
     if args.evaluation_dataset == "ricechem":
         dataset = ricechem_dataset.RiceChemDataset(
             data_path=os.path.join(project_path, "statics/datasets/RiceChem/data"),
-            correction_path=os.path.join(project_path, f"intervention_analysis/intervention_predictions/ricechem/{model_name2simple[args.model_name]}.json"),
-            use_corrections=True,
-            correction_only=False
         )
         tool = ricechem_structure_processor.RiceChemTool(dataset, args.tool_mode)
         processor = ricechem_structure_processor.RiceChemStructureProcessor(dataset, args.tool_mode)
@@ -186,7 +154,7 @@ if __name__ == "__main__":
         )
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, processor, args.tool_mode)
 
-    elif args.evaluation_dataset == "entailment": # WARNING! Not updated yet
+    elif args.evaluation_dataset == "entailment":  # WARNING! Not updated yet
         train_dataset_path = os.path.join(project_path, "statics/datasets/EntailmentBank/data/train.jsonl")
         few_shot_examples = get_few_shot_examples(
             train_dataset_path=train_dataset_path,
@@ -199,13 +167,13 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase", prompting_regime=args.prompting_regime)
         evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
-    elif args.evaluation_dataset == "averitec": # WARNING! Not updated yet
+    elif args.evaluation_dataset == "averitec":  # WARNING! Not updated yet
         dataset_path = os.path.join(project_path, "statics/datasets/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model, prompting_regime=args.prompting_regime)
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
-    elif args.evaluation_dataset == "tabfact": # WARNING! Not updated yet
+    elif args.evaluation_dataset == "tabfact":  # WARNING! Not updated yet
         dataset_path = os.path.join(project_path, "statics/datasets/TabFact")
         dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap_full.json',
                                                  f'{dataset_path}/data/all_csv')
@@ -216,7 +184,7 @@ if __name__ == "__main__":
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [ricechem, entailment, averitec, tabfact]")
 
-    print(f"Loaded {args.evaluation_dataset} | prompting_regime={args.prompting_regime if args.evaluation_dataset=='ricechem' else args.prompting_regime}")
+    print(f"Loaded {args.evaluation_dataset} | prompting_regime={args.prompting_regime}")
 
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda b: b, shuffle=False)
     if args.try_one_batch:
@@ -226,29 +194,33 @@ if __name__ == "__main__":
 
     for batch in tqdm(dataloader, desc=f"Intervention {args.evaluation_dataset}"):
         pred_prompts = [intervention_logic.make_prompt(s, include_gold_structure=False) for s in batch]
-        pred_outputs = llm.generate(pred_prompts, max_new_tokens=GEN_MAX_NEW_TOKENS[args.evaluation_dataset]['pred'][args.tool_mode], skip_special_tokens=False)
+        pred_outputs = llm.generate(
+            pred_prompts,
+            max_new_tokens=GEN_MAX_NEW_TOKENS[args.evaluation_dataset]['pred'][args.tool_mode],
+            skip_special_tokens=False
+        )
 
-        gold_prompts = [intervention_logic.make_prompt(s, include_gold_structure=True) for s in batch]
-        gold_outputs = llm.generate(gold_prompts, max_new_tokens=GEN_MAX_NEW_TOKENS[args.evaluation_dataset]['gold'][args.tool_mode], skip_special_tokens=False)
-
-        all_outputs = pred_outputs + gold_outputs
-        all_samples = [deepcopy(s) for s in batch] + [deepcopy(s) for s in batch]
-        completion_types = ["structure_prediction"] * len(batch) + ["gold_structure"] * len(batch)
-
-        for orig_sample, model_out, completion_type in zip(all_samples, all_outputs, completion_types):
+        for orig_sample, model_out in zip(batch, pred_outputs):
             sample = deepcopy(orig_sample)
-            sample['completion_type'] = completion_type
 
-            # try:
             sample_with_interv = intervention_logic.make_intervention(sample, model_out)
-            prompt_list = intervention_logic.interventions_to_prompt(sample_with_interv)
-            interv_outputs = llm.generate(prompt_list, max_new_tokens=GEN_MAX_NEW_TOKENS[args.evaluation_dataset]['interv'][args.tool_mode], skip_special_tokens=False)
-            final_sample = intervention_logic.collect_intervention_completion(sample_with_interv, interv_outputs)
-            processed_samples_list.append(final_sample)
 
-            # except Exception as e:
-            #     print(f"[ERROR] {e}")
-                
+            if sample_with_interv.get('generation_status') == 'error':
+                processed_samples_list.append(sample_with_interv)
+                continue
+
+            prompt_list = intervention_logic.interventions_to_prompt(sample_with_interv)
+            if prompt_list:
+                interv_outputs = llm.generate(
+                    prompt_list,
+                    max_new_tokens=GEN_MAX_NEW_TOKENS[args.evaluation_dataset]['interv'][args.tool_mode],
+                    skip_special_tokens=False
+                )
+                final_sample = intervention_logic.collect_intervention_completion(sample_with_interv, interv_outputs)
+            else:
+                final_sample = sample_with_interv
+
+            processed_samples_list.append(final_sample)
 
     print("\n=== Running evaluation ===")
     if evaluator is not None:
@@ -265,17 +237,41 @@ if __name__ == "__main__":
     save_dir = os.path.join(project_path, "intervention_analysis", "intervention_predictions", args.evaluation_dataset)
     os.makedirs(save_dir, exist_ok=True)
 
-    filename = f"{model_name2simple[args.model_name]}_{args.prompting_regime}_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+    filename = f"{model_name2simple[args.model_name]}_{args.prompting_regime}_{timestamp}.json"
+
+    n_total     = len(processed_samples_list)
+    n_correct   = sum(1 for s in processed_samples_list if s.get("generation_status") == "correct")
+    n_incorrect = sum(1 for s in processed_samples_list if s.get("generation_status") == "incorrect")
+    n_error     = sum(1 for s in processed_samples_list if s.get("generation_status") == "error")
 
     final_dict = {
         "meta": {
-            "model": args.model_name,
-            "dataset": args.evaluation_dataset,
+            "model":          args.model_name,
+            "model_simple":   model_name2simple.get(args.model_name, args.model_name),
+            "use_api":        args.use_api,
+            "api_base_url":   args.api_base_url if args.use_api else None,
+            "tokenizer_name": args.tokenizer_name,
+
+            "dataset":          args.evaluation_dataset,
             "prompting_regime": args.prompting_regime,
-            "total_samples": len(processed_samples_list)
+            "tool_mode":        args.tool_mode,
+
+            "batch_size":    args.batch_size,
+            "seed":          args.seed,
+            "try_one_batch": args.try_one_batch,
+            "timestamp":     timestamp,
+
+            "total_samples":  n_total,
+            "n_correct":      n_correct,
+            "n_incorrect":    n_incorrect,
+            "n_error":        n_error,
+            "correct_rate":   round(n_correct   / max(1, n_correct + n_incorrect), 3),
+            "incorrect_rate": round(n_incorrect / max(1, n_correct + n_incorrect), 3),
+            "error_rate":     round(n_error     / max(1, n_total), 3),
         },
         "metrics": evaluation_metrics,
-        "results": processed_samples_list
+        "result": processed_samples_list,
     }
 
     with open(os.path.join(save_dir, filename), "w", encoding="utf-8") as f:

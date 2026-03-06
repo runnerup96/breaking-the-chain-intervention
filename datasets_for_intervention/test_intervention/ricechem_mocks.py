@@ -3,15 +3,7 @@ from copy import deepcopy
 
 
 class RiceChemDatasetMock:
-    """
-    Lightweight dataset mock aligned with the current unified RiceChem pipeline.
 
-    Each sample contains:
-    - idx, task_idx, task, student_answer, score_range
-    - gold_rubric (dict[item->bool]), gold_score (float)
-    - mediator_rubric (dict[item->bool]) as a mutable copy of gold (default)
-    - optional bad_rubric / bad_score for Correction tests
-    """
     def __init__(self):
         self.task2rubric_weights = {
             1: {
@@ -26,21 +18,20 @@ class RiceChemDatasetMock:
 
         self.data = []
 
-        gold_0 = {"A item": True, "B item": False, "C item": True}   # score 1.5
-        bad_0  = {"A item": False, "B item": True,  "C item": False}  # score 1.5
+        # sample 0: gold A=True, B=False, C=True  → score = 1.0 + 0.5 = 1.5
+        gold_0 = {"A item": True, "B item": False, "C item": True}
 
-        gold_1 = {"A item": False, "B item": True, "C item": True}   # score 2.0
-        bad_1  = {"A item": True,  "B item": False, "C item": False} # score 1.0
+        # sample 1: gold A=False, B=True, C=True  → score = 1.5 + 0.5 = 2.0
+        gold_1 = {"A item": False, "B item": True, "C item": True}
 
         samples = [
-            ("mock_0@Task1", "Sample answer A", gold_0, bad_0),
-            ("mock_1@Task1", "Sample answer B", gold_1, bad_1),
+            ("mock_0@Task1", "Sample answer A", gold_0),
+            ("mock_1@Task1", "Sample answer B", gold_1),
         ]
 
-        for idx, ans, gold, bad in samples:
+        for idx, ans, gold in samples:
             weights = self.task2rubric_weights[1]
             gold_score = float(sum(weights[k] for k, v in gold.items() if v))
-            bad_score = float(sum(weights[k] for k, v in bad.items() if v))
             self.data.append({
                 "idx": idx,
                 "task_idx": 1,
@@ -50,8 +41,6 @@ class RiceChemDatasetMock:
                 "gold_rubric": deepcopy(gold),
                 "gold_score": gold_score,
                 "mediator_rubric": deepcopy(gold),
-                "bad_rubric": deepcopy(bad),
-                "bad_score": bad_score,
             })
 
     def get_random_student_answer(self, task_idx: int) -> str:
