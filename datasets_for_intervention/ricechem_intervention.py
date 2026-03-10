@@ -30,7 +30,10 @@ class RiceChemIntervention:
     def clean_llm_output(self, text):
         tokens_to_remove = [
             '<|im_end|>', '<|endoftext|>', '<|im_start|>', '<|eot_id|>',
-            '<|pad|>', '\u00ad', '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff',
+            '<|end_of_text|>', '<|pad|>',
+            '<end_of_turn>',
+            '</s>',
+            '\u00ad', '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff',
         ]
         for token in tokens_to_remove:
             text = text.replace(token, '')
@@ -147,9 +150,11 @@ class RiceChemIntervention:
         idx = 0
 
         for i in range(len(interv.get('Local Edits', []))):
+
             score, tool_rubric = self.infer_completion(
                 completions[idx], interv['Local Edits'][i], short_completion=True
             )
+            interv['Local Edits'][i]['raw_generation'] = completions[idx]
             interv['Local Edits'][i]['score_after_intervention'] = score
             if self.tool_mode:
                 interv['Local Edits'][i]['tool_rubric_after_intervention'] = tool_rubric
@@ -160,6 +165,7 @@ class RiceChemIntervention:
                 completions[idx], interv['Correction'][i], short_completion=True
             )
             interv['Correction'][i]['score_after_intervention'] = score
+            interv['Correction'][i]['raw_generation'] = completions[idx]
             if self.tool_mode:
                 interv['Correction'][i]['tool_rubric_after_intervention'] = tool_rubric
             idx += 1
