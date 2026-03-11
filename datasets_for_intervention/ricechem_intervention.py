@@ -173,98 +173,89 @@ class RiceChemIntervention:
         return sample
 
     FEW_SHOT = {
-        "Example 1": {
-            "question": (
-                "When studying the emission sources within the Milky Way, a satellite detected interplanetary clouds containing silicon atoms that have lost five electrons.\n"
-                "b) The ionization energies corresponding to the removal of the third, fourth, and fifth electrons in silicon are 3231, 4356, and 16091 kJ/mol, respectively. \n"
-                "Using core charge calculations and your understanding of Coulomb's Law, briefly explain 1) why the removal of each additional electron requires more energy than the removal of the previous one, and 2) the relative magnitude of the values observed.\n"
-                "This question can be answered reasonably in around 150 words or fewer.\n"
-            ),
-            "answer": (
-                "With each removal of an electron, there is less electron-electron repulsion, which decreases the potential energy of the electrons as they are more strongly attracted to the nucleus, and ultimately increasing each successive ionization energy.  "
-                "The ionization energies of the third and fourth electron are similar due to the fact that both of these electrons reside in the same n quantum number (3), meaning they are basically the same radius away from the nucleus. Furthermore, these two electrons have the same core charge of +4. This indicates the potential energies and thus the resulting ionization energies are similar, as Coulomb's Law states potential energy is given by V(r) =(+Ze)(-e)/r. The difference in these two energies is due to the fact that the electrons in the 3p orbital experience greater electron-electron repulsion than those in the 3s, and 3s electrons have greater probability of core penetration. This is supported by silicon's electron configuration of 1s^2 2s^2 2p^6 3s^2 3p^2.  "
-                "However, there is a large jump in ionization energy from removal of the fourth to fifth electron because there is a significant decrease in the distance between the electron and nucleus (r), as the fifth electron is removed from the n=2 shell instead of the third. Thus, the core charge felt by the fifth electron is +12, significantly increasing the ionization energy.\n"
-            ),
-            "checklist": {
-                "correctly cites decreased electron electron repulsion (True/False)": True,
-                "relates decreased electron electron repulsion to decreased potential energy (True/False)": True,
-                "3rd and 4th electrons ionized feel same core charge (True/False)": True,
-                "3rd and 4th electrons ionized from n=3 shell and have same radius (True/False)": True,
-                "5th electron ionized from n=2 shell and feels higher core charge (True/False)": True,
-                "5th electron ionized from n=2 shell and has smaller radius (True/False)": True,
-                "correctly explains relationship of potential energy to ionization energy (True/False)": True,
-                "partially explains relationship between potential energy and ionization energy (True/False)": False,
-            },
-            "score_range": "0-8",
-            "explanation": (
-                "The student correctly explains all major points. They fully explain the relationship between "
-                "potential energy and ionization energy, so the PARTIALLY item is False."
-            ),
-        },
-        "Example 2": {
-            "question": (
-                "b) If light is used to excite an electron to a higher energy level in an atom, only certain frequencies "
-                "of light can be absorbed. However, if it is used to eject an electron from the atom, any value above a "
-                "minimum threshold frequency can be absorbed. What's up with that?! ¯\\ (°-°) /¯\n\n"
-                "This question can be answered reasonably in around 150 words or fewer.\n"
-            ),
-            "answer": (
-                "For excitation, the photon energy must exactly match the difference between two quantized energy levels. "
-                "For ejection, the photon only needs to exceed the binding energy; excess becomes kinetic energy. "
-                "Frequency is proportional to energy, so there is a minimum threshold but no specific frequency requirement above it.\n"
-            ),
-            "checklist": {
-                "Correctly states that frequency is proportional to energy of light (True/False)": True,
-                "Explaining sentence 1: energy levels of an electron in an atom are quantized (True/False)": True,
-                "Explaining sentence 1: FULLY explains energy/frequency absorbed must equal the difference in energy levels in an electron (True/False)": True,
-                "Explaining sentence 1: PARTIALLY explains energy/frequency absorbed must equal the difference in energy levels in an electron (True/False)": False,
-                "Explaining sentence 2: a minimum amount of energy is needed to eject an electron (True/False)": True,
-                "Explaining sentence 2: any additional energy becomes kinetic energy (True/False)": True,
-            },
-            "score_range": "0-6",
-            "explanation": "Full explanation given for sentence 1, so PARTIALLY is False.",
-        },
-        "Example 3": {
-            "question": (
-                "Assess the accuracy and logic of the student's response about hybrid orbitals in methanimine (CH2NH).\n"
-                "This question can be reasonably answered in 150 words or fewer.\n"
-            ),
-            "answer": (
-                "Carbon forms 3 sp2 hybrid orbitals (not 4 sp3). Nitrogen is also sp2 hybridized. "
-                "Both use unhybridized p orbitals for the pi bond.\n"
-            ),
-            "checklist": {
-                "Sentence 1 is correct. Valence bond theory describes that atomic orbitals must be half-filled to participate in covalent bonding. (True/False)": True,
-                "Sentence 2: Correct number of hybrid orbitals. In this molecule, carbon must form three hybrid orbitals to form three electron domains. (True/False)": True,
-                "Sentence 2: Correct type of hybrid orbitals. Carbon must form sp2 hybrid orbitals (from using a 2s and two 2p orbitals) (True/False)": True,
-                "Sentence 3: Correctly states that nitrogen is hybridized (True/False)": True,
-                "Sentence 3: Correct type of hybridization. Nitrogen is sp2 hybridized to form 3 electron domains (True/False)": True,
-                "Sentence 3: Correct description of hybrid orbital bonds in nitrogen. Two sp2 orbitals form two sigma bonds. (True/False)": True,
-                "Sentence 3: Correct description of unhybridized orbital bonds in nitrogen. Unhybridized p orbital forms pi bond (True/False)": True,
-            },
-            "score_range": "0-7",
-            "explanation": "All items correct.",
-        },
-        "Example 4": {
-            "question": (
-                "How did the Law of Multiple Proportions lead to the conclusion that matter is made of atoms?\n"
-                "This question can be reasonably answered in around 75 words or fewer.\n"
-            ),
-            "answer": (
-                "The Law states that masses of one element combining with a fixed mass of another form whole-number ratios. "
-                "Only discrete, indivisible particles (atoms) produce such ratios; continuous matter could combine in any ratio.\n"
-            ),
-            "checklist": {
-                "Fixed mass of one element (True/False)": True,
-                "Mass data in LoMP (True/False)": True,
-                "Combine to form compounds (True/False)": True,
-                "Integer/whole number ratio (True/False)": True,
-                "Whole numbers mean indivisible/discrete (True/False)": True,
-                "Indivisible unit of mass = atom (True/False)": True,
-            },
-            "score_range": "0-6",
-            "explanation": "All items correct.",
-        },
+        "Example 1": {"question": ("When studying the emission sources within the Milky Way, a satellite detected interplanetary clouds containing silicon atoms that have lost five electrons.\n"
+                                    "b) The ionization energies corresponding to the removal of the third, fourth, and fifth electrons in silicon are 3231, 4356, and 16091 kJ/mol, respectively. \n"
+                                    "Using core charge calculations and your understanding of Coulomb's Law, briefly explain 1) why the removal of each additional electron requires more energy than the removal of the previous one, and 2) the relative magnitude of the values observed.\n"
+                                    "This question can be answered reasonably in around 150 words or fewer.\n"), 
+                      "answer": ("With each removal of an electron, there is less electron-electron repulsion, which decreases the potential energy of the electrons as they are more strongly attracted to the nucleus, and ultimately increasing each successive ionization energy.  "
+                                    "The ionization energies of the third and fourth electron are similar due to the fact that both of these electrons reside in the same n quantum number (3), meaning they are basically the same radius away from the nucleus. Furthermore, these two electrons have the same core charge of +4. This indicates the potential energies and thus the resulting ionization energies are similar, as Coulomb's Law states potential energy is given by V(r) =(+Ze)(-e)/r. The difference in these two energies is due to the fact that the electrons in the 3p orbital experience greater electron-electron repulsion than those in the 3s, and 3s electrons have greater probability of core penetration. This is supported by silicon's electron configuration of 1s^2 2s^2 2p^6 3s^2 3p^2.  "
+                                    "However, there is a large jump in ionization energy from removal of the fourth to fifth electron because there is a significant decrease in the distance between the electron and nucleus (r), as the fifth electron is removed from the n=2 shell instead of the third. Thus, the core charge felt by the fifth electron is +12, significantly increasing the ionization energy.\n"),
+                      "checklist": {"correctly cites decreased electron electron repulsion (True/False)": True,
+                                    "relates decreased electron electron repulsion to decreased potential energy (True/False)": True,
+                                    "3rd and 4th electrons ionized feel same core charge (True/False)": True,
+                                    "3rd and 4th electrons ionized from n=3 shell and have same radius (True/False)": True,
+                                    "5th electron ionized from n=2 shell and feels higher core charge (True/False)": True,
+                                    "5th electron ionized from n=2 shell and has smaller radius (True/False)": True,
+                                    "correctly explains relationship of potential energy to ionization energy (True/False)": True,
+                                    "partially explains relationship between potential energy and ionization energy (True/False)": False},
+                      "explanation": "There are no interventions here",
+                      "score_range": "0-8"   
+                     },
+        "Example 2": {"question": ("In each statement below (a-c), two observations are given which seem to contrast with each other. Using your knowledge of electron configurations, orbitals, Coulomb’s law, and/or atomic and molecular structures, briefly explain why both of these observations are true, and how the two observations can be reconciled in each case.\n\n"
+                                   "b) If light is used to excite an electron to a higher energy level in an atom, only certain frequencies of light can be absorbed. However, if it is used to eject an electron from the atom, any value above a minimum threshold frequency can be absorbed. What’s up with that?! ¯\\ (°-°) /¯\n\n"
+                                   "This question can be answered reasonably in around 150 words or fewer.\n"),
+                      "answer": ("The reason why only certain frequencies of light can excite electrons to a higher energy level in an atom is because the energy levels that the electron will go to match the energy levels of that specific frequency of light."
+                                 "Think about it, if the energy level above the one that the electron is currently is like let's say -6 eV and the one that the electron is at is at like -10 eV, then the electron will be needed to be hit with a frequency of light that is 4 eV to get to the -6 eV."
+                                 "If it is not exactly 4 then it wont be able to catch on to that energy level. However when you are ejecting an electron, you are not trying to reach a specific energy level, you are just trying to get out of the atom,"
+                                 "so the frequency that you need is the frequency required to get out of the atom Once the electron is out of the atom, it is out. So the frequency does not really matter after that point that the electron is out of the atom. It is just an added bonus. The frequency of the light correlates with its energy, especially kinetic energy. The more the frequency the faster it will go. The threshold frequency is simply how much energy the electron needs to break free from the prison of the atom. If the electron has more energy than it needs, then it does not matter and it will continue to break free."),
+                      "checklist": {"Correctly states that frequency is proportional to energy of light (True/False)": False,
+                                    "Explaining sentence 1: energy levels of an electron in an atom are quantized (True/False)": True,
+                                    "Explaining sentence 1: FULLY explains energy/frequency absorbed must equal the difference in energy levels in an electron (True/False)": True,
+                                    "Explaining sentence 1: PARTIALLY explains energy/frequency absorbed must equal the difference in energy levels in an electron (True/False)": False,
+                                    "Explaining sentence 2: a minimum amount of energy is needed to eject an electron (True/False)": False,
+                                    "Explaining sentence 2: any additional energy becomes kinetic energy (True/False)": True
+                                    },
+                      "explanation": "There are no interventions here",
+                      "score_range": "0-6"
+                     },
+        "Example 3": {"question": ("A CHEM 121 student was asked what hybrid orbitals must be present to form methanimine (CH2NH), for which a correct Lewis structure is shown below:\n\n"
+                                   "The student responded:\n"
+                                   "According to valence bond theory, Carbon cannot form four bonds because it only has two unpaired valence electrons. So, it has to form four sp3 hybrid orbitals to create the four bonds. Nitrogen doesn’t need to hybridize because it already has three unpaired 2p valence electrons to form the three bonds with Carbon and Hydrogen.\n"
+                                   "Assess the accuracy and logic of the student’s response: briefly explain whether the reasoning presented is logical, noting what information is correct or incorrect and providing correct logical reasoning and explanation where needed.\n"
+                                   "This question can be reasonably answered in 150 words or fewer."),
+                      "answer": ("Sentence 1: This is incorrect, valence bond theory dictates that carbon cannot form 4 bonds because its valence electrons only occupy 3 atomic orbitals, one 2s and two 2p orbitals, and therefore atomic orbital overlap would only account for Carbon having three bonds."
+                                 "Sentence 2: This is not correct, while carbon has 4 bonds it only has 3 electron domains around it and therefore undergoes sp^2 hybridization to form three sp^2 orbitals. Two of these orbitals form the single bonds with H while the remaining sp^2 orbital alongside a pi bond created between the unhybridized 2p orbitals in carbon and nitrogen form a double bond."
+                                 "Sentence 3: This is incorrect, Nitrogen does in fact undergo sp^2 hybridization as it has three electron domains around it. One of the three sp^2 orbitals facilitates the single N-H bond while another sp^2 orbital in conjuction with a remaning 2p orbital in the same plane of carbon's 2p form a double bond between nitrogen and carbon."),
+                      "checklist": {"Sentence 1 is correct. Valence bond theory describes that atomic orbitals must be half-filled to participate in covalent bonding. (True/False)": False,
+                                    "Sentence 2: Correct number of hybrid orbitals. In this molecule, carbon must form three hybrid orbitals to form three electron domains. (True/False)": True,
+                                    "Sentence 2: Correct type of hybrid orbitals. Carbon must form sp2 hybrid orbitals (from using a 2s and two 2p orbitals) (True/False)": True,
+                                    "Sentence 3: Correctly states that nitrogen is hybridized (True/False)": True,
+                                    "Sentence 3: Correct type of hybridization. Nitrogen is sp2 hybridized to form 3 electron domains (True/False)": True,
+                                    "Sentence 3: Correct description of hybrid orbital bonds in nitrogen. Two sp2 orbitals form two sigma bonds. (True/False)": True,
+                                    "Sentence 3: Correct description of unhybridized orbital bonds in nitrogen. Unhybridized p orbital forms pi bond (True/False)": True
+                                   },
+                      "checklist_with_intervention": {"Sentence 1 is correct. Valence bond theory describes that atomic orbitals must be half-filled to participate in covalent bonding. (True/False)": True,
+                                                      "Sentence 2: Correct number of hybrid orbitals. In this molecule, carbon must form three hybrid orbitals to form three electron domains. (True/False)": True,
+                                                      "Sentence 2: Correct type of hybrid orbitals. Carbon must form sp2 hybrid orbitals (from using a 2s and two 2p orbitals) (True/False)": False,
+                                                      "Sentence 3: Correctly states that nitrogen is hybridized (True/False)": True,
+                                                      "Sentence 3: Correct type of hybridization. Nitrogen is sp2 hybridized to form 3 electron domains (True/False)": False,
+                                                      "Sentence 3: Correct description of hybrid orbital bonds in nitrogen. Two sp2 orbitals form two sigma bonds. (True/False)": False,
+                                                      "Sentence 3: Correct description of unhybridized orbital bonds in nitrogen. Unhybridized p orbital forms pi bond (True/False)": True
+                                                    },
+                      "explanation": "Here the original score must be 6.0, but after intervention it should have been recalculated to 4.0 (because of 4 True's).",
+                      "score_range": "0-7"                   
+                     },
+        "Example 4": {"question": ("How did the Law of Multiple Proportions lead to the conclusion that matter is made of atoms?\n"
+                                   "This question can be reasonably answered in around 75 words or fewer.\n"),
+                      "answer": ("The Law of Multiple Proportions states that when two elements combine to form more than one compound, if one of the elements is fixed to a certain mass in each compound, the mass of the other element will exist in a simple integer ratio to the masses of that element in the other compounds."
+                                 "The appearance of a simple integer ratio implies that something is being counted, and that being the smallest divisible unit. As this is mass data, that means this must be a unit of mass, which was concluded to be the atom, with molecules being made up of a whole number sum of them."),
+                      "checklist": {"Fixed mass of one element (True/False)": True,
+                                    "Mass data in LoMP (True/False)": True,
+                                    "Combine to form compounds (True/False)": True,
+                                    "Integer/whole number ratio (True/False)": True,
+                                    "Whole numbers mean indivisible/discrete (True/False)": True,
+                                    "Indivisible unit of mass = atom (True/False)": True
+                                   },
+                      "checklist_with_intervention": {"Fixed mass of one element (True/False)": False,
+                                                      "Mass data in LoMP (True/False)": False,
+                                                      "Combine to form compounds (True/False)": False,
+                                                      "Integer/whole number ratio (True/False)": False,
+                                                      "Whole numbers mean indivisible/discrete (True/False)": False,
+                                                      "Indivisible unit of mass = atom (True/False)": False
+                                                     },
+                      "explanation": "Here the original score must be 6.0, but after intervention it should have been recalculated to 0.0 (because of 0 True's).",
+                      "score_range": "0-6"
+                     }
     }
 
     def _checklist_dict_to_string(self, checklist: dict) -> str:
@@ -282,8 +273,8 @@ class RiceChemIntervention:
             bool_list = list(checklist.values())
             return (
                 "Final tool call:\n"
-                "   TOOL: calculate_score\n"
-                f'   ARGS: {{"rubric": {bool_list}}}\n\n'
+                "TOOL: calculate_score\n"
+                f'ARGS: {{"rubric": {bool_list}}}\n\n'
             )
         return ""
 
@@ -326,8 +317,8 @@ class RiceChemIntervention:
                 "Your final response must contain ONLY the following fields and no other text:\n"
                 "1) Checklist: (the filled checklist, line-for-line in the same format)\n"
                 "2) Final tool call:\n"
-                "   TOOL: calculate_score\n"
-                "   ARGS: {\"rubric\": \"FILLED RICECHEM CHECKLIST\"}\n\n"
+                "TOOL: calculate_score\n"
+                "ARGS: {\"rubric\": \"FILLED RICECHEM CHECKLIST\"}\n\n"
             )
         elif self.tool_mode == "structured":
             tool_call_instruction = (
@@ -340,8 +331,8 @@ class RiceChemIntervention:
                 "Your final response must contain ONLY the following fields and no other text:\n"
                 "1) Checklist: (the filled checklist, line-for-line in the same format)\n"
                 "2) Final tool call:\n"
-                "   TOOL: calculate_score\n"
-                "   ARGS: {\"rubric\": [True, False, ...]}\n\n"
+                "TOOL: calculate_score\n"
+                "ARGS: {\"rubric\": [True, False, ...]}\n\n"
             )
 
         if self.tool_mode:
@@ -352,7 +343,7 @@ class RiceChemIntervention:
             ex = self.FEW_SHOT[ex_name]
             ex_num = ex_name.split()[-1]
 
-            if self.prompting_regime == "detailed":
+            if self.prompting_regime in ["detailed", "max_detailed"]:
                 checklist = ex.get("checklist_with_intervention", ex["checklist"])
                 explanation = ex["explanation"]
             else:
