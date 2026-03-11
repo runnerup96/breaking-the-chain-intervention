@@ -1,4 +1,4 @@
-import re
+giimport re
 from copy import deepcopy
 from datasets_for_intervention.prompt import Prompt
 
@@ -266,8 +266,8 @@ class RiceChemIntervention:
             checklist_str = self._checklist_dict_to_string(checklist).replace('\n', '\\n')
             return (
                 "Final tool call:\n"
-                "   TOOL: calculate_score\n"
-                f'   ARGS: {{"rubric": "{checklist_str}"}}\n\n'
+                "TOOL: calculate_score\n"
+                f'ARGS: {{"rubric": "{checklist_str}"}}\n\n'
             )
         elif self.tool_mode == "structured":
             bool_list = list(checklist.values())
@@ -343,8 +343,13 @@ class RiceChemIntervention:
             ex = self.FEW_SHOT[ex_name]
             ex_num = ex_name.split()[-1]
 
+            example_type = ""
             if self.prompting_regime in ["detailed", "max_detailed"]:
                 checklist = ex.get("checklist_with_intervention", ex["checklist"])
+                if 'checklist_with_intervention' in ex:
+                    example_type = " (With intervention)"
+                else:
+                    example_type = " (No intervention)"
                 explanation = ex["explanation"]
             else:
                 checklist = ex["checklist"]
@@ -353,7 +358,7 @@ class RiceChemIntervention:
             checklist_str = self._checklist_dict_to_string(checklist)
 
             ex_block = (
-                f"Example #{ex_num}\n"
+                f"Example #{ex_num}{example_type}\n"
                 "Question:\n"
                 f"{ex['question']}"
                 "Answer:\n"
