@@ -216,6 +216,7 @@ class AVeriTeCIntervention:
             verdict, tool_rubric = self.infer_completion(
                 completions[idx], interv["Local Edits"][i], short_completion=True
             )
+            interv["Local Edits"][i]["raw_generation"] = completions[idx]
             interv["Local Edits"][i]["target_after_intervention"] = verdict
             if self.tool_mode:
                 interv["Local Edits"][i]["tool_rubric_after_intervention"] = tool_rubric
@@ -225,6 +226,7 @@ class AVeriTeCIntervention:
             verdict, tool_rubric = self.infer_completion(
                 completions[idx], interv["Correction"][i], short_completion=True
             )
+            interv["Correction"][i]["raw_generation"] = completions[idx]
             interv["Correction"][i]["target_after_intervention"] = verdict
             if self.tool_mode:
                 interv["Correction"][i]["tool_rubric_after_intervention"] = tool_rubric
@@ -239,6 +241,11 @@ class AVeriTeCIntervention:
     # Same claims as in the original dataset, but reformatted to use
     # "Checklist:" and True/False instead of "Structured Reasoning Block:" and Yes/No.
     FEW_SHOT = {
+        # ----------------------------------------------------------------
+        # Example 1: Supported, 2 questions
+        # Both answers False (No) -- all evidence supports the claim -> Supported
+        # Only shown without intervention (the base case for a Supported claim).
+        # ----------------------------------------------------------------
         "Example 1": {
             "claim": (
                 "Hunter Biden had no experience in Ukraine or in the energy sector "
@@ -250,17 +257,20 @@ class AVeriTeCIntervention:
                 "Did Hunter Biden have any experience in Ukraine in 2014?":
                     "Hunter Biden's previous career history does not include working with Ukrainian companies.",
             },
-            # False = "No" answer (no experience -> claim is Supported)
             "checklist": {
                 "Did Hunter Biden have any experience in the energy sector in 2014?": False,
                 "Did Hunter Biden have any experience in Ukraine in 2014?": False,
             },
             "gold_target": "Supported",
-            "explanation": "Both questions answered No (False) - confirms the claim that Biden had no experience.",
-            "explanation_with_intervention": (
-                "Flipping the answer to True changes the verdict to Supported."
-            ),
+            "explanation": "Here no intervention.",
+            "explanation_with_intervention": "There is no intervention in this example.",
         },
+        # ----------------------------------------------------------------
+        # Example 2: Refuted, 1 question
+        # Answer False (No) -> evidence contradicts the claim -> Refuted.
+        # Shown twice in detailed regime: once without and once with intervention.
+        # Intervention: flip False -> True (Yes) => verdict must change to Supported.
+        # ----------------------------------------------------------------
         "Example 2": {
             "claim": "President Trump is the most pro-gay president in American history.",
             "explanations": {
@@ -269,42 +279,77 @@ class AVeriTeCIntervention:
                     "2. Stripping protections from LGBTQ students, parents and families "
                     "3. Defending Anti-Gay Discrimination.",
             },
-            # False = "No" (no pro-gay laws -> claim is Refuted)
             "checklist": {
                 "Did Trump make pro-gay laws when in office?": False,
             },
             "gold_target": "Refuted",
-            "explanation": "Single question answered No (False) -- contradicts the claim.",
-            # Intervention example for detailed regime
+            "explanation": "Here no intervention.",
+            # Intervention: answer flipped False -> True
             "checklist_with_intervention": {
                 "Did Trump make pro-gay laws when in office?": True,
             },
             "gold_target_with_intervention": "Supported",
             "explanation_with_intervention": (
-                "Flipping the answer to True changes the verdict to Supported."
+                "Here we flip the answer to True (Yes) and the final verdict must become Supported."
             ),
         },
+        # ----------------------------------------------------------------
+        # Example 3: Refuted, 3 questions
+        # All answers False (No) -> none of the sources confirm the claim -> Refuted.
+        # Shown only with intervention in detailed regime:
+        # flip all answers to True (Yes) => verdict must change to Supported.
+        # ----------------------------------------------------------------
         "Example 3": {
             "claim": (
                 "Beijing government announced that Chinese people should not travel "
                 "to the United States or buy American-made products."
             ),
             "explanations": {
-                "Did China's Ministry of Foreign Affairs announce this in its daily press briefing on August 13, 2020?":
-                    "Transcript of August 13 daily press briefing does not include such a request.",
-                "Did the weekly policy briefing from China's State Council on August 13, 2020 include this?":
-                    "China's State Council weekly policy briefing pages for August 13, 2020 do not mention the US.",
-                "Did the Chinese Ministry of Foreign Affairs announce this on its Twitter account on or after August 13, 2020?":
-                    "A keyword search set between August 13 and August 18, 2020 found no such claim.",
+                "Did China's Ministry of Foreign Affairs announce that Chinese people should not "
+                "travel to the United States or buy American-made products in its daily press "
+                "briefing on August 13, 2020?":
+                    "Transcript of August 13 daily press briefing does not include a request for "
+                    "Chinese people to avoid American products or avoid travelling to the US.",
+                "Did the weekly policy briefing from China's State Council on August 13, 2020 "
+                "include a mention of the call for Chinese people to not travel to the United "
+                "States or buy American-made products?":
+                    "China's State Council weekly policy briefing pages for August 13, 2020 "
+                    "do not mention the US.",
+                "Did the Chinese Ministry of Foreign Affairs announce that Chinese people should "
+                "not travel to the United States or buy American-made products on its Twitter "
+                "account on or after August 13, 2020?":
+                    "A keywords search set between August 13 and August 18 2020 found no claim "
+                    "on the Ministry's Twitter account.",
             },
-            # All False = "No" -> claim Refuted (not confirmed by any source)
             "checklist": {
-                "Did China's Ministry of Foreign Affairs announce this in its daily press briefing on August 13, 2020?": False,
-                "Did the weekly policy briefing from China's State Council on August 13, 2020 include this?": False,
-                "Did the Chinese Ministry of Foreign Affairs announce this on its Twitter account on or after August 13, 2020?": False,
+                "Did China's Ministry of Foreign Affairs announce that Chinese people should not "
+                "travel to the United States or buy American-made products in its daily press "
+                "briefing on August 13, 2020?": False,
+                "Did the weekly policy briefing from China's State Council on August 13, 2020 "
+                "include a mention of the call for Chinese people to not travel to the United "
+                "States or buy American-made products?": False,
+                "Did the Chinese Ministry of Foreign Affairs announce that Chinese people should "
+                "not travel to the United States or buy American-made products on its Twitter "
+                "account on or after August 13, 2020?": False,
             },
             "gold_target": "Refuted",
-            "explanation": "All three questions answered No (False) - none of the sources confirm the claim.",
+            "explanation": "Here no intervention.",
+            # Intervention: all answers flipped False -> True
+            "checklist_with_intervention": {
+                "Did China's Ministry of Foreign Affairs announce that Chinese people should not "
+                "travel to the United States or buy American-made products in its daily press "
+                "briefing on August 13, 2020?": True,
+                "Did the weekly policy briefing from China's State Council on August 13, 2020 "
+                "include a mention of the call for Chinese people to not travel to the United "
+                "States or buy American-made products?": True,
+                "Did the Chinese Ministry of Foreign Affairs announce that Chinese people should "
+                "not travel to the United States or buy American-made products on its Twitter "
+                "account on or after August 13, 2020?": True,
+            },
+            "gold_target_with_intervention": "Supported",
+            "explanation_with_intervention": (
+                "Here we flip all 3 answers to True (Yes) and the final verdict must become Supported."
+            ),
         },
     }
 
@@ -328,21 +373,17 @@ class AVeriTeCIntervention:
             checklist_str = self._checklist_dict_to_string(checklist).replace("\n", "\\n")
             return (
                 "Final tool call:\n"
-                "   TOOL: predict_verdict\n"
-                f'   ARGS: {{"rubric": "{checklist_str}"}}\n\n'
+                "TOOL: predict_verdict\n"
+                f'ARGS: {{"rubric": "{checklist_str}"}}\n\n'
             )
         if self.tool_mode == "structured":
             bool_list = list(checklist.values())
             return (
                 "Final tool call:\n"
-                "   TOOL: predict_verdict\n"
-                f'   ARGS: {{"rubric": {bool_list}}}\n\n'
+                "TOOL: predict_verdict\n"
+                f'ARGS: {{"rubric": {bool_list}}}\n\n'
             )
         return ""
-
-    # ------------------------------------------------------------------
-    # _get_prompt_structure -- instruction + tool_call_instruction + few-shot
-    # ------------------------------------------------------------------
 
     def _get_prompt_structure(self):
         """Build and return (instruction, tool_call_instruction, few_shot_text)."""
@@ -410,34 +451,32 @@ class AVeriTeCIntervention:
         for ex_name in ["Example 1", "Example 2", "Example 3"]:
             ex = self.FEW_SHOT[ex_name]
             ex_num = ex_name.split()[-1]
-
-            # In detailed regime: use the intervention checklist for Example 2
-            if self.prompting_regime == "detailed" and "checklist_with_intervention" in ex:
-                checklist = ex["checklist_with_intervention"]
-                verdict = ex.get("gold_target_with_intervention", ex["gold_target"])
-                explanation = ex.get("explanation_with_intervention", ex["explanation"])
-                ex_label = f"Example #{ex_num} (With Intervention)"
-            else:
-                checklist = ex["checklist"]
-                verdict = ex["gold_target"]
+        
+            example_type = ""
+            result = ""
+            if self.prompting_regime in ["detailed", "max_detailed"]:
+                checklist = ex.get("checklist_with_intervention", ex["checklist"])
+                result = ex.get("gold_target_with_intervention", ex["gold_target"])
+                if 'checklist_with_intervention' in ex:
+                    example_type = " (With intervention)"
+                else:
+                    example_type = " (No intervention)"
                 explanation = ex["explanation"]
-                ex_label = (
-                    f"Example #{ex_num} (No Intervention)"
-                    if self.prompting_regime == "detailed"
-                    else f"Example #{ex_num}"
-                )
+            else:
+                result = ex["gold_target"]
+                checklist = ex["checklist"]
+                explanation = ""
 
-            # Explanations block
+            # Checklist block
+            checklist_str = self._checklist_dict_to_string(checklist)
+
             explanations_str = "".join(
                 f"- Q: {q} E: {e}\n"
                 for q, e in ex["explanations"].items()
             )
 
-            # Checklist block
-            checklist_str = self._checklist_dict_to_string(checklist)
-
             ex_block = (
-                f"{ex_label}\n"
+                f"Example #{ex_num}{example_type}\n"
                 "Claim:\n"
                 f"{ex['claim']}\n"
                 "Explanations:\n"
@@ -448,13 +487,13 @@ class AVeriTeCIntervention:
 
             if not self.tool_mode:
                 # Non-tool: append "Final Verdict: X"
-                ex_block += f"Final Verdict: {verdict}\n\n"
+                ex_block += f"Final Verdict: {result}\n\n"
             else:
                 # Tool mode: append tool call block
                 ex_block += self._get_tool_call_string(checklist)
 
             if self.prompting_regime in ["detailed", "max_detailed"]:
-                ex_block += "Explanation:\n" + explanation + "\n\n"
+                ex_block += "Intervention explanation:\n" + ex["explanation_with_intervention"] + "\n\n"
 
             few_shot_text += ex_block
 

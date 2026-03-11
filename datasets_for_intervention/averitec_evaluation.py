@@ -1,175 +1,290 @@
 from statistics import mean, pstdev
-from math import isclose
+
 
 class AVeriTeCEvaluation:
+    """
+    Evaluator for AVeriTeC.
 
-    def __init__(self, dataset, intervention_logic):
+    Metrics mirror RiceChem (performance / faithfulness / mediator_tool_match),
+    but use:
+      - gold_target    instead of gold_score (string, not float)
+      - compare_targets instead of compare_scores (string equality)
+      - target_before_intervention / target_after_intervention
+      - expected_target_after_intervention (instead of expected_score_after_intervention)
+
+    Local Edits filter (defined in the architecture spec):
+      If gold_target == "Supported":       flipping any answer deterministically -> Refuted.
+      If gold_target == "Refuted" (len==1): flipping the single answer -> Supported.
+      Multi-question Refuted behavior is non-deterministic -> exclude from faithfulness.
+
+      Filter applied when computing faithfulness.Local Edits:
+        include sample only if:
+          target_before_intervention == "Supported"
+          OR len(sample["mediator_rubric"]) == 1
+    """
+
+    def __init__(self, dataset, processor, tool_mode: str = "none"):
+        """
+        Args:
+            dataset:    AVeriTeCDataset
+            processor:  AVeriTeCStructureProcessor
+            tool_mode:  "none" | "simple" | "structured"
+        """
         self.dataset = dataset
-        self.intervention_logic = intervention_logic
+        self.processor = processor
+        self.tool_mode = tool_mode if tool_mode != "none" else None
 
-        self.idx2gold_structure = {sample['idx']: sample['supporting_questions'] for sample in dataset}
-        self.idx2gold_verdict = {sample['idx']: sample['label'] for sample in dataset}
+        # Lookup indices for fast gold data access by idx
+        self.idx2gold_rubric = {s["idx"]: s["gold_rubric"] for s in dataset}
+        self.idx2gold_target = {s["idx"]: s["gold_target"] for s in dataset}
 
-
-    def compare_checklists(self, gold_supporting_questions, predicted_supporting_questions):
-        if gold_supporting_questions is None or predicted_supporting_questions is None:
+    def compare_targets(self, gold: str, pred: str) -> int:
+        """
+        Return 1 if verdicts match, 0 otherwise.
+        None arguments return 0 -- missing data is treated as mismatch.
+        """
+        if gold is None or pred is None:
             return 0
-        for item, answer in gold_supporting_questions.items():
-            if item not in predicted_supporting_questions or predicted_supporting_questions[item] != answer:
-                return 0
-        return 1
+        return 1 if gold == pred else 0
 
-    def compare_verdicts(self, gold_verdict, predicted_verdict):
-        if gold_verdict is None or predicted_verdict is None:
-            return 0
-        return 1 if gold_verdict == predicted_verdict else 0
+    def summarize(self, lst: list) -> dict:
+        """
+        Aggregate a list of {0, 1} and None values.
+        None entries are counted in n_none and excluded from mean/std.
+        """
+        n_total = len(lst)
+        n_none  = sum(1 for x in lst if x is None)
+        clean   = [x for x in lst if x is not None]
+        n_valid = len(clean)
 
-
-    def summarize_nested_lists(self, tree):
-        if isinstance(tree, dict):
-            return {k: self.summarize_nested_lists(v) for k, v in tree.items()}
-        elif isinstance(tree, list):
-            if not all(isinstance(x, (int, float)) for x in tree):
-                raise TypeError("All list elements must be int or float.")
-            if len(tree) == 0:
-                return {"mean": None, "std": None}
-            return {"mean": round(mean(tree), 3), "std": round(pstdev(tree), 3)}
-        else:
-            raise TypeError("Leaf values must be lists; found non-list leaf instead.")
-
-    def evaluate(self, processed_samples_list):
-        evaluation_metrics = {
-            "performance": {
-                "with_gold_structure": {
-                    "verdict_match": []
-                },
-                "with_predicted_structure": {
-                    "structure_match": [],
-                    "verdict_match": []
-                }
-            },
-            "faithfulness": {
-                "with_gold_structure": {
-                    "HSVT": [],
-                    "Local Edits": [],
-                    "Global": []
-                },
-                "with_predicted_structure": {
-                    "HSVT": [],
-                    "Local Edits": [],
-                    "Global": []
-                }
-            },
-            "local_edit_influence": {
-                "with_gold_structure": {},
-                "with_predicted_structure": {}
+        if n_valid == 0:
+            return {
+                "mean": None, "std": None,
+                "n_total": n_total, "n_valid": 0, "n_none": n_none,
             }
+        return {
+            "mean":    round(mean(clean), 3),
+            "std":     round(pstdev(clean), 3),
+            "n_total": n_total,
+            "n_valid": n_valid,
+            "n_none":  n_none,
         }
 
+    def evaluate(self, processed_samples_list: list) -> dict:
+        """
+        Accept a unified list of samples (correct + incorrect + error).
+        Filtering by generation_status is done internally.
+
+        Metrics structure:
+          performance:
+            counts           -- n_total, n_correct, n_incorrect, n_error + rates
+            checklist_match  -- M' == M_gold    (correct + incorrect)
+            verdict_match    -- target_before_intervention == gold_target  (correct + incorrect)
+
+          faithfulness:
+            Local Edits      -- expected_target == target_after  (correct, filtered)
+            Correction       -- gold_target == target_after      (incorrect)
+
+          mediator_tool_match (tool_mode only):
+            predicted        -- mediator_rubric vs tool_rubric
+            Local Edits      -- mediator_rubric vs tool_rubric_after_intervention  (correct)
+            Correction       -- mediator_rubric vs tool_rubric_after_intervention  (incorrect)
+        """
+        metrics = {
+            "performance": {
+                "checklist_match": [],
+                "verdict_match":   [],
+            },
+            "faithfulness": {
+                "Local Edits": [],
+                "Correction":  [],
+            },
+            "mediator_tool_match": {
+                "predicted":   [],
+                "Local Edits": [],
+                "Correction":  [],
+            },
+        }
+
+        n_correct   = 0
+        n_incorrect = 0
+        n_error     = 0
+
         for sample in processed_samples_list:
-            sample_idx = sample['idx']
-            completion_type = sample['completion_type']
-            
-            # original structure and corresponding verdict
-            gold_structure, gold_verdict = self.idx2gold_structure[sample_idx], self.idx2gold_verdict[sample_idx]
-            # predicted structure and corresponding verdict
-            predicted_structure, predicted_verdict = sample['supporting_questions'], sample['label']
+            generation_status = sample.get("generation_status")
 
-            structure_match = self.compare_checklists(gold_structure, predicted_structure)
-            verdict_match = self.compare_verdicts(gold_verdict, predicted_verdict)
+            if generation_status == "error":
+                n_error += 1
+                continue
 
-            if completion_type == "gold_structure":
-                evaluation_metrics["performance"]["with_gold_structure"]["verdict_match"].append(verdict_match)
-            elif completion_type == "structure_prediction":
-                evaluation_metrics["performance"]["with_predicted_structure"]["structure_match"].append(structure_match)
-                evaluation_metrics["performance"]["with_predicted_structure"]["verdict_match"].append(verdict_match)
+            if generation_status not in ("correct", "incorrect"):
+                continue
 
-            # faithfulness metrics
-            structure_intervention = sample['structure_intervention']
+            idx         = sample["idx"]
+            gold_rubric = self.idx2gold_rubric.get(idx)
+            gold_target = self.idx2gold_target.get(idx)
 
-            hsvt_intervention = structure_intervention['HSVT'][0]
-            expected_hsvt_verdict = hsvt_intervention['label']
-            hsvt_result_after_intervention = hsvt_intervention['label_after_intervention']
-            hsvt_intervention_match = self.compare_verdicts(expected_hsvt_verdict, hsvt_result_after_intervention)
+            interv      = sample.get("structure_intervention") or {}
+            local_edits = interv.get("Local Edits") or []
+            correction  = interv.get("Correction")  or []
 
-            if completion_type == "gold_structure":
-                evaluation_metrics["faithfulness"]["with_gold_structure"]["HSVT"].append(hsvt_intervention_match)
-            elif completion_type == "structure_prediction":
-                evaluation_metrics["faithfulness"]["with_predicted_structure"]["HSVT"].append(hsvt_intervention_match)
+            if generation_status == "correct":
+                n_correct += 1
+            else:
+                n_incorrect += 1
 
-            # Local edits intervention
-            if predicted_verdict == "Supported" or len(predicted_structure) == 1:
-                local_edits_intervention = structure_intervention['Local Edits']
-                for intervention_idx, local_edit_intervention in enumerate(local_edits_intervention):
-                    expected_local_edit_verdict = local_edit_intervention['label']
-                    local_edit_result_after_intervention = local_edit_intervention['label_after_intervention']
-                    # if predicted_structure == 'Supported' or len(gold_structure) == 1:
-                    local_edit_intervention_match = self.compare_verdicts(expected_local_edit_verdict,
-                                                                        local_edit_result_after_intervention)
+            # --- PERFORMANCE ---
+            # checklist_match: M' == M_gold
+            metrics["performance"]["checklist_match"].append(
+                self.processor.compare_structures(gold_rubric, sample.get("mediator_rubric"))
+            )
+            # verdict_match: predicted verdict vs gold
+            metrics["performance"]["verdict_match"].append(
+                self.compare_targets(gold_target, sample.get("target_before_intervention"))
+            )
 
-                    if completion_type == "gold_structure":
-                        evaluation_metrics["faithfulness"]["with_gold_structure"]["Local Edits"].append(
-                            local_edit_intervention_match)
-                        if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_gold_structure"]:
-                            evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx] = []
-                        evaluation_metrics["local_edit_influence"]["with_gold_structure"][intervention_idx].append(local_edit_intervention_match)
+            # --- FAITHFULNESS ---
 
-                    elif completion_type == "structure_prediction":
-                        evaluation_metrics["faithfulness"]["with_predicted_structure"]["Local Edits"].append(
-                            local_edit_intervention_match)
-                        if intervention_idx not in evaluation_metrics["local_edit_influence"]["with_predicted_structure"]:
-                            evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx] = []
-                        evaluation_metrics["local_edit_influence"]["with_predicted_structure"][intervention_idx].append(local_edit_intervention_match)
+            # Local Edits (correct only)
+            # Filter: include only if:
+            #   target_before_intervention == "Supported"  (all answers correct -> flip -> Refuted)
+            #   OR len(mediator_rubric) == 1               (single question -> flip is deterministic)
+            predicted_verdict = sample.get("target_before_intervention")
+            predicted_rubric  = sample.get("mediator_rubric") or {}
 
-                # Global intervention (we do it only if more then one local edit and we look only at Supported class) 
-                if len(local_edits_intervention) > 1:
-                    global_intervention = structure_intervention['Global'][0]
-                    expected_global_verdict = global_intervention['label']
-                    global_result_after_intervention = global_intervention['label_after_intervention']
-                    global_intervention_match = self.compare_verdicts(expected_global_verdict, global_result_after_intervention)
+            local_edits_eligible = (
+                predicted_verdict == "Supported"
+                or len(predicted_rubric) == 1
+            )
 
-                    if completion_type == "gold_structure":
-                        evaluation_metrics["faithfulness"]["with_gold_structure"]["Global"].append(
-                            global_intervention_match)
-                    elif completion_type == "structure_prediction":
-                        evaluation_metrics["faithfulness"]["with_predicted_structure"]["Global"].append(
-                            global_intervention_match)
+            if local_edits_eligible:
+                for item in local_edits:
+                    metrics["faithfulness"]["Local Edits"].append(
+                        self.compare_targets(
+                            item.get("expected_target_after_intervention"),
+                            item.get("target_after_intervention"),
+                        )
+                    )
 
-        aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
-        self.print_evaluation_metrics(aggregated_evaluation_metrics)
+            # Correction (incorrect only)
+            for corr in correction:
+                metrics["faithfulness"]["Correction"].append(
+                    self.compare_targets(gold_target, corr.get("target_after_intervention"))
+                )
 
-        return aggregated_evaluation_metrics
+            # --- MEDIATOR-TOOL MATCH ---
+            if self.tool_mode:
+                # predicted: mediator_rubric (from text) vs tool_rubric (from ARGS)
+                metrics["mediator_tool_match"]["predicted"].append(
+                    self.processor.compare_structures(
+                        sample.get("mediator_rubric"), sample.get("tool_rubric")
+                    )
+                )
+                # Local Edits after intervention (eligible samples only)
+                if local_edits_eligible:
+                    for item in local_edits:
+                        metrics["mediator_tool_match"]["Local Edits"].append(
+                            self.processor.compare_structures(
+                                item.get("mediator_rubric"),
+                                item.get("tool_rubric_after_intervention"),
+                            )
+                        )
+                # Correction after intervention
+                for corr in correction:
+                    metrics["mediator_tool_match"]["Correction"].append(
+                        self.processor.compare_structures(
+                            corr.get("mediator_rubric"),
+                            corr.get("tool_rubric_after_intervention"),
+                        )
+                    )
 
-    def print_evaluation_metrics(self, evaluation_metrics):
-        print("\nEvaluation Results:")
-        print("===================")
+        # Counts
+        n_total     = n_correct + n_incorrect + n_error
+        n_non_error = n_correct + n_incorrect
+
+        result = {
+            "performance": {
+                "counts": {
+                    "n_total":        n_total,
+                    "n_correct":      n_correct,
+                    "n_incorrect":    n_incorrect,
+                    "n_error":        n_error,
+                    "correct_rate":   round(n_correct   / max(1, n_non_error), 3),
+                    "incorrect_rate": round(n_incorrect / max(1, n_non_error), 3),
+                    "error_rate":     round(n_error     / max(1, n_total),     3),
+                },
+                "checklist_match": self.summarize(metrics["performance"]["checklist_match"]),
+                "verdict_match":   self.summarize(metrics["performance"]["verdict_match"]),
+            },
+            "faithfulness": {
+                "Local Edits": self.summarize(metrics["faithfulness"]["Local Edits"]),
+                "Correction":  self.summarize(metrics["faithfulness"]["Correction"]),
+            },
+            "mediator_tool_match": {
+                "predicted":   self.summarize(metrics["mediator_tool_match"]["predicted"]),
+                "Local Edits": self.summarize(metrics["mediator_tool_match"]["Local Edits"]),
+                "Correction":  self.summarize(metrics["mediator_tool_match"]["Correction"]),
+            } if self.tool_mode else {},
+        }
+
+        self.print_evaluation_metrics(result)
+        return result
+
+    def print_evaluation_metrics(self, evaluation_metrics: dict):
+        print("\nAVeriTeC Evaluation Results:")
+        print("=============================")
+
+        counts = evaluation_metrics["performance"]["counts"]
+        print("\nGeneration Quality:")
+        print(
+            f"  n_total={counts['n_total']}  |  "
+            f"correct={counts['n_correct']} ({counts['correct_rate']:.1%})  |  "
+            f"incorrect={counts['n_incorrect']} ({counts['incorrect_rate']:.1%})  |  "
+            f"error={counts['n_error']} ({counts['error_rate']:.1%})"
+        )
 
         print("\nPerformance Metrics:")
         print("-------------------")
-        for structure_type, metrics in evaluation_metrics["performance"].items():
-            print(f"\n{structure_type}:")
-            for metric_name, value in metrics.items():
-                if None not in value.values():
-                    print(f"  {metric_name}: mean = {value['mean']}, std = {value['std']}")
-                else:
-                    print(f"  {metric_name}: mean = No, std = No")
-        
+        for metric_name in ("checklist_match", "verdict_match"):
+            v = evaluation_metrics["performance"][metric_name]
+            if v["mean"] is None:
+                print(
+                    f"  {metric_name}: mean=N/A  "
+                    f"(n_total={v['n_total']}, n_valid={v['n_valid']}, n_none={v['n_none']})"
+                )
+            else:
+                print(
+                    f"  {metric_name}: mean={v['mean']}, std={v['std']}  "
+                    f"(n_total={v['n_total']}, n_valid={v['n_valid']}, n_none={v['n_none']})"
+                )
+
         print("\nFaithfulness Metrics:")
         print("--------------------")
-        for structure_type, metrics in evaluation_metrics["faithfulness"].items():
-            print(f"\n{structure_type}:")
-            for intervention_type, value in metrics.items():
-                if None not in value.values():
-                    print(f"  {intervention_type}: mean = {value['mean']}, std = {value['std']}")
+        print("  (Local Edits filtered: target_before=='Supported' OR len(mediator)==1)")
+        for metric_name in ("Local Edits", "Correction"):
+            v = evaluation_metrics["faithfulness"][metric_name]
+            if v["mean"] is None:
+                print(
+                    f"  {metric_name}: mean=N/A  "
+                    f"(n_total={v['n_total']}, n_valid={v['n_valid']}, n_none={v['n_none']})"
+                )
+            else:
+                print(
+                    f"  {metric_name}: mean={v['mean']}, std={v['std']}  "
+                    f"(n_total={v['n_total']}, n_valid={v['n_valid']}, n_none={v['n_none']})"
+                )
+
+        if self.tool_mode and evaluation_metrics.get("mediator_tool_match"):
+            print("\nMediator-Tool Match:")
+            print("--------------------")
+            for metric_name, v in evaluation_metrics["mediator_tool_match"].items():
+                if v["mean"] is None:
+                    print(
+                        f"  {metric_name}: mean=N/A  "
+                        f"(n_total={v['n_total']}, n_valid={v['n_valid']}, n_none={v['n_none']})"
+                    )
                 else:
-                    print(f"  {intervention_type}: mean = No , std = No ")
-                
-        print("\nLocal Edit Influence:")
-        print("--------------------") 
-        for structure_type, edit_metrics in evaluation_metrics["local_edit_influence"].items():
-            print(f"\n{structure_type}:")
-            for edit_id, value in edit_metrics.items():
-                if None not in value.values():
-                    print(f"  Edit {edit_id}: mean = {value['mean']}, std = {value['std']}")
-                else:
-                    print(f"  Edit {edit_id}: mean = No, std = No")
+                    print(
+                        f"  {metric_name}: mean={v['mean']}, std={v['std']}  "
+                        f"(n_total={v['n_total']}, n_valid={v['n_valid']}, n_none={v['n_none']})"
+                    )

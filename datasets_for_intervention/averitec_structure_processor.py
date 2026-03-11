@@ -2,10 +2,6 @@ import re
 import json
 
 
-# ---------------------------------------------------------------------------
-# AVeriTeCTool
-# ---------------------------------------------------------------------------
-
 class AVeriTeCTool:
     """
     Deterministic function: predicts the verdict ("Supported" / "Refuted")
@@ -28,10 +24,6 @@ class AVeriTeCTool:
         self.dataset = dataset
         self.tool_mode = tool_mode if tool_mode != "none" else None
         self.name = "predict_verdict"
-
-    # ------------------------------------------------------------------
-    # Spec (argument description for prompt injection)
-    # ------------------------------------------------------------------
 
     @property
     def spec(self) -> dict:
@@ -86,10 +78,6 @@ class AVeriTeCTool:
     def spec_json(self) -> str:
         return json.dumps(self.spec, ensure_ascii=False)
 
-    # ------------------------------------------------------------------
-    # Argument validation -- type-based, not mode-based
-    # ------------------------------------------------------------------
-
     def validate_args(self, args: dict) -> bool:
         """
         Accepts both dict and list rubric -- type is determined via isinstance.
@@ -122,10 +110,6 @@ class AVeriTeCTool:
             return True
 
         return False
-
-    # ------------------------------------------------------------------
-    # Core function
-    # ------------------------------------------------------------------
 
     def calculate_score(self, args: dict, sample_meta: dict):
         """
@@ -171,11 +155,6 @@ class AVeriTeCTool:
                 return False
         return True
 
-
-# ---------------------------------------------------------------------------
-# AVeriTeCStructureProcessor
-# ---------------------------------------------------------------------------
-
 class AVeriTeCStructureProcessor:
     """
     Parsing and canonicalization of completions for AVeriTeC.
@@ -197,10 +176,6 @@ class AVeriTeCStructureProcessor:
 
     Canonical mediator form: dict {question_str: bool}
     """
-
-    # ------------------------------------------------------------------
-    # Regular expressions
-    # ------------------------------------------------------------------
 
     # Checklist line pattern:
     #   - Q: <question> (True/False): True
@@ -256,10 +231,6 @@ class AVeriTeCStructureProcessor:
         self.dataset = dataset
         self.tool_mode = tool_mode if tool_mode != "none" else None
 
-    # ------------------------------------------------------------------
-    # extract_mediator
-    # ------------------------------------------------------------------
-
     def extract_mediator(self, completion_text: str) -> dict | None:
         """
         Extract the "Checklist:" block and parse it into a canonical dict {question: bool}.
@@ -289,15 +260,12 @@ class AVeriTeCStructureProcessor:
                 continue
             question = m.group("question").strip()
             # Remove stray quotes left by escaping
-            question = re.sub(r"[\'\"]{1,3}", "", question).strip()
+            question = re.sub(r'^[\'\"]{1,3}|[\'\"]{1,3}$', "", question).strip()
             answer_raw = m.group("answer").strip().lower()
             answer_bool = answer_raw in ("true", "yes")
             checklist[question] = answer_bool
         return checklist if checklist else None
 
-    # ------------------------------------------------------------------
-    # extract_final_answer
-    # ------------------------------------------------------------------
 
     def extract_final_answer(self, text: str, short_completion: bool = False) -> str | None:
         """
@@ -322,10 +290,6 @@ class AVeriTeCStructureProcessor:
                 return m2.group("verdict").title()
 
         return None
-
-    # ------------------------------------------------------------------
-    # extract_tool_args
-    # ------------------------------------------------------------------
 
     def _clean_tool_text(self, s: str) -> str:
         """Strip Markdown wrappers and unescape escape sequences from an ARGS block."""
@@ -398,10 +362,6 @@ class AVeriTeCStructureProcessor:
 
         return None
 
-    # ------------------------------------------------------------------
-    # boollist_to_checklist (structured only)
-    # ------------------------------------------------------------------
-
     def boollist_to_checklist(self, sample: dict, payload) -> dict | None:
         """
         Convert list[bool] to dict {question: bool} using gold_rubric key order.
@@ -427,10 +387,6 @@ class AVeriTeCStructureProcessor:
 
         return {keys[i]: payload[i] for i in range(len(keys))}
 
-    # ------------------------------------------------------------------
-    # compare_structures
-    # ------------------------------------------------------------------
-
     def compare_structures(self, a, b) -> int | None:
         """
         Strict comparison of two canonical {question: bool} dicts.
@@ -447,10 +403,6 @@ class AVeriTeCStructureProcessor:
             if k not in b or b[k] != v:
                 return 0
         return 1
-
-    # ------------------------------------------------------------------
-    # check_generation_format_mistakes
-    # ------------------------------------------------------------------
 
     def check_generation_format_mistakes(self, completion: str) -> bool:
         """
