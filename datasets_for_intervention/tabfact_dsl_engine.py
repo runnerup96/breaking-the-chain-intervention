@@ -70,11 +70,11 @@ class ScalarList:
 @dataclass(frozen=True)
 class ExecResult:
     """
-    - final: результат всей программы (учитывая суффикс "=True/False"), или None если не исполнилось
-    - expr_value: булево значение выражения (до сравнения с суффиксом), или None
-    - expected: суффикс, или None
-    - error: строка с причиной, если не исполнилось
-    - executable: флаг (final != None)
+    - final: the result of the whole program (taking the "=True/False" suffix into account), or None if execution failed
+    - expr_value: the boolean value of the expression (before comparison with the suffix), or None
+    - expected: the suffix, or None
+    - error: a string with the reason if execution failed
+    - executable: flag (final != None)
     """
     final: Optional[bool]
     expr_value: Optional[bool]
@@ -94,9 +94,9 @@ class FunctionSpec:
 
 class FunctionRegistry:
     """
-    Реестр языка:
-    - приводит алиасы к каноническим именам
-    - знает ожидаемую арность (min/max) для arity-repair и проверок
+    Language registry:
+    - maps aliases to canonical names
+    - knows the expected arity (min/max) for arity repair and validation
     """
 
     def __init__(self) -> None:
@@ -105,7 +105,7 @@ class FunctionRegistry:
         self._init_specs()
 
     def _init_specs(self) -> None:
-        # Канонические имена и арности взяты из того, что реально встречается в bootstrap_full.json.
+        # Canonical names and arities are taken from what actually appears in bootstrap_full.json.
         specs = [
             # comparisons
             FunctionSpec("eq", ("eq", "equal"), 2, 2),
@@ -128,12 +128,12 @@ class FunctionRegistry:
 
             # row navigation / selection
             FunctionSpec("hop", ("hop",), 2, 2),
-            FunctionSpec("argmax", ("argmax",), 1, 2),  # редкая 1-арг форма встречается
+            FunctionSpec("argmax", ("argmax",), 1, 2),  # a rare 1-arg form appears
             FunctionSpec("argmin", ("argmin",), 1, 2),
             FunctionSpec("top", ("top",), 1, 1),
             FunctionSpec("bottom", ("bottom",), 1, 1),
 
-            # aggregates (обычно 2-арг: RowSet; Field)
+            # aggregates (usually 2-arg: RowSet; Field)
             FunctionSpec("count", ("count",), 1, 1),
             FunctionSpec("sum", ("sum",), 1, 2),
             FunctionSpec("avg", ("avg",), 1, 2),
@@ -152,7 +152,7 @@ class FunctionRegistry:
             FunctionSpec("only", ("only",), 1, 1),
             FunctionSpec("zero", ("zero",), 1, 1),
 
-            # all_* (обычно 3-арг: RowSet; Field; Value, но редкие 2-арг тоже есть)
+            # all_* (usually 3-arg: RowSet; Field; Value, but rare 2-arg forms also exist)
             FunctionSpec("all_eq", ("all_eq",), 2, 3),
             FunctionSpec("all_not_eq", ("all_not_eq",), 3, 3),
             FunctionSpec("all_greater", ("all_greater",), 2, 3),
@@ -187,7 +187,7 @@ class FunctionRegistry:
         n = name.strip()
         if n in self._alias_to_canon:
             return self._alias_to_canon[n]
-        # если внезапно встретится новая функция — пусть падает как unknown
+        # if a new function suddenly appears, let it fail as unknown
         return n
 
     def get_spec(self, canonical: str) -> Optional[FunctionSpec]:
@@ -202,12 +202,12 @@ class FunctionRegistry:
 
 class NumberParser:
     """
-    Делает из строки число, если это разумно.
-    Поддерживает:
-    - M:SS(.xx) -> секунды
+    Converts a string to a number when it is reasonable to do so.
+    Supports:
+    - M:SS(.xx) -> seconds
     - mixed fraction: a - b / c
     - fraction: b / c
-    - fallback: первое число в строке ("89.7 fm" -> 89.7)
+    - fallback: the first number in the string ("89.7 fm" -> 89.7)
     """
 
     _re_time = re.compile(r"^\s*(\d+)\s*:\s*(\d+(?:\.\d+)?)\s*$")
@@ -266,10 +266,10 @@ class NumberParser:
 
 class TableContext:
     """
-    Обёртка над DataFrame:
-    - гарантирует индекс 0..n-1
-    - резолвит колонки case-insensitive
-    - нормализует текст и извлекает числа
+    Wrapper around DataFrame:
+    - guarantees index 0..n-1
+    - resolves columns case-insensitively
+    - normalizes text and extracts numbers
     """
 
     def __init__(self, df: pd.DataFrame, num_parser: NumberParser) -> None:
@@ -308,10 +308,10 @@ class TableContext:
         t = "" if s is None else str(s)
         t = t.strip()
 
-        # Преобразуем HTML-кавычки в обычные кавычки
+        # Convert HTML quotes to regular quotes
         t = t.replace("&#34;", '"').replace("&quot;", '"')
 
-        # Уберём внешние кавычки, если они реально обрамляют строку
+        # Remove outer quotes if they actually wrap the string
         if len(t) >= 2 and t[0] == '"' and t[-1] == '"':
             t = t[1:-1].strip()
 
@@ -346,7 +346,7 @@ class TableContext:
         nb = self.to_number(b)
         if na is not None and nb is not None:
             return na > nb
-        # если чисел нет — лучше не делать лексикографию, а считать невалидным
+        # if there are no numbers, it is better not to do lexicographic comparison and to treat it as invalid
         raise EvalError("greater requires numeric operands")
 
     def cmp_less(self, a: Any, b: Any) -> bool:
@@ -373,10 +373,10 @@ class TableContext:
 
 class ProgramParser:
     """
-    Парсер DSL:
+    DSL parser:
     - quote-aware + brace-depth-aware
-    - поддерживает разделители ';' и ','
-    - делает arity-repair под реальные шумы из bootstrap_full.json
+    - supports delimiters ';' and ','
+    - performs arity repair for real noise from bootstrap_full.json
     """
 
     _re_ident = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\{")
@@ -413,14 +413,14 @@ class ProgramParser:
         name = m.group(1)
         name_c = self.registry.canonicalize(name)
 
-        # позиция открывающей '{' сразу после имени
+        # position of the opening '{' immediately after the name
         open_pos = len(name)
         if open_pos >= len(t) or t[open_pos] != "{":
             return Literal(t)
 
         close_pos = self._find_matching_brace(t, open_pos)
         if close_pos is None or close_pos != len(t) - 1:
-            # либо не закрылась, либо есть хвост -> считаем литералом (консервативно)
+            # either it was not closed, or there is trailing content -> treat it as a literal (conservatively)
             return Literal(t)
 
         inside = t[open_pos + 1: close_pos]
@@ -431,7 +431,7 @@ class ProgramParser:
         return Call(name=name_c, args=args_ast)
 
     def _preprocess(self, s: str) -> str:
-        # Важно: превращаем HTML-кавычки в обычные, чтобы splitter мог игнорировать delimiters внутри quotes
+        # Important: convert HTML quotes to regular quotes so the splitter can ignore delimiters inside quotes
         return s.replace("&#34;", '"').replace("&quot;", '"')
 
     def _find_last_top_level_equals(self, s: str) -> Optional[int]:
@@ -489,11 +489,11 @@ class ProgramParser:
 
     def _split_args(self, inside: str) -> List[str]:
         """
-        Делит аргументы внутри {...} по верхнеуровневому разделителю:
-        - если есть ';' на depth=0 => делим по ';'
-        - иначе делим по ','
-        quote-aware и brace-aware.
-        Важно: НЕ выкидываем пустые аргументы.
+        Splits arguments inside {...} by the top-level delimiter:
+        - if there is ';' at depth=0 => split by ';'
+        - otherwise split by ','
+        quote-aware and brace-aware.
+        Important: DO NOT discard empty arguments.
         """
         delim = ";" if self._has_top_level_semicolon(inside) else ","
 
@@ -526,10 +526,10 @@ class ProgramParser:
 
     def _repair_args(self, canonical_name: str, raw_args: List[str]) -> List[str]:
         """
-        Чинит реальные шумы:
-        - filter_* ожидает 3 args, но приходит 2: "field, value" в одном аргументе -> делим
-        - если аргументов слишком много (обычно из-за запятых) -> склеиваем хвост в последний
-        - unary ops с лишними аргументами -> отбрасываем лишние (count/only/etc)
+        Fixes real noise patterns:
+        - filter_* expects 3 args, but 2 arrive: "field, value" in one argument -> split them
+        - if there are too many arguments (usually because of commas) -> join the tail into the last one
+        - unary ops with extra arguments -> drop the extras (count/only/etc)
         """
         spec = self.registry.get_spec(canonical_name)
         if spec is None:
@@ -537,7 +537,7 @@ class ProgramParser:
 
         args = list(raw_args)
 
-        # 1) специальные кейсы: filter_* с 2 args вместо 3 (частный шум)
+        # 1) special cases: filter_* with 2 args instead of 3 (a specific noise pattern)
         if canonical_name in ("filter_less", "filter_eq", "filter_not_eq",
                               "filter_greater", "filter_greater_eq", "filter_less_eq") and len(args) == 2:
             # pattern: filter_less{C; field, value}
@@ -545,35 +545,35 @@ class ProgramParser:
             if split is not None:
                 args = [args[0], split[0], split[1]]
 
-        # 2) редкий шум: filter_eq может прийти с 4 аргументами из-за запятых в value
-        #    приводим к 3, склеивая tail
+        # 2) rare noise: filter_eq may arrive with 4 arguments because of commas in value
+        #    reduce to 3 by joining the tail
         if canonical_name.startswith("filter_") and spec.max_args == 3 and len(args) > 3:
             args = [args[0], args[1], self._join_tail(args[2:])]
 
-        # 3) сравнения бывают "not_eq" с 3 аргументами из-за запятых -> склеить в 2
+        # 3) comparisons like "not_eq" can have 3 arguments because of commas -> join into 2
         if canonical_name in ("eq", "not_eq", "greater", "less") and len(args) > 2:
             args = [args[0], self._join_tail(args[1:])]
 
-        # 4) unary ops с лишними аргументами (в local edits встречается)
+        # 4) unary ops with extra arguments (this appears in local edits)
         if canonical_name in ("count", "only", "top", "bottom", "half", "any", "none", "zero", "not") and len(args) > 1:
             args = [args[0]]
 
-        # 5) add/diff строго бинарные: если вдруг 3 -> склеим в 2
+        # 5) add/diff are strictly binary: if there are suddenly 3 -> join into 2
         if canonical_name in ("add", "diff") and len(args) > 2:
             args = [args[0], self._join_tail(args[1:])]
 
-        # 6) all_eq / all_greater допускают 2-арг вариант (редко) и 3-арг (обычно).
-        #    если >3 -> склеить хвост в последний
+        # 6) all_eq / all_greater allow a 2-arg variant (rare) and a 3-arg variant (usual).
+        #    if >3 -> join the tail into the last one
         if canonical_name in ("all_eq", "all_greater") and len(args) > 3:
             args = [args[0], args[1], self._join_tail(args[2:])]
 
-        # 7) and/or — variadic: просто обрежем пустые хвосты, но не ниже min_args
-        #    (пустые аргументы иногда получаются из ";;")
+        # 7) and/or — variadic: just trim empty tails, but not below min_args
+        #    (empty arguments are sometimes produced by ";;")
         if canonical_name in ("and", "or"):
             args = [a for a in args if a != ""]
-            # если после чистки стало слишком мало — оставим как есть (упадёт на Eval)
+            # if after cleanup there are too few arguments, leave it as is (it will fail in Eval)
 
-        # финально: если max_args задан и всё ещё больше — склеить tail
+        # finally: if max_args is set and there are still too many arguments — join the tail
         if spec.max_args is not None and len(args) > spec.max_args:
             head = args[:spec.max_args - 1]
             tail = args[spec.max_args - 1:]
@@ -583,8 +583,8 @@ class ProgramParser:
 
     def _split_field_value_pair(self, s: str) -> Optional[Tuple[str, str]]:
         """
-        Делит строку "field, value" на (field, value), но только на верхнем уровне и с учётом кавычек.
-        Берём последнее вхождение ',' (обычно value может содержать запятые).
+        Splits the string "field, value" into (field, value), but only at the top level and with quotes taken into account.
+        We take the last occurrence of ',' (usually value may contain commas).
         """
         t = s.strip()
         if not t or "," not in t:
@@ -609,16 +609,16 @@ class ProgramParser:
         return left, right
 
     def _join_tail(self, parts: List[str]) -> str:
-        # Склеиваем через "," — это безопаснее: чаще всего хвост образовался из-за запятых в литералах.
+        # Join with "," — this is safer: most often the tail was created by commas inside literals.
         return ", ".join([p.strip() for p in parts])
 
 
 class TabFactEngine:
     """
-    Исполнитель DSL:
+    DSL executor:
     - parse -> AST -> eval
-    - строгие типы (RowSet/ScalarList)
-    - операции реализованы как методы (без вложенных функций)
+    - strict types (RowSet/ScalarList)
+    - operations are implemented as methods (without nested functions)
     """
 
     def __init__(self) -> None:
@@ -667,7 +667,7 @@ class TabFactEngine:
             # quantifiers
             "within": self.op_within,
             "not_within": self.op_not_within,
-            "any_eq": self.op_within,   # any_eq семантически то же, что within
+            "any_eq": self.op_within,   # any_eq is semantically the same as within
             "any": self.op_any,
             "none": self.op_none,
             "only": self.op_only,
@@ -701,9 +701,9 @@ class TabFactEngine:
 
     def execute(self, program_text: str, df: pd.DataFrame) -> ExecResult:
         """
-        Возвращает ExecResult:
-        - если получилось: final != None
-        - если нет: final == None и есть error
+        Returns ExecResult:
+        - if successful: final != None
+        - otherwise: final == None and error is present
         """
         try:
             prog = self.parser.parse_program(program_text)
@@ -773,7 +773,7 @@ class TabFactEngine:
         raise EvalError(f"Expected ScalarList, got: {type(v)}")
 
     def row_of(self, v: Any) -> int:
-        # Для before/after и positional: RowSet -> top row
+        # For before/after and positional ops: RowSet -> top row
         if isinstance(v, int):
             return v
         if isinstance(v, RowSet):
@@ -850,7 +850,7 @@ class TabFactEngine:
                 if ctx.cmp_greater(cell_v, value):
                     out.append(r)
             except EvalError:
-                # если нечисло — просто не проходит фильтр
+                # if it is not numeric, it simply does not pass the filter
                 continue
         return RowSet(rows=out, hint_field=field)
 
@@ -1093,7 +1093,7 @@ class TabFactEngine:
 
     def op_all_eq(self, args: List[Any], ctx: TableContext) -> bool:
         if len(args) == 2:
-            # редкая форма: all_eq{ScalarList; Value} (в датасете реально есть 3 таких)
+            # rare form: all_eq{ScalarList; Value} (there are actually 3 such cases in the dataset)
             lst = self.as_scalar_list(args[0])
             val = args[1]
             for x in lst.values:
@@ -1122,7 +1122,7 @@ class TabFactEngine:
 
     def op_all_greater(self, args: List[Any], ctx: TableContext) -> bool:
         if len(args) == 2:
-            # редкая форма: all_greater{ScalarList; Value} (в датасете есть 2 таких)
+            # rare form: all_greater{ScalarList; Value} (there are 2 such cases in the dataset)
             lst = self.as_scalar_list(args[0])
             val = args[1]
             for x in lst.values:
@@ -1217,7 +1217,7 @@ class TabFactEngine:
         return self._positional(args, ctx, pos=5)
 
     def op_last(self, args: List[Any], ctx: TableContext) -> bool:
-        # last{C; D}: D находится на последней позиции в C
+        # last{C; D}: D is in the last position in C
         self._require_arity("last", args, 2)
         C = self.as_rowset(args[0])
         drow = self.row_of(args[1])
@@ -1239,14 +1239,14 @@ class TabFactEngine:
     def op_rank(self, args: List[Any], ctx: TableContext) -> Scalar:
         """
         rank{C; Field}:
-        - если есть колонка "rank" в таблице: берём строку с минимальным rank и делаем hop в Field
-        - иначе: fallback hop{top{C}; Field}
+        - if there is a "rank" column in the table: take the row with the minimum rank and hop to Field
+        - otherwise: fallback hop{top{C}; Field}
         """
         self._require_arity("rank", args, 2)
         C = self.as_rowset(args[0])
         out_field = str(args[1])
 
-        # если нет колоноки rank — fallback
+        # if there is no rank column — fallback
         if "rank" not in ctx.col_map:
             r = C.top()
             return ctx.cell(r, out_field)

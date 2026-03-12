@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple, Union
 import os
@@ -57,8 +58,8 @@ class TestParserBasics(unittest.TestCase):
             self.parser.parse_program("eq{1;1}=Maybe")
 
     def test_last_top_level_equals(self):
-        # '=' внутри вложенности не должен считаться суффиксом
-        # Суффикс - только последний '=' на top-level
+        # '=' inside nested expressions must not be treated as the suffix
+        # The suffix is only the last '=' at the top level
         prog = self.parser.parse_program("eq{diff{2;1};1}=True")
         self.assertTrue(prog.expected)
         self.assertCall(prog.expr, name="eq", nargs=2)
@@ -114,14 +115,14 @@ class TestParserBasics(unittest.TestCase):
     # ---------- HTML quotes & quotes handling ----------
 
     def test_html_quotes_preprocess(self):
-        # &#34; -> "  (важно для quote-aware splitting)
+        # &#34; -> "  (important for quote-aware splitting)
         prog = self.parser.parse_program('eq{a; &#34;kuala lumpur;&#34;}=True')
         self.assertCall(prog.expr, name="eq", nargs=2)
-        # второй аргумент должен быть одним литералом, без разбиения на ';'
+        # the second argument must remain a single literal, without splitting on ';'
         self.assertLit(prog.expr.args[1], '"kuala lumpur;"')
 
     def test_semicolon_inside_quotes_not_a_delimiter(self):
-        # top-level delim здесь ';', но внутри второго аргумента есть ';' в кавычках
+        # the top-level delimiter here is ';', but the second argument contains ';' inside quotes
         node = self.parser.parse_expr('eq{a; "kuala lumpur;"}')
         self.assertCall(node, name="eq", nargs=2)
         self.assertLit(node.args[1], '"kuala lumpur;"')
@@ -151,7 +152,7 @@ class TestParserBasics(unittest.TestCase):
     def test_repair_comparisons_too_many_args_join_tail(self):
         node = self.parser.parse_expr("eq{a; b; c}")
         self.assertCall(node, name="eq", nargs=2)
-        # второй аргумент станет "b, c" из join_tail
+        # the second argument becomes "b, c" via join_tail
         self.assertLit(node.args[1], "b, c")
 
     def test_repair_filter_too_many_args_join_tail(self):
@@ -167,7 +168,7 @@ class TestParserBasics(unittest.TestCase):
     def test_repair_and_or_drop_empty_args(self):
         node = self.parser.parse_expr("and{true;;false;}")
         self.assertCall(node, name="and")
-        # после удаления пустых будет 2 аргумента: true, false
+        # after removing empty items, there should be 2 arguments: true, false
         self.assertEqual(len(node.args), 2)
 
     # ---------- malformed syntax behavior ----------
@@ -181,7 +182,7 @@ class TestParserBasics(unittest.TestCase):
         self.assertLit(node)
 
     def test_unmatched_quote_does_not_crash(self):
-        # не гарантируем правильный парсинг, но тестируем устойчивость
+        # we do not guarantee correct parsing here, but we test robustness
         node = self.parser.parse_expr('eq{a; "unterminated}')
         self.assertIsNotNone(node)
 
@@ -201,7 +202,7 @@ class TestEngineExecutionSmoke(unittest.TestCase):
             "rank": ["2", "1", "3"],
             "name": ["B", "A", "C"],
         })
-        # rank{all_rows; name} вернёт name у минимального rank, т.е. "A"
+        # rank{all_rows; name} returns the name at the minimal rank, i.e. "A"
         res = self.engine.execute('eq{rank{all_rows; name}; "A"}=True', df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
@@ -216,11 +217,11 @@ class TestEngineExecutionSmoke(unittest.TestCase):
 
     def test_aliases_work_end_to_end(self):
         df = pd.DataFrame({"x": ["2", "1"]})
-        # gt -> greater (строго числовое сравнение)
+        # gt -> greater (strict numeric comparison)
         res = self.engine.execute("gt{hop{0; x}; hop{1; x}}=True", df)
-        # ВАЖНО: hop{0; x} сейчас не поддерживает row=0 как int (в текущем движке row int не создаётся из Literal)
-        # Поэтому этот тест ожидаемо должен быть НЕ executable.
-        # Оставляем как “охраняющий” тест: если позже добавишь int-literal → станет executable.
+        # IMPORTANT: hop{0; x} currently does not support row=0 as an int (in the current engine, a row int is not created from Literal)
+        # Therefore, this test is expected to be NOT executable.
+        # We keep it as a guard test: if you later add int literals, it will become executable.
         self.assertFalse(res.executable)
 
     def test_greater_non_numeric_is_not_executable(self):
@@ -257,7 +258,7 @@ class TestParserAdvanced(unittest.TestCase):
         if raw is not None:
             self.assertEqual(node.raw, raw)
 
-    # 1) очень глубокая вложенность
+    # 1) very deep nesting
     def test_deep_nesting_15_levels(self):
         s = "not{not{not{not{not{not{not{not{not{not{not{not{not{not{not{true}}}}}}}}}}}}}}}=False"
         prog = self.parser.parse_program(s)
@@ -265,7 +266,7 @@ class TestParserAdvanced(unittest.TestCase):
         # expr = not{...}
         self.assertCall(prog.expr, name="not", nargs=1)
 
-    # 2) длинная строка с кучей пробелов и переносами
+    # 2) long string with lots of spaces and newlines
     def test_whitespace_and_newlines(self):
         s = """
             and{
@@ -278,7 +279,7 @@ class TestParserAdvanced(unittest.TestCase):
         self.assertTrue(prog.expected)
         self.assertCall(prog.expr, name="and")
 
-    # 3) '=' внутри кавычек не должен ломать суффикс
+    # 3) '=' inside quotes must not break suffix parsing
     def test_equals_inside_quotes_ignored_for_suffix(self):
         prog = self.parser.parse_program('eq{"a=b"; "a=b"}=True')
         self.assertTrue(prog.expected)
@@ -286,42 +287,42 @@ class TestParserAdvanced(unittest.TestCase):
         self.assertLit(prog.expr.args[0], '"a=b"')
         self.assertLit(prog.expr.args[1], '"a=b"')
 
-    # 4) значение с ';' внутри кавычек
+    # 4) value with ';' inside quotes
     def test_semicolon_inside_quotes(self):
         node = self.parser.parse_expr('eq{a; "kuala lumpur;"}')
         self.assertCall(node, name="eq", nargs=2)
         self.assertLit(node.args[1], '"kuala lumpur;"')
 
-    # 5) html-кавычки + ';' внутри
+    # 5) HTML quotes + ';' inside
     def test_html_quotes_with_semicolon_inside(self):
         prog = self.parser.parse_program('eq{a; &#34;kuala lumpur;&#34;}=True')
         self.assertCall(prog.expr, name="eq", nargs=2)
         self.assertLit(prog.expr.args[1], '"kuala lumpur;"')
 
-    # 6) если есть ';' на top-level, запятые в value не должны делить аргумент
+    # 6) if ';' exists at the top level, commas inside the value must not split the argument
     def test_semicolon_delim_keeps_commas_in_value(self):
         node = self.parser.parse_expr('filter_eq{all_rows; city; "cape vincent , ny"}')
         self.assertCall(node, name="filter_eq", nargs=3)
         self.assertLit(node.args[2], '"cape vincent , ny"')
 
-    # 7) comma-delim вариант + запятые в value -> repair склеит хвост
+    # 7) comma-delimited variant + commas in the value -> repair should join the tail back
     def test_comma_delim_filter_eq_value_with_commas_repair(self):
-        # нет ';' => delimiter=','
+        # no ';' => delimiter=','
         node = self.parser.parse_expr("filter_eq{all_rows, city, cape vincent , ny}")
         self.assertCall(node, name="filter_eq", nargs=3)
         self.assertLit(node.args[0], "all_rows")
         self.assertLit(node.args[1], "city")
-        # хвост склеен обратно
+        # the tail is joined back
         self.assertLit(node.args[2], "cape vincent, ny")
 
-    # 8) repair: filter_* с 2 args (field, value) в одном аргументе
+    # 8) repair: filter_* with 2 args (field, value) packed into one argument
     def test_repair_filter_two_args_split_field_value(self):
         node = self.parser.parse_expr("filter_less{all_rows; crowd, 15000}")
         self.assertCall(node, name="filter_less", nargs=3)
         self.assertLit(node.args[1], "crowd")
         self.assertLit(node.args[2], "15000")
 
-    # 9) repair: unary с лишними аргументами
+    # 9) repair: unary call with extra arguments
     def test_repair_unary_trim(self):
         node = self.parser.parse_expr("count{all_rows; x; y}")
         self.assertCall(node, name="count", nargs=1)
@@ -329,19 +330,19 @@ class TestParserAdvanced(unittest.TestCase):
         node2 = self.parser.parse_expr("not{true; extra}")
         self.assertCall(node2, name="not", nargs=1)
 
-    # 10) repair: comparison с лишними args склеивается
+    # 10) repair: comparison with extra args gets joined
     def test_repair_eq_too_many_args(self):
         node = self.parser.parse_expr("eq{a; b; c; d}")
         self.assertCall(node, name="eq", nargs=2)
         self.assertLit(node.args[1], "b, c, d")
 
-    # 11) and/or чистит пустые аргументы
+    # 11) and/or removes empty arguments
     def test_repair_and_drops_empty(self):
         node = self.parser.parse_expr("and{true;;false;}")
         self.assertCall(node, name="and")
         self.assertEqual(len(node.args), 2)
 
-    # 12) алиасы канонизируются в AST
+    # 12) aliases are canonicalized in the AST
     def test_aliases_canonicalize_in_ast(self):
         self.assertCall(self.parser.parse_expr("gt{2;1}"), name="greater", nargs=2)
         self.assertCall(self.parser.parse_expr("lt{2;1}"), name="less", nargs=2)
@@ -350,12 +351,12 @@ class TestParserAdvanced(unittest.TestCase):
         self.assertCall(self.parser.parse_expr("filter_ne{all_rows; x; 1}"), name="filter_not_eq", nargs=3)
         self.assertCall(self.parser.parse_expr("filter_equal{all_rows; x; 1}"), name="filter_eq", nargs=3)
 
-    # 13) некорректный синтаксис: trailing garbage -> Literal
+    # 13) malformed syntax: trailing garbage -> Literal
     def test_trailing_garbage_becomes_literal(self):
         prog = self.parser.parse_program("eq{1;2} junk=True")
         self.assertIsInstance(prog.expr, Literal)
 
-    # 14) несбалансированные скобки не должны крашить парсер
+    # 14) unbalanced braces must not crash the parser
     def test_unbalanced_brace_no_crash(self):
         node = self.parser.parse_expr("and{eq{1;1}; not{false}")
         self.assertIsNotNone(node)
@@ -365,21 +366,21 @@ class TestEngineExecutionAdvanced(unittest.TestCase):
     def setUp(self):
         self.engine = TabFactEngine()
 
-    # 1) case-insensitive колонки + пробелы
+    # 1) case-insensitive columns + spaces
     def test_case_insensitive_column_resolution(self):
         df = pd.DataFrame({"Call Sign": ["KDSD"], "Format": ["Public Radio"]})
         res = self.engine.execute('eq{hop{filter_eq{all_rows; call sign; kdsd}; format}; "public radio"}=True', df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 2) filter_eq с пустым value
+    # 2) filter_eq with an empty value
     def test_filter_eq_empty_value(self):
         df = pd.DataFrame({"x": ["", "a", ""]})
         res = self.engine.execute("eq{count{filter_eq{all_rows; x; }}; 2}=True", df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 3) only/any/none на rowset
+    # 3) only/any/none on a rowset
     def test_only_any_none_rowset(self):
         df = pd.DataFrame({"x": ["a", "b", "b"]})
         res1 = self.engine.execute("only{filter_eq{all_rows; x; a}}=True", df)
@@ -417,7 +418,7 @@ class TestEngineExecutionAdvanced(unittest.TestCase):
         self.assertTrue(res3.executable and res3.final)
         self.assertTrue(res4.executable and res4.final)
 
-    # 7) argmax/argmin (2-арг)
+    # 7) argmax/argmin (2-arg)
     def test_argmax_argmin_two_args(self):
         df = pd.DataFrame({"name": ["a", "b", "c"], "score": ["10", "30", "20"]})
         res1 = self.engine.execute('eq{hop{argmax{all_rows; score}; name}; "b"}=True', df)
@@ -425,7 +426,7 @@ class TestEngineExecutionAdvanced(unittest.TestCase):
         self.assertTrue(res1.executable and res1.final)
         self.assertTrue(res2.executable and res2.final)
 
-    # 8) argmax 1-арг через hint_field (получаем RowSet из filter_greater по score)
+    # 8) 1-arg argmax via hint_field (we obtain a RowSet from filter_greater on score)
     def test_argmax_one_arg_via_hint_field(self):
         df = pd.DataFrame({"name": ["a", "b", "c"], "score": ["10", "30", "20"]})
         res = self.engine.execute('eq{hop{argmax{filter_greater{all_rows; score; 0}}; name}; "b"}=True', df)
@@ -443,19 +444,19 @@ class TestEngineExecutionAdvanced(unittest.TestCase):
     # 10) uniq
     def test_uniq(self):
         df = pd.DataFrame({"x": ["A", "a", "b", "b"]})
-        res = self.engine.execute("eq{uniq{all_rows; x}; 2}=True", df)  # A и a считаются одним (normalize)
+        res = self.engine.execute("eq{uniq{all_rows; x}; 2}=True", df)  # A and a are treated as the same value (normalize)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 11) most_freq с tie-break
+    # 11) most_freq with tie-break
     def test_most_freq_tie_break(self):
-        # a и b по 2 раза, tie-break по ключу => "a"
+        # a and b both appear 2 times; tie-break by key => "a"
         df = pd.DataFrame({"x": ["b", "a", "b", "a"]})
         res = self.engine.execute('eq{most_freq{all_rows; x}; "a"}=True', df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 12) sum/avg/max/min с “умными” числами
+    # 12) sum/avg/max/min with “smart” numbers
     def test_smart_numbers_aggregates(self):
         df = pd.DataFrame({"laps": ["40 laps", "10 laps", "2 laps"]})
         res1 = self.engine.execute("eq{sum{all_rows; laps}; 52}=True", df)
@@ -477,7 +478,7 @@ class TestEngineExecutionAdvanced(unittest.TestCase):
         self.assertTrue(res2.executable and res2.final)
         self.assertTrue(res3.executable and res3.final)
 
-    # 14) all_eq (3-арг) и all_not_eq
+    # 14) all_eq (3-arg) and all_not_eq
     def test_all_eq_and_all_not_eq_rowset_field(self):
         df = pd.DataFrame({"x": ["a", "a", "b"]})
         res1 = self.engine.execute("all_eq{filter_eq{all_rows; x; a}; x; a}=True", df)
@@ -485,50 +486,50 @@ class TestEngineExecutionAdvanced(unittest.TestCase):
         self.assertTrue(res1.executable and res1.final)
         self.assertTrue(res2.executable and res2.final)
 
-    # 15) all_eq (2-арг overload на ScalarList)
+    # 15) all_eq (2-arg overload on ScalarList)
     def test_all_eq_scalarlist_overload(self):
         df = pd.DataFrame({"x": ["A", "a", "a"]})
-        # hop вернёт ScalarList (rowset size>1)
+        # hop returns a ScalarList (rowset size > 1)
         res = self.engine.execute("all_eq{hop{filter_eq{all_rows; x; a}; x}; a}=True", df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 16) all_greater (2-арг overload на ScalarList)
+    # 16) all_greater (2-arg overload on ScalarList)
     def test_all_greater_scalarlist_overload(self):
         df = pd.DataFrame({"n": ["11", "12", "13"]})
         res = self.engine.execute("all_greater{hop{all_rows; n}; 10}=True", df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 17) rank с колонкой rank
+    # 17) rank with a rank column
     def test_rank_with_rank_column(self):
         df = pd.DataFrame({"rank": ["2", "1", "3"], "name": ["B", "A", "C"]})
         res = self.engine.execute('eq{rank{all_rows; name}; "A"}=True', df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 18) rank без колонки rank (fallback top)
+    # 18) rank without a rank column (fallback to top)
     def test_rank_without_rank_column(self):
         df = pd.DataFrame({"name": ["TopName", "Other"]})
         res = self.engine.execute('eq{rank{all_rows; name}; "TopName"}=True', df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 19) rank с пустыми/нечисловыми значениями rank
+    # 19) rank with empty/non-numeric rank values
     def test_rank_with_missing_rank_values(self):
         df = pd.DataFrame({"rank": ["", "x", "5", "2"], "name": ["A", "B", "C", "D"]})
-        # минимальный числовой rank = 2 -> "D"
+        # minimal numeric rank = 2 -> "D"
         res = self.engine.execute('eq{rank{all_rows; name}; "D"}=True', df)
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 20) выражение возвращает не bool => не исполняемо
+    # 20) expression returns a non-bool => not executable
     def test_expression_non_bool_not_executable(self):
         df = pd.DataFrame({"x": ["a", "b"]})
         res = self.engine.execute("count{all_rows}=True", df)  # expr_value float
         self.assertFalse(res.executable)
 
-    # 21) длинная “реалистичная” строка с глубокой вложенностью
+    # 21) long “realistic” string with deep nesting
     def test_long_realistic_nested_program(self):
         df = pd.DataFrame({
             "city": ["cape vincent , ny", "other"],
@@ -546,7 +547,7 @@ class TestEngineExecutionAdvanced(unittest.TestCase):
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 22) большой DataFrame (10k строк) + настоящее DSL-выражение
+    # 22) large DataFrame (10k rows) + real DSL expression
     def test_big_table_10k_rows(self):
         n = 10_000
         df = pd.DataFrame({
@@ -584,14 +585,14 @@ class TestParserMore(unittest.TestCase):
         if raw is not None:
             self.assertEqual(node.raw, raw)
 
-    # 23) comma-delim + вложенные вызовы: split должен уважать brace-depth
+    # 23) comma-delimited input + nested calls: split must respect brace depth
     def test_comma_delim_nested_calls_split(self):
         node = self.parser.parse_expr("eq{count{all_rows}, 3}")
         self.assertCall(node, name="eq", nargs=2)
         self.assertCall(node.args[0], name="count", nargs=1)
         self.assertLit(node.args[1], "3")
 
-    # 24) comma-delim с пустым value: пустой аргумент должен сохраняться
+    # 24) comma-delimited input with empty value: the empty argument must be preserved
     def test_comma_delim_empty_value_kept(self):
         node = self.parser.parse_expr("filter_eq{all_rows, x, }")
         self.assertCall(node, name="filter_eq", nargs=3)
@@ -599,25 +600,25 @@ class TestParserMore(unittest.TestCase):
         self.assertLit(node.args[1], "x")
         self.assertLit(node.args[2], "")
 
-    # 25) лишняя закрывающая скобка -> trailing garbage => Literal (консервативное поведение)
+    # 25) extra closing brace -> trailing garbage => Literal (conservative behavior)
     def test_extra_closing_brace_becomes_literal(self):
         node = self.parser.parse_expr("eq{1;2}}")
         self.assertLit(node)
 
-    # 26) несколько '=' на top-level: суффикс берётся по последнему '=',
-    #     а expr в таком случае обычно становится Literal (из-за trailing garbage)
+    # 26) multiple '=' at the top level: the suffix is taken from the last '=',
+    #     and in that case expr usually becomes a Literal (because of trailing garbage)
     def test_multiple_equals_last_suffix_wins_expr_literal(self):
         prog = self.parser.parse_program("eq{1;1}=True=False")
-        self.assertFalse(prog.expected)  # последний суффикс =False
+        self.assertFalse(prog.expected)  # the last suffix is =False
         self.assertIsInstance(prog.expr, Literal)
 
-    # 27) пустые {} у not: парсер не должен падать, получаем not{""} (после trim лишних args)
+    # 27) empty {} in not: the parser must not crash; we get not{""} (after trimming extra args)
     def test_not_with_empty_braces_parses(self):
         node = self.parser.parse_expr("not{}")
         self.assertCall(node, name="not", nargs=1)
         self.assertLit(node.args[0], "")
 
-    # 28) неизвестная функция всё равно парсится в Call (исполнение уже потом решит, что делать)
+    # 28) an unknown function still parses as a Call (execution will decide what to do later)
     def test_unknown_function_parses_as_call(self):
         node = self.parser.parse_expr("weirdop{a; b}")
         self.assertCall(node, name="weirdop", nargs=2)
@@ -629,10 +630,10 @@ class TestEngineMore(unittest.TestCase):
     def setUp(self):
         self.engine = TabFactEngine()
 
-    # 29) filter_greater_eq / filter_less_eq (и арефметика сравнения)
+    # 29) filter_greater_eq / filter_less_eq (and comparison arithmetic)
     def test_filter_greater_eq_and_less_eq(self):
         df = pd.DataFrame({"n": ["1", "2", "3", "4"]})
-        # >=2 -> 3 строки, <=2 -> 2 строки
+        # >=2 -> 3 rows, <=2 -> 2 rows
         r1 = self.engine.execute("eq{count{filter_greater_eq{all_rows; n; 2}}; 3}=True", df)
         r2 = self.engine.execute("eq{count{filter_less_eq{all_rows; n; 2}}; 2}=True", df)
         self.assertTrue(r1.executable and r1.final)
@@ -679,7 +680,7 @@ class TestEngineMore(unittest.TestCase):
         self.assertTrue(res.executable)
         self.assertTrue(res.final)
 
-    # 34) полностью comma-delim программа (ни одного ';' на верхнем уровне)
+    # 34) fully comma-delimited program (not a single ';' at the top level)
     def test_comma_delim_program_executes(self):
         df = pd.DataFrame({"x": ["a", "b", "b"], "n": ["0", "2", "3"]})
         program = (
@@ -759,8 +760,8 @@ def _parse_number(x: Any) -> Optional[float]:
 
 def _read_table_csv(path: str) -> pd.DataFrame:
     """
-    Таблицы TabFact часто идут с sep='#'.
-    Делаем robust read: пробуем '#', если 1 колонка — пробуем ','.
+    TabFact tables often come with sep='#'.
+    We do a robust read: first try '#', and if there is only 1 column, try ','.
     """
     df = pd.read_csv(path, sep="#", dtype=str, keep_default_na=False)
     if df.shape[1] <= 1:
@@ -768,16 +769,16 @@ def _read_table_csv(path: str) -> pd.DataFrame:
         if df2.shape[1] > df.shape[1]:
             df = df2
     df = df.fillna("")
-    # нормализуем названия колонок (как минимум strip)
+    # normalize column names (at least strip them)
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
 
 def _safe_quoted_literal(v: str) -> str:
     """
-    Безопасный литерал для DSL:
-    - всегда в двойных кавычках
-    - если внутри есть двойные кавычки или фигурные скобки, лучше отказаться (вернём пустую строку)
+    Safe literal for DSL:
+    - always wrapped in double quotes
+    - if it contains double quotes or curly braces, it is better to reject it (return an empty string)
     """
     if v is None:
         return '""'
@@ -786,20 +787,20 @@ def _safe_quoted_literal(v: str) -> str:
         return ""
     if "{" in s or "}" in s:
         return ""
-    # допускаем ';' и ',' — парсер quote-aware
+    # allow ';' and ',' — the parser is quote-aware
     return f'"{s}"'
 
 
 def _pick_text_column_and_value(df: pd.DataFrame) -> Optional[Tuple[str, str]]:
     """
-    Выбираем колонку и значение, чтобы:
-    - в колонке есть повторяющееся значение
-    - значение можно безопасно закавычить (нет '"', '{', '}')
+    Choose a column and value such that:
+    - the column contains a repeated value
+    - the value can be safely quoted (no '"', '{', '}')
     """
     for col in df.columns:
         vals = df[col].astype(str).tolist()
         normed = [_norm_text(x) for x in vals]
-        # частоты
+        # frequencies
         freq: Dict[str, int] = {}
         for t in normed:
             if t == "":
@@ -807,12 +808,12 @@ def _pick_text_column_and_value(df: pd.DataFrame) -> Optional[Tuple[str, str]]:
             freq[t] = freq.get(t, 0) + 1
         if not freq:
             continue
-        # хотим значение, которое встречается хотя бы 2 раза
+        # we want a value that appears at least 2 times
         candidates = sorted(freq.items(), key=lambda kv: -kv[1])
         for key, cnt in candidates:
             if cnt < 2:
                 break
-            # найдём оригинальное значение, которое нормализуется в key
+            # find the original value that normalizes to key
             for raw in vals:
                 if _norm_text(raw) == key:
                     q = _safe_quoted_literal(str(raw))
@@ -823,7 +824,7 @@ def _pick_text_column_and_value(df: pd.DataFrame) -> Optional[Tuple[str, str]]:
 
 def _pick_numeric_column(df: pd.DataFrame, min_numeric: int = 8) -> Optional[str]:
     """
-    Выбираем колонку, где достаточно много чисел (по _parse_number).
+    Choose a column that contains enough numeric values (according to _parse_number).
     """
     nrows = len(df)
     if nrows == 0:
@@ -839,9 +840,9 @@ def _pick_numeric_column(df: pd.DataFrame, min_numeric: int = 8) -> Optional[str
 def _rowset_filter_eq(df: pd.DataFrame, col: str, qval: str) -> List[int]:
     """
     Reference for filter_eq.
-    qval уже с кавычками "..."
+    qval is already quoted as "..."
     """
-    # снимем кавычки как в norm_text
+    # remove quotes as in norm_text
     target = _norm_text(qval)
     out = []
     for i, x in enumerate(df[col].astype(str).tolist()):
@@ -915,7 +916,7 @@ def _mode_value_norm(df: pd.DataFrame, col: str, rows: Optional[List[int]] = Non
         freq[k] = freq.get(k, 0) + 1
     if not freq:
         return None
-    # tie-break: лексикографически по ключу
+    # tie-break: lexicographically by key
     return sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
 
@@ -940,9 +941,10 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.engine = TabFactEngine()
 
+        PROJECT_ROOT = Path(__file__).resolve().parents[3]
         base_dir = os.environ.get(
             "TABFACT_TABLE_DIR",
-            "/home/chaichuk/frontdoor_llm_causality/statics/datasets/Table-Fact-Checking/data/all_csv",
+            f"{PROJECT_ROOT}/statics/datasets/TabFact/data/all_csv",
         )
         max_tables = int(os.environ.get("TABFACT_MAX_TABLES", "12"))
 
@@ -950,17 +952,17 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
         if os.path.isdir(base_dir):
             paths = sorted(glob.glob(os.path.join(base_dir, "*.csv")))
         if not paths:
-            # fallback: то, что обычно лежит в окружении проекта
+            # fallback: what is usually present in the project environment
             paths = sorted(glob.glob("/mnt/data/*.html.csv")) + sorted(glob.glob("/mnt/data/*.csv"))
 
-        # отфильтруем реальные файлы
+        # filter real files
         paths = [p for p in paths if os.path.isfile(p)]
         cls.table_paths = paths[:max_tables]
 
         if not cls.table_paths:
             raise unittest.SkipTest("No TabFact tables found. Set TABFACT_TABLE_DIR or provide CSVs.")
 
-        # кеш DataFrame, чтобы не читать 30 раз один и тот же файл
+        # DataFrame cache so we do not read the same file 30 times
         cls._df_cache: Dict[str, pd.DataFrame] = {}
 
     def _df(self, path: str) -> pd.DataFrame:
@@ -973,7 +975,7 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
         return path, self._df(path)
 
     # -------------------------
-    # 1) Базовая корректность на all_rows
+    # 1) Basic correctness on all_rows
     # -------------------------
 
     def test_real_01_count_all_rows(self):
@@ -1022,7 +1024,7 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
 
             with self.subTest(table=path, col=col):
                 self.assertTrue(res.executable, res.error)
-                # expr_value должно совпасть
+                # expr_value must match
                 self.assertEqual(res.expr_value, expected)
 
     def test_real_04_filter_not_eq_count_matches_reference(self):
@@ -1086,7 +1088,7 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
             rows = _rowset_filter_num(df, num_col, thr, mode="lt")
             expected = len(rows)
 
-            # намеренно используем "repair" формат: "{col}, {thr}" внутри 2-го args
+            # intentionally use the "repair" format: "{col}, {thr}" inside the 2nd arg
             program = f"eq{{count{{filter_less{{all_rows; {num_col}, {thr}}}}}; {expected}}}=True"
             res = self.engine.execute(program, df)
             with self.subTest(table=path, col=num_col):
@@ -1175,7 +1177,7 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
             if expected is None:
                 continue
 
-            # expected — уже нормализованная строка (lower), а most_freq возвращает norm-key
+            # expected is already a normalized string (lower), while most_freq returns the normalized key
             program = f'eq{{most_freq{{all_rows; {col}}}; "{expected}"}}=True'
             res = self.engine.execute(program, df)
 
@@ -1184,13 +1186,13 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
                 self.assertTrue(res.final, f"expected={expected}, expr={res.expr_value}")
 
     # -------------------------
-    # 5) rank (если есть колонка rank) + fallback (если нет)
+    # 5) rank (if there is a rank column) + fallback (if there is not)
     # -------------------------
 
     def test_real_11_rank_min_rank_row_if_present(self):
         for path in self.table_paths:
             df = self._df(path)
-            # ищем rank колонку case-insensitively
+            # search for a rank column case-insensitively
             rank_col = None
             for c in df.columns:
                 if str(c).strip().lower() == "rank":
@@ -1198,7 +1200,7 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
                     break
             if rank_col is None:
                 continue
-            # и ещё нужна хоть какая-то другая колонка для извлечения
+            # and we also need at least one other column to extract from
             out_col = None
             for c in df.columns:
                 if c != rank_col:
@@ -1207,7 +1209,7 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
             if out_col is None:
                 continue
 
-            # reference: выбираем строку с минимальным числовым rank (первую при равенстве)
+            # reference: choose the row with the minimal numeric rank (the first one in case of a tie)
             rows = list(range(len(df)))
             best_r = None
             best_v = None
@@ -1254,16 +1256,16 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
                 self.assertTrue(res.final)
 
     # -------------------------
-    # 6) Complex chained queries (боевые)
+    # 6) Complex chained queries (practical)
     # -------------------------
 
     def test_real_13_complex_chain_filter_then_argmax_then_compare(self):
         """
-        Строим реальный сложный запрос:
-        - берём текстовую колонку и значение (filter_eq)
-        - берём числовую колонку
-        - на subset rows делаем argmax по числовой колонке
-        - сравниваем, что hop(...) >= median(subset)
+        Build a real complex query:
+        - take a text column and a value (filter_eq)
+        - take a numeric column
+        - perform argmax over the numeric column on the subset rows
+        - compare that hop(...) >= median(subset)
         """
         for path in self.table_paths:
             df = self._df(path)
@@ -1289,9 +1291,9 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
             nums_sorted = sorted(nums)
             med = nums_sorted[len(nums_sorted) // 2]
 
-            # expected: max(subset) >= med  (должно быть True по определению)
-            # в DSL это: greater_eq{hop{argmax{subset; num_col}; num_col}; med} , но greater_eq нет,
-            # поэтому используем: not{less{...; med}} (эквивалент >=)
+            # expected: max(subset) >= med  (this must be True by definition)
+            # in DSL this would be: greater_eq{hop{argmax{subset; num_col}; num_col}; med}, but there is no greater_eq,
+            # so we use: not{less{...; med}} (equivalent to >=)
             program = (
                 f"not{{less{{"
                 f"  hop{{argmax{{filter_eq{{all_rows; {text_col}; {qval}}}; {num_col}}}; {num_col}}};"
@@ -1306,10 +1308,10 @@ class TestTabFactEngineOnRealTables(unittest.TestCase):
 
     def test_real_14_complex_chain_two_filters_and_and_or(self):
         """
-        Ещё один “боевой” шаблон:
-        - выбираем text_col/value (subset A)
-        - выбираем numeric col и threshold = median(all numeric)
-        - проверяем (within subsetA) AND (count(filter_greater(all_rows)) >= 1) OR (none(filter_less(subsetA)))
+        Another “practical” template:
+        - choose text_col/value (subset A)
+        - choose a numeric column and threshold = median(all numeric values)
+        - check (within subsetA) AND (count(filter_greater(all_rows)) >= 1) OR (none(filter_less(subsetA)))
         """
         for path in self.table_paths:
             df = self._df(path)
