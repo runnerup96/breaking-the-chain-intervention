@@ -15,7 +15,7 @@ import llm_model
 from datasets_for_intervention import (
     ricechem_intervention, ricechem_dataset, ricechem_evaluation, ricechem_structure_processor,
     entailment_intervention, entailment_dataset, entailment_evaluation,
-    averitec_intervention, averitec_dataset, averitec_evaluation,
+    averitec_intervention, averitec_dataset, averitec_evaluation, averitec_structure_processor,
     tabfact_intervention, tabfact_dataset, tabfact_evaluation,
 )
 
@@ -167,12 +167,20 @@ if __name__ == "__main__":
         dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
         intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase", prompting_regime=args.prompting_regime)
         evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
-    elif args.evaluation_dataset == "averitec":  # WARNING! Not updated yet
+    elif args.evaluation_dataset == "averitec":
         dataset_path = os.path.join(project_path, "statics/datasets/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = averitec_intervention.AVeriTeCIntervention(dataset, llm_model, prompting_regime=args.prompting_regime)
-        evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, intervention_logic)
+        tool = averitec_structure_processor.AVeriTeCTool(dataset, args.tool_mode)
+        processor = averitec_structure_processor.AVeriTeCStructureProcessor(dataset, args.tool_mode)
+        intervention_logic = averitec_intervention.AVeriTeCIntervention(
+            dataset=dataset,
+            llm_model=llm,
+            tool=tool,
+            processor=processor,
+            prompting_regime=args.prompting_regime,
+            tool_mode=args.tool_mode,
+        )
+        evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, processor, args.tool_mode)
     elif args.evaluation_dataset == "tabfact":  # WARNING! Not updated yet
         dataset_path = os.path.join(project_path, "statics/datasets/TabFact")
         dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap_full.json',
