@@ -1,154 +1,132 @@
 import os
+import io
 import json
 import hashlib
 import pandas as pd
 import numpy as np
+from copy import deepcopy
+
+from datasets_for_intervention.tabfact_dsl_engine import TabFactEngine
+
 
 class TabFactDataset:
+    """
+    Dataset for TabFact: table-based fact-checking.
+
+    Each sample contains a table (CSV-formatted string), a natural-language claim,
+    the gold DSL verifier query (mediator), and pre-computed local edits.
+
+    Standard architecture keys:
+        - gold_query:     gold DSL query string (the mediator M_gold)
+        - mediator_query: copy of gold_query at load time; replaced during interventions
+        - gold_target:    True for all samples (all main questions are entailed by construction)
+
+    sample_id2local_edits stores only edits verified at load time to:
+        (a) parse without error, and
+        (b) execute to a result different from gold_target on the actual table.
+    Each entry: {"query": str, "expected_target": bool}
+    """
+
     def __init__(self, queries_json_path: str, tables_dir: str):
         self.tables_dir = tables_dir
-        self.queries_json_path = queries_json_path
-        self.data = None
-        
-        self.queries_data = self._load_queries(queries_json_path)
-        self.table_id2content = self._load_tables(tables_dir, list(self.queries_data.keys()))
+        self._engine = TabFactEngine()   # used only at load time to filter local edits
 
-        self.table_id2alt_questions = {}
-        self.table_id2alt_programs = {}
-        self.sample_id2local_edits = {}
+        queries_data = self._load_queries(queries_json_path)
+        table_id2content = self._load_tables(tables_dir, list(queries_data.keys()))
 
-        self.process_data()
+        self.sample_id2local_edits: dict = {}
+        self.data: list = self._process(queries_data, table_id2content)
 
     def _load_queries(self, json_path: str) -> dict:
         with open(json_path, 'r', encoding='utf-8') as f:
-            queries = json.load(f)
-        return queries
+            return json.load(f)
 
     def _load_tables(self, tables_dir: str, table_ids: list) -> dict:
+        wanted = set(table_ids)
         table_dict = {}
         for filename in os.listdir(tables_dir):
-            if filename in table_ids:
-                table_id = filename
-                file_path = os.path.join(tables_dir, filename)
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    table_content = f.read().strip()
-                table_dict[table_id] = table_content
+            if filename in wanted:
+                with open(os.path.join(tables_dir, filename), 'r', encoding='utf-8') as f:
+                    table_dict[filename] = f.read().strip()
         return table_dict
-    
+
     def _preprocess_text(self, text: str) -> str:
         if text is None:
             return ""
         return text.strip().replace('\n', ' ').replace('\r', ' ')
-    
+
     def _generate_sample_id(self, table_id: str, statement: str) -> str:
-        statement_hash = hashlib.md5(statement.encode('utf-8')).hexdigest()[:8]
-        return f"{table_id.replace('.html.csv', '')}@{statement_hash}"
-    
-    def _parse_table_for_distractors(self, table_path: str) -> dict:
-        try:
-            df = pd.read_csv(table_path, sep='#', header=0, dtype=str)
-            columns = df.columns.tolist()
+        h = hashlib.md5(statement.encode('utf-8')).hexdigest()[:8]
+        return f"{table_id.replace('.html.csv', '')}@{h}"
 
-            column_values = {}
-            all_entities = []
-            for col in columns:
-                unique_vals = df[col].dropna().astype(str).str.strip()
-                unique_vals = unique_vals[unique_vals != ''].unique().tolist()
-                column_values[col] = unique_vals
-                all_entities.extend(unique_vals)
+    def _process(self, queries_data: dict, table_id2content: dict) -> list:
+        data = []
 
-            entity_swaps = list(set(all_entities))
-
-            return {
-                "columns": columns,
-                "values": column_values,
-                "entity_swaps": entity_swaps
-            }
-
-        except Exception as e:
-            print(f"Warning: Failed to parse table {table_path} with pandas: {e}")
-            return {
-                "columns": [],
-                "values": {},
-                "entity_swaps": []
-            }
-
-    
-    def process_data(self):
-        self.data = []
-
-        for table_id, table_entries in self.queries_data.items():
-            if table_id not in self.table_id2content:
+        for table_id, table_entries in queries_data.items():
+            if table_id not in table_id2content:
                 continue
 
-            table_content = self.table_id2content[table_id]
+            table_content = table_id2content[table_id]
 
-            table_path = os.path.join(self.tables_dir, table_id)
-            distractors = self._parse_table_for_distractors(table_path)
-
-            all_alt_questions = []
-            all_alt_programs = []
+            try:
+                df = pd.read_csv(io.StringIO(table_content), sep="#", header=0, dtype=str)
+            except Exception:
+                df = None
 
             for entry in table_entries:
-                main_question = self._preprocess_text(entry["main_question"])
-                table_caption = entry["table_name"]
-                main_program = self._preprocess_text(entry["main_program"])
-                label_gt = True
+                statement   = self._preprocess_text(entry["main_question"])
+                gold_query  = self._preprocess_text(entry["main_program"])
+                gold_target = True   # all bootstrap main questions are entailed
 
-                alt_questions = [self._preprocess_text(q) for q in entry.get("alternate_questions", [])]
-                alt_programs = [self._preprocess_text(p) for p in entry.get("alternate_programs", [])]
-                local_edits = [self._preprocess_text(p) for p in entry.get("local_edits", [])]
+                sample_id = self._generate_sample_id(table_id, statement)
 
-                all_alt_questions.extend(alt_questions)
-                all_alt_programs.extend(alt_programs)
+                # Filter local edits at load time — keep only those that flip the result
+                valid_local_edits = []
+                if df is not None:
+                    for raw in entry.get("local_edits", []):
+                        q = self._preprocess_text(raw)
+                        r = self._engine.execute(q, df)
+                        if r.executable and r.final != gold_target:
+                            valid_local_edits.append({
+                                "query": q,
+                                "expected_target": r.final,
+                            })
 
-                sample_id = self._generate_sample_id(table_id, main_question)
+                self.sample_id2local_edits[sample_id] = valid_local_edits
 
-                sample = {
-                    "idx": sample_id,
-                    "table_id": table_id,
+                data.append({
+                    # standard architecture keys
+                    "idx":            sample_id,
+                    "gold_query":     gold_query,
+                    "mediator_query": deepcopy(gold_query),
+                    "gold_target":    gold_target,
+                    # X fields
+                    "table_id":       table_id,
                     "table_html_csv": table_content,
-                    "statement": main_question,
-                    "table_caption": table_caption,
-                    "verifier_query_gt": main_program,
-                    "label_gt": label_gt,
-                    "distractors": distractors,
-                }
-                self.data.append(sample)
-                self.sample_id2local_edits[sample_id] = local_edits
+                    "statement":      statement,
+                    "table_caption":  entry.get("table_name", ""),
+                })
 
-            self.table_id2alt_questions[table_id] = list(set(all_alt_questions))
-            self.table_id2alt_programs[table_id] = list(set(all_alt_programs))
-            
+        return data
 
-    def get_random_alternate_question(self, sample: dict) -> str:
-        table_id = sample['table_id']
-        pool = self.table_id2alt_questions.get(table_id, [])
-        if pool:
-            idx = np.random.choice(len(pool))
-            return pool[idx]
-        else:
-            return sample['statement']
+    def get_local_edits(self, sample: dict, n: int = None) -> list:
+        """
+        Return verified local-edit entries for this sample.
 
-    def get_random_alternate_program(self, sample: dict) -> str:
-        table_id = sample['table_id']
-        pool = self.table_id2alt_programs.get(table_id, [])
-        if pool:
-            idx = np.random.choice(len(pool))
-            return pool[idx]
-        else:
-            orig_prog = sample['verifier_query_gt']
-            if orig_prog.endswith("=True"):
-                return orig_prog[:-len("=True")] + "=False"
-            elif orig_prog.endswith("=False"):
-                return orig_prog[:-len("=False")] + "=True"
-            else:
-                return orig_prog
-            
-    def get_random_local_edits(self, sample: dict, n=3) -> str:
-        sample_id = sample['idx']
-        pool = self.sample_id2local_edits.get(sample_id, [])
-        return np.random.choice(pool, size=n, replace=False).tolist()
+        Each entry: {"query": str, "expected_target": bool}
+
+        Args:
+            sample: a dataset sample dict (must have "idx").
+            n:      if given, return a random subset of at most n edits.
+                    If the pool is smaller than n, returns the whole pool.
+
+        Returns [] if the sample has no valid local edits.
+        """
+        pool = self.sample_id2local_edits.get(sample["idx"], [])
+        if n is None or n >= len(pool):
+            return pool
+        indices = np.random.choice(len(pool), size=n, replace=False)
+        return [pool[i] for i in indices]
 
     def __len__(self):
         return len(self.data)

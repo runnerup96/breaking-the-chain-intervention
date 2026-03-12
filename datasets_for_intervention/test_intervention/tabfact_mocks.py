@@ -1,211 +1,206 @@
+"""
+tabfact_mocks.py
+~~~~~~~~~~~~~~~~
+Mock TabFactDataset for unit tests.
+
+New architecture keys per sample:
+  idx, gold_query, mediator_query, gold_target,
+  table_id, table_html_csv, statement, table_caption
+
+sample_id2local_edits: {idx: [{"query": str, "expected_target": bool}]}
+  - Only edits verified to execute to result != gold_target are stored.
+  - gold_target is always True.
+
+get_local_edits(sample, n=None) mirrors TabFactDataset.get_local_edits.
+"""
+
 import random
+from copy import deepcopy
+
+
+# -----------------------------------------------------------------------
+# Table fixtures
+# -----------------------------------------------------------------------
+#
+# Suffix semantics (TabFactEngine):
+#   expr=True  →  final = (eval(expr) == True)
+#   expr=False →  final = (eval(expr) == False)
+#
+# Sample 0: greater{Usain.gold; Shawn.gold}=True → 8>1=True → final=True  (gold)
+# Sample 1: eq{argmax(gold).athlete; Carl Lewis}=True → True → final=True  (gold)
+# Sample 2: less{avg{US.time}; 15}=True → 14.33<15=True → final=True  (gold)
+
+_TABLE = (
+    "rank#athlete#nation#gold#silver#bronze\n"
+    "1#Usain Bolt#Jamaica#8#0#1\n"
+    "2#Shawn Crawford#United States#1#2#0\n"
+    "3#Carl Lewis#United States#9#1#0"
+)
+
+_TABLE_WITH_TIME = (
+    "rank#athlete#nation#gold#silver#bronze#time\n"
+    "1#Usain Bolt#Jamaica#8#0#1#9.63\n"
+    "2#Shawn Crawford#United States#1#2#0#19.79\n"
+    "3#Carl Lewis#United States#9#1#0#8.87"
+)
+
+
+def _s(idx, stmt, gq, table=_TABLE):
+    return {
+        "idx": idx,
+        "table_id": "table1.html.csv",
+        "table_html_csv": table,
+        "statement": stmt,
+        "table_caption": "Olympic Medalists",
+        "gold_query": gq,
+        "mediator_query": deepcopy(gq),
+        "gold_target": True,
+    }
 
 
 class TabFactDatasetMock:
     """
-    Mock class for TabFactDataset with support for diverse intervention tests.
+    Mock TabFactDataset with new architecture keys.
+
+    Three samples covering common DSL patterns:
+      0 - comparison (greater / hop / filter_eq)
+      1 - argmax + hop + eq
+      2 - avg + filter_eq + less  (uses time column)
+
+    Each pool has 4-5 verified local edits (all expected_target=False).
     """
 
     def __init__(self):
-        self.mock_table_content = (
-            "Rank#Athlete#Nation#Gold#Silver#Bronze#Event#Time\n"
-            "1#Usain Bolt#Jamaica#8#0#1#100m#9.63\n"
-            "2#Shawn Crawford#United States#1#2#0#200m#19.79\n"
-            "3#Carl Lewis#United States#9#1#0#Long Jump#8.87"
-        )
-
-        # -------------------
-        # Основные сэмплы
-        # -------------------
         self.data = [
-            # --- Base sample with filter_eq and hop ---
-            {
-                "idx": "mock_0@table1",
-                "table_id": "table1.html.csv",
-                "table_html_csv": self.mock_table_content,
-                "statement": "Usain Bolt won more gold medals than Shawn Crawford.",
-                "table_caption": "Olympic Medalists",
-                "verifier_query_gt": (
+            _s(
+                "mock_0@table1",
+                "Usain Bolt won more gold medals than Shawn Crawford.",
+                (
                     "greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; "
                     "hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True"
                 ),
-                "label_gt": True,
-                "distractors": {
-                    "columns": [
-                        "Rank", "Athlete", "Nation",
-                        "Gold", "Silver", "Bronze",
-                        "Event", "Time"
-                    ],
-                    "values": {
-                        "athlete": ["Usain Bolt", "Shawn Crawford", "Carl Lewis"],
-                        "nation": ["Jamaica", "United States", "Canada"],
-                        "gold": ["8", "1", "9", "5", "3"],
-                        "silver": ["0", "2", "1", "0", "4"],
-                        "bronze": ["1", "0", "0", "2"],
-                        "event": ["100m", "200m", "Long Jump", "400m"],
-                        "time": ["9.63", "19.79", "8.87", "10.12"]
-                    },
-                    "entity_swaps": [
-                        "Usain Bolt", "Shawn Crawford", "Carl Lewis",
-                        "Jamaica", "United States", "Canada",
-                        "8", "1", "9", "0", "2",
-                        "100m", "200m", "Long Jump"
-                    ]
-                }
-            },
-            # --- Sample with argmax ---
-            {
-                "idx": "mock_1@table1",
-                "table_id": "table1.html.csv",
-                "table_html_csv": self.mock_table_content,
-                "statement": "Carl Lewis has the most gold medals.",
-                "table_caption": "Olympic Medalists",
-                "verifier_query_gt": "eq{hop{argmax{all_rows; gold}; athlete}; Carl Lewis}=True",
-                "label_gt": True,
-                "distractors": {
-                    "columns": [
-                        "Rank", "Athlete", "Nation",
-                        "Gold", "Silver", "Bronze",
-                        "Event", "Time"
-                    ],
-                    "values": {
-                        "athlete": ["Usain Bolt", "Shawn Crawford", "Carl Lewis"],
-                        "nation": ["Jamaica", "United States", "Canada"],
-                        "gold": ["8", "1", "9", "5", "3"],
-                        "silver": ["0", "2", "1", "0", "4"],
-                        "bronze": ["1", "0", "0", "2"],
-                        "event": ["100m", "200m", "Long Jump", "400m"],
-                        "time": ["9.63", "19.79", "8.87", "10.12"]
-                    },
-                    "entity_swaps": [
-                        "Usain Bolt", "Shawn Crawford", "Carl Lewis",
-                        "Jamaica", "United States", "Canada",
-                        "8", "1", "9", "0", "2",
-                        "100m", "200m", "Long Jump"
-                    ]
-                }
-            },
-            # --- Sample with aggregation (avg) ---
-            {
-                "idx": "mock_2@table1",
-                "table_id": "table1.html.csv",
-                "table_html_csv": self.mock_table_content,
-                "statement": "Average time for US athletes is better than 15 seconds.",
-                "table_caption": "Olympic Medalists",
-                "verifier_query_gt": (
-                    "less{avg{filter_eq{all_rows; nation; United States}; time}; 15}=True"
-                ),
-                "label_gt": True,
-                "distractors": {
-                    "columns": [
-                        "Rank", "Athlete", "Nation",
-                        "Gold", "Silver", "Bronze",
-                        "Event", "Time"
-                    ],
-                    "values": {
-                        "athlete": ["Usain Bolt", "Shawn Crawford", "Carl Lewis"],
-                        "nation": ["Jamaica", "United States", "Canada"],
-                        "gold": ["8", "1", "9", "5", "3"],
-                        "silver": ["0", "2", "1", "0", "4"],
-                        "bronze": ["1", "0", "0", "2"],
-                        "event": ["100m", "200m", "Long Jump", "400m"],
-                        "time": ["9.63", "19.79", "8.87", "10.12", "15.5", "20.0"]
-                    },
-                    "entity_swaps": [
-                        "Usain Bolt", "Shawn Crawford", "Carl Lewis",
-                        "Jamaica", "United States", "Canada",
-                        "8", "1", "9", "0", "2",
-                        "100m", "200m", "Long Jump",
-                        "15", "10", "20"
-                    ]
-                }
-            }
+            ),
+            _s(
+                "mock_1@table1",
+                "Carl Lewis has the most gold medals.",
+                "eq{hop{argmax{all_rows; gold}; athlete}; Carl Lewis}=True",
+            ),
+            _s(
+                "mock_2@table1",
+                "Average time for US athletes is under 15 seconds.",
+                "less{avg{filter_eq{all_rows; nation; United States}; time}; 15}=True",
+                table=_TABLE_WITH_TIME,
+            ),
         ]
 
-        # -------------------
-        # Alternative questions/programs
-        # -------------------
-        self.table_id2alt_questions = {
-            "table1.html.csv": [
-                "Shawn Crawford is from Jamaica.",
-                "Usain Bolt has exactly 1 gold medal.",
-                "Carl Lewis competed in the 100m event.",
-                "The fastest time belongs to a US athlete."
-            ]
-        }
-        self.table_id2alt_programs = {
-            "table1.html.csv": [
-                "eq{Jamaica; hop{filter_eq{all_rows; athlete; Shawn Crawford}; nation}}=False",
-                "eq{1; hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}}=False",
-                "eq{100m; hop{filter_eq{all_rows; athlete; Carl Lewis}; event}}=False",
-                "eq{United States; hop{argmin{all_rows; time}; nation}}=False"
-            ]
-        }
-
-        # -------------------
-        # Pre-generated Local Edits
-        # -------------------
+        # Each entry: {"query": str, "expected_target": bool}
+        # All expected_target=False (verified to differ from gold_target=True).
         self.sample_id2local_edits = {
+            # Sample 0: greater{Usain.gold; Shawn.gold}=True  (8>1=True, gold)
             "mock_0@table1": [
-                # Athlete swap
-                "greater{hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}; hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}}=True",
-                # Operator change
-                "less{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True",
-                "eq{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True",
-                # Self-comparison
-                "greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}}=True",
-                # Filter change
-                "greater{hop{filter_eq{all_rows; nation; Jamaica}; gold}; hop{filter_eq{all_rows; nation; United States}; gold}}=True"
+                # operator flip  ->  8<1=False, =True -> final=False
+                {
+                    "query": (
+                        "less{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; "
+                        "hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True"
+                    ),
+                    "expected_target": False,
+                },
+                # entity swap  ->  1>8=False, =True -> final=False
+                {
+                    "query": (
+                        "greater{hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}; "
+                        "hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}}=True"
+                    ),
+                    "expected_target": False,
+                },
+                # suffix flip  ->  8>1=True, =False -> final=False
+                {
+                    "query": (
+                        "greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; "
+                        "hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=False"
+                    ),
+                    "expected_target": False,
+                },
+                # operator change to eq  ->  8==1=False, =True -> final=False
+                {
+                    "query": (
+                        "eq{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; "
+                        "hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True"
+                    ),
+                    "expected_target": False,
+                },
+                # not_eq suffix flip  ->  8!=1=True, =False -> final=False
+                {
+                    "query": (
+                        "not_eq{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; "
+                        "hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=False"
+                    ),
+                    "expected_target": False,
+                },
             ],
+            # Sample 1: eq{argmax(gold).athlete; Carl Lewis}=True (gold)
             "mock_1@table1": [
-                "eq{hop{argmax{all_rows; gold}; athlete}; Usain Bolt}=True",
-                "not_eq{hop{argmax{all_rows; gold}; athlete}; Carl Lewis}=True",
-                "eq{hop{argmax{all_rows; silver}; athlete}; Carl Lewis}=True",
-                "eq{hop{argmax{all_rows; gold}; nation}; Carl Lewis}=True",
-                "eq{hop{argmax{all_rows; gold}; athlete}; Shawn Crawford}=True"
+                # wrong target  ->  Carl Lewis != Usain Bolt -> False, =True -> False
+                {
+                    "query": "eq{hop{argmax{all_rows; gold}; athlete}; Usain Bolt}=True",
+                    "expected_target": False,
+                },
+                # suffix flip  ->  True, =False -> False
+                {
+                    "query": "eq{hop{argmax{all_rows; gold}; athlete}; Carl Lewis}=False",
+                    "expected_target": False,
+                },
+                # negation: Carl Lewis != Carl Lewis = False, =True -> False
+                {
+                    "query": "not_eq{hop{argmax{all_rows; gold}; athlete}; Carl Lewis}=True",
+                    "expected_target": False,
+                },
+                # argmax silver: Shawn Crawford(2) != Carl Lewis -> False, =True -> False
+                {
+                    "query": "eq{hop{argmax{all_rows; silver}; athlete}; Carl Lewis}=True",
+                    "expected_target": False,
+                },
             ],
+            # Sample 2: less{avg{US.time}; 15}=True  avg(19.79,8.87)=14.33 (gold)
             "mock_2@table1": [
-                "less{avg{filter_eq{all_rows; nation; Jamaica}; time}; 15}=True",
-                "greater{avg{filter_eq{all_rows; nation; United States}; time}; 15}=True",
-                "eq{avg{filter_eq{all_rows; nation; United States}; time}; 15}=True",
-                "less{avg{filter_eq{all_rows; event; 100m}; time}; 15}=True",
-                "less{sum{filter_eq{all_rows; nation; United States}; time}; 15}=True"
-            ]
+                # operator flip  ->  14.33>15=False, =True -> False
+                {
+                    "query": "greater{avg{filter_eq{all_rows; nation; United States}; time}; 15}=True",
+                    "expected_target": False,
+                },
+                # suffix flip  ->  True, =False -> False
+                {
+                    "query": "less{avg{filter_eq{all_rows; nation; United States}; time}; 15}=False",
+                    "expected_target": False,
+                },
+                # equality  ->  14.33==15=False, =True -> False
+                {
+                    "query": "eq{avg{filter_eq{all_rows; nation; United States}; time}; 15}=True",
+                    "expected_target": False,
+                },
+                # Jamaica avg=9.63, 9.63<9=False, =True -> False
+                {
+                    "query": "less{avg{filter_eq{all_rows; nation; Jamaica}; time}; 9}=True",
+                    "expected_target": False,
+                },
+            ],
         }
 
-    # -------------------
-    # API
-    # -------------------
-    def get_random_alternate_question(self, sample: dict) -> str:
-        """Returns a random alternative question for the sample's table."""
-        table_id = sample['table_id']
-        pool = self.table_id2alt_questions.get(table_id, [])
-        if pool:
-            return random.choice(pool)
-        return sample['statement']
+    # ------------------------------------------------------------------
+    # Public API  --  mirrors TabFactDataset
+    # ------------------------------------------------------------------
 
-    def get_random_alternate_program(self, sample: dict) -> str:
-        """Returns a random alternative program for the sample's table."""
-        table_id = sample['table_id']
-        pool = self.table_id2alt_programs.get(table_id, [])
-        if pool:
-            return random.choice(pool)
-
-        # fallback
-        orig_prog = sample['verifier_query_gt']
-        if orig_prog.endswith("=True"):
-            return orig_prog[:-len("=True")] + "=False"
-        elif orig_prog.endswith("=False"):
-            return orig_prog[:-len("=False")] + "=True"
-        return orig_prog
-
-    def get_random_local_edits(self, sample: dict, n: int = 3) -> list[str]:
-        """Returns a random sample of n local edits for the given sample."""
-        sample_id = sample['idx']
-        pool = self.sample_id2local_edits.get(sample_id, [])
-        if len(pool) < n:
-            return pool + random.choices(pool, k=n - len(pool)) if pool else ["eq{1;0}=True"] * n
-        return random.sample(pool, n)
+    def get_local_edits(self, sample: dict, n: int = None) -> list:
+        """
+        Return verified local-edit entries for this sample.
+        Each entry: {"query": str, "expected_target": bool}
+        """
+        pool = self.sample_id2local_edits.get(sample["idx"], [])
+        if n is None or n >= len(pool):
+            return list(pool)
+        indices = random.sample(range(len(pool)), n)
+        return [pool[i] for i in indices]
 
     def __len__(self) -> int:
         return len(self.data)

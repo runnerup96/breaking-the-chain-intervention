@@ -16,7 +16,7 @@ from datasets_for_intervention import (
     ricechem_intervention, ricechem_dataset, ricechem_evaluation, ricechem_structure_processor,
     entailment_intervention, entailment_dataset, entailment_evaluation,
     averitec_intervention, averitec_dataset, averitec_evaluation, averitec_structure_processor,
-    tabfact_intervention, tabfact_dataset, tabfact_evaluation,
+    tabfact_intervention, tabfact_dataset, tabfact_evaluation, tabfact_dsl_engine, tabfact_structure_processor
 )
 
 def fix_seed(seed=42):
@@ -181,13 +181,29 @@ if __name__ == "__main__":
             tool_mode=args.tool_mode,
         )
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, processor, args.tool_mode)
-    elif args.evaluation_dataset == "tabfact":  # WARNING! Not updated yet
+    elif args.evaluation_dataset == "tabfact":
         dataset_path = os.path.join(project_path, "statics/datasets/TabFact")
-        dataset = tabfact_dataset.TabFactDataset(f'{dataset_path}/bootstrap_full.json',
-                                                 f'{dataset_path}/data/all_csv')
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = tabfact_intervention.TabFactIntervention(dataset, llm_model, args.prompting_regime)
-        evaluator = tabfact_evaluation.TabFactEvaluation(dataset, intervention_logic)
+        dataset = tabfact_dataset.TabFactDataset(
+            queries_json_path=os.path.join(dataset_path, "bootstrap_full.json"),
+            tables_dir=os.path.join(dataset_path, "data/all_csv"),
+        )
+        engine = tabfact_dsl_engine.TabFactEngine()
+        tool = tabfact_structure_processor.TabFactTool(engine)
+        processor = tabfact_structure_processor.TabFactStructureProcessor(engine)
+        intervention_logic = tabfact_intervention.TabFactIntervention(
+            dataset=dataset,
+            llm_model=llm,
+            tool=tool,
+            processor=processor,
+            prompting_regime=args.prompting_regime,
+            tool_mode=args.tool_mode,
+        )
+        evaluator = tabfact_evaluation.TabFactEvaluation(
+            dataset=dataset,
+            processor=processor,
+            tool=tool,
+            tool_mode=args.tool_mode,
+        )
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
                                   f"Currently -- [ricechem, entailment, averitec, tabfact]")
@@ -242,7 +258,8 @@ if __name__ == "__main__":
         evaluation_metrics = {"note": "No evaluator configured for this dataset"}
         print("No evaluator for this dataset")
 
-    save_dir = os.path.join(project_path, "intervention_analysis", "intervention_predictions", args.evaluation_dataset)
+    subdir = args.prompting_regime if args.tool_mode == 'none' else 'tool'
+    save_dir = os.path.join(project_path, "intervention_analysis", "intervention_predictions", args.evaluation_dataset, subdir)
     os.makedirs(save_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
