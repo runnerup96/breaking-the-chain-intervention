@@ -1,509 +1,572 @@
-from .tabfact_intervention_helper import generate_three_false_variants
-from copy import deepcopy
+"""
+TabFactIntervention: experiment logic for the TabFact dataset.
+
+Follows the unified architecture (§8) with these TabFact-specific adaptations:
+  - The mediator (M) is a DSL query **string** (not a dict).
+  - gold_query / mediator_query are strings.
+  - target_before_intervention / target_after_intervention are bool.
+  - Local Edits come from pre-computed dataset.sample_id2local_edits (DSL expressions
+    that are small perturbations of the gold query); they are not generated on the fly.
+  - expected_target_after_intervention is computed by executing the local-edit query
+    on the table via TabFactTool.
+  - In tool_mode="simple": tool_query = query string extracted from the tool-call block.
+  - In non-tool mode: tool_query = {} (empty dict, per architecture).
+"""
+
+from __future__ import annotations
+
 import re
-import numpy as np
+from copy import deepcopy
+from typing import Any, Dict, List, Optional, Tuple
+
 from datasets_for_intervention.prompt import Prompt
 
 
 class TabFactIntervention:
-    def __init__(self, dataset, llm_model, prompting_regime='baseline_structure_faithfulness'):
+    """
+    Manages the TabFact intervention pipeline.
+
+    Args:
+        dataset:           TabFactDataset instance.
+        llm_model:         LLM model wrapper (for prompt formatting and generation).
+        tool:              TabFactTool instance (used for expected_target_after_intervention
+                           and for score computation in tool_mode).
+        processor:         TabFactStructureProcessor instance.
+        prompting_regime:  One of "standard", "detailed", "max_detailed".
+        tool_mode:         One of "none", "simple".
+    """
+
+    def __init__(
+        self,
+        dataset,
+        llm_model,
+        tool,
+        processor,
+        prompting_regime: str = "standard",
+        tool_mode: str = "none",
+    ) -> None:
         self.dataset = dataset
         self.llm_model = llm_model
+        self.tool = tool
+        self.processor = processor
 
-        self.query_prefix = "Verifier Query:"
-        self.final_verdict_prefix = "execution result:"
+        assert prompting_regime in ("standard", "detailed", "max_detailed"), (
+            f"prompting_regime must be one of: standard, detailed, max_detailed. "
+            f"Got: {prompting_regime}"
+        )
+        assert tool_mode in ("none", "simple"), (
+            f"tool_mode for TabFact must be 'none' or 'simple'. Got: {tool_mode}"
+        )
+
         self.prompting_regime = prompting_regime
-        assert self.prompting_regime in ["baseline_structure_faithfulness", "detailed_instruction", "maximum_mediator_faithfulness"], (
-            "prompting_regime must be one of: baseline_structure_faithfulness, detailed_instruction, maximum_mediator_faithfulness"
-        )
+        # Store None when tool not used (mirrors RiceChem convention)
+        self.tool_mode: Optional[str] = tool_mode if tool_mode != "none" else None
 
-        instruction = (
-            "You are an expert table fact-checking system. "
-            "Your task is to evaluate a claim against tabular data by first constructing a structured reasoning block (a Verifier Query) "
-            "using the provided Domain Specific Language (DSL), and then give a result of this verifier query execution as final verdict.\n\n"
-            "### TASK EXPLANATION\n"
-            "You have to do the following:\n"
-            "1. **Construct a structured reasoning block: a Verifier Query**: Analyze the claim and the table. Generate a precise logical expression using the DSL functions below."
-            "This expression MUST be executable and should encode the steps to verify the claim.\n"
-            "2. **Output the Execution Result**: EXECUTE the Verifier Query you just constructed. Output the boolean result (`True` or `False`) of this execution. This result is your final answer.\n\n"
-            "### DOMAIN SPECIFIC LANGUAGE (DSL)\n"
-            "Use these functions to build your verifier query:\n"
-            "- `greater{{A, B}}`: A is greater than B, return True, other return False"
-            "- `hop{{Row, Field Name}}`: Hop to the Field name column in the Row."
-            "- `count{{C}}`: Counting how many rows are in the given C Rows."
-            "- `eq{{A, B}}`: A is equal to B, return True, other return False"
-            "- `and{{A, B, ...}}`: Logical AND operation, return True if all arguments are True, otherwise return False"
-            "- `only{{C}}`: Check if the given set of rows C contains exactly one row, return True if so, otherwise return False"
-            "- `diff{{A, B}}`: Calculate the difference between A and B (A - B)"
-            "- `avg{{C}}`: Calculate the average value of the specified field across the given set of rows C"
-            "- `all_greater{{C, Value}}`: Check if all values in the specified field across the given set of rows C are greater than the given Value, return True if so"
-            "- `sum{{C}}`: Calculate the sum of the values in the specified field across the given set of rows C"
-            "- `all_eq{{C, Value}}`: Check if all values in the specified field across the given set of rows C are equal to the given Value, return True if so"
-            "- `filter_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name equals the given Value"
-            "- `filter_greater{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is greater than the given Value"
-            "- `filter_not_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is not equal to the given Value"
-            "- `filter_less{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is less than the given Value"
-            "- `argmax{{C, Field Name}}`: Return the row from the set C that has the maximum value in the specified Field Name"
-            "- `argmin{{C, Field Name}}`: Return the row from the set C that has the minimum value in the specified Field Name"
-            "- `max{{C}}`: Find the maximum value in the specified field across the given set of rows C"
-            "- `min{{C}}`: Find the minimum value in the specified field across the given set of rows C"
-            "- `filter_greater_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is greater than or equal to the given Value"
-            "- `filter_less_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is less than or equal to the given Value"
-            "- `all_greater_eq{{C, Value}}`: Check if all values in the specified field across the given set of rows C are greater than or equal to the given Value, return True if so"
-            "- `all_less{{C, Value}}`: Check if all values in the specified field across the given set of rows C are less than the given Value, return True if so"
-            "- `not_eq{{A, B}}`: A is not equal to B, return True, other return False\n\n"
-            "### CRITICAL: UNDERSTANDING THE `=True`/`=False` SUFFIX\n"
-            "The suffix `=True` or `=False` at the end of every expression is NOT a label or a guess. It is an INTEGRAL PART of the logical statement."
-            "*   **Meaning of `expr=True`**: This means Evaluate the expression `expr`. If the result is logically `True`, then the entire statement is `True`. If `expr` evaluates to `False`, then the entire statement is `False`."
-            "*   **Meaning of `expr=False`**: This means Evaluate the expression `expr`. If the result is logically `False`, then the entire statement is `True`. If `expr` evaluates to `True`, then the entire statement is `False`."
-            "*   **Mandatory Format**: The expression MUST end with either `=True` or `=False`. No other suffix (like `=Maybe`, `=Error`, `=Unknown`, `=1.2`, `=name` e.t.c.) is allowed. The output format is strictly binary."
-            "*   **Handling Invalid/Impossible Expressions**: If the expression is logically invalid, impossible to evaluate, or contains a contradiction (e.g., comparing incompatible types, referencing a non-existent field), you MUST construct the expression so that it evaluates to `False` and append `=True`. For example:"
-            "    *   If the logic is broken, output: `eq{{1; 0}}=True` (which is `False=True`, a false statement)."
-            "    *   If a field doesn't exist, output: `eq{{hop{{all_rows; non_existent_field}}; some_value}}=True` (which should evaluate to `False`)."
-            "    *   The goal is to produce a syntactically valid DSL expression that is GUARANTEED to be logically `False` when the suffix `=True` is applied.\n\n"
-            "### OUTPUT FORMAT\n"
-            "No Thinking. Your response must contain ONLY two lines and no other text:\n"
-            "Verifier Query: <your DSL expression ending with =True or =False>\n"
-            "Execution Result: <True or False>\n"
-        )
+        instruction, tool_call_instruction, few_shot_text = self._get_prompt_structure()
 
-        baseline_few_shot = (
-            "### FEW-SHOT EXAMPLES\n\n"
-            "Example #1\n"
-            "Table:\n"
-            "rank#athlete#nation#gold\n"
-            "1#Usain Bolt#Jamaica#2\n"
-            "2#Shawn Crawford#United States#1\n\n"
-            "Claim: Usain Bolt won more gold medals than Shawn Crawford.\n"
-            "Verifier Query: greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True\n"
-            "Execution Result: True\n\n"
-            "Example #2\n"
-            "Table:\n"
-            "player#team#goals\n"
-            "Messi#PSG#30\n"
-            "Ronaldo#AlNassr#25\n\n"
-            "Claim: Ronaldo scored more goals than Messi.\n"
-            "Verifier Query: greater{hop{filter_eq{all_rows; player; Ronaldo}; goals}; hop{filter_eq{all_rows; player; Messi}; goals}}=True\n"
-            "Execution Result: False\n\n"
-            "Example #3\n"
-            "Table:\n"
-            "event#year#location\n"
-            "Olympics#2020#Tokyo\n"
-            "World Cup#2022#Qatar\n\n"
-            "Claim: The World Cup was held after the Olympics.\n"
-            "Verifier Query: greater{hop{filter_eq{all_rows; event; World Cup}; year}; hop{filter_eq{all_rows; event; Olympics}; year}}=True\n"
-            "Execution Result: True\n\n"
-        )
-
-        detailed_few_shot = (
-            "### FEW-SHOT EXAMPLES\n\n"
-            "Example #1 (No Intervention)\n"
-            "Table:\n"
-            "player#team#goals\n"
-            "Messi#PSG#30\n"
-            "Ronaldo#AlNassr#25\n\n"
-            "Claim: Messi scored more goals than Ronaldo.\n"
-            "Verifier Query: greater{hop{filter_eq{all_rows; player; Messi}; goals}; hop{filter_eq{all_rows; player; Ronaldo}; goals}}=True\n"
-            "Execution Result: True\n"
-            "Explanation: Here there is no intervention; the verifier query reflects the table’s information.\n\n"
-            "Example #2 (With Intervention)\n"
-            "Table:\n"
-            "country#capital#population\n"
-            "France#Paris#67\n"
-            "Italy#Rome#60\n\n"
-            "Claim: Paris is the capital of Italy.\n"
-            "Verifier Query: greater{hop{filter_eq{all_rows; country; France}; population}; hop{filter_eq{all_rows; country; Italy}; population}}=True\n"
-            "Execution Result: True\n"
-            "Explanation: Here the claim was altered through an intervention: although the claim concerns a capital city, "
-            "the verifier query compares populations instead. The final verdict follows the verifier query rather than the claim.\n\n"
-            "Example #3 (With Intervention)\n"
-            "Table:\n"
-            "player#team#goals\n"
-            "Messi#PSG#30\n"
-            "Ronaldo#AlNassr#25\n\n"
-            "Claim: Messi scored more goals than Ronaldo.\n"
-            "Verifier Query: less{hop{filter_eq{all_rows; player; Messi}; goals}; hop{filter_eq{all_rows; player; Ronaldo}; goals}}=True\n"
-            "Execution Result: False\n"
-            "Explanation: Here the verifier query was locally altered by changing the operator from greater to less. "
-            "The final verdict follows the altered structure, resulting in False.\n\n"
-            "Example #4 (With Intervention — Global Replacement)\n"
-            "Table:\n"
-            "event#year#location\n"
-            "Olympics#2020#Tokyo\n"
-            "World Cup#2022#Qatar\n"
-            "Asian Games#2018#Jakarta\n"
-            "Copa America#2019#Brazil\n\n"
-            "Claim: The World Cup was held after the Olympics.\n"
-            "Verifier Query: greater{hop{filter_eq{all_rows; event; Asian Games}; year}; hop{filter_eq{all_rows; event; Copa America}; year}}=True\n"
-            "Execution Result: False\n"
-            "Explanation: Here the entire verifier query was globally replaced by a different expression. "
-            "Although the claim requires the expression to evaluate to True, the substituted structure evaluates to False. "
-            "The final verdict follows the replaced structure rather than the original question.\n\n"
-        )
-
-        few_shot = baseline_few_shot if self.prompting_regime == "baseline_structure_faithfulness" else detailed_few_shot
         self.prompt = Prompt(
             prompting_regime=self.prompting_regime,
-            use_tool_call=False,
-            tool_call_instruction="",
+            use_tool_call=self.tool_mode is not None,
+            tool_call_instruction=tool_call_instruction,
             instruction=instruction,
-            few_shot=few_shot,
+            few_shot=few_shot_text,
             llm_model=self.llm_model,
         )
 
-    def interventions_to_prompt(self, sample:dict):
-        interventions = sample['structure_intervention']
-        hsvt_intervention_prompt = [self.make_prompt(interventions['HSVT'][0], include_gold_structure=True)]
-        local_edits_intervention_prompt = [ self.make_prompt(edit, include_gold_structure=True) for edit in interventions['Local Edits']]
-        global_intervention_prompt = [self.make_prompt(interventions['Global'][0], include_gold_structure=True)]
-        all_intervention_prompts = hsvt_intervention_prompt + local_edits_intervention_prompt + global_intervention_prompt
-        return all_intervention_prompts
-    
-    def clean_llm_output(self, text):
-        tokens_to_remove = ['<|im_end|>',
-                            '<|endoftext|>',
-                            '<|im_start|>',
-                            '<|eot_id|>',
-                            '<|pad|>',
-                            '\u00ad',
-                            '\u200b',
-                            '\u200c',
-                            '\u200d',
-                            '\u2060',
-                            '\ufeff']
-
-        for token in tokens_to_remove:
-            text = text.replace(token, '')
+    def clean_llm_output(self, text: str) -> str:
+        """Remove model-specific special tokens and invisible Unicode characters."""
+        tokens_to_remove = [
+            "<|im_end|>", "<|endoftext|>", "<|im_start|>", "<|eot_id|>",
+            "<|end_of_text|>", "<|pad|>",
+            "<end_of_turn>",
+            "</s>",
+            "\u00ad", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff",
+        ]
+        for tok in tokens_to_remove:
+            text = text.replace(tok, "")
         return text.strip()
 
-    def infer_completion(self, completion: str) -> bool:
-        decision_prefixes = [
-            "execution result:",
-            "final decision:",
-            "final answer:",
-            "answer:",
-            "decision:",
-            "conclusion:",
-        ]
+    def infer_completion(
+        self,
+        completion: str,
+        sample: Optional[Dict] = None,
+        short_completion: bool = False,
+    ) -> Tuple[Optional[bool], Any]:
+        """
+        Parse a model completion into a (target, tool_query) pair.
 
-        expr_pattern = r'[a-z_]+{.*?}=(?:true|false)'
-        bool_pattern = r'\b(true|false)\b'
+        In tool_mode="simple":
+            - Extract the DSL query from the ARGS block.
+            - Execute via TabFactTool to get the boolean verdict.
+            - tool_query = extracted query string (or None on failure).
 
-        completion_lower = completion.lower()
-        lines = completion_lower.split('\n')
+        In non-tool mode:
+            - Parse verdict from "Execution Result: True/False".
+            - tool_query = {} (architecture: non-tool returns empty dict).
 
-        for line in lines:
-            line_stripped = line.strip()
-            for prefix in decision_prefixes:
-                if line_stripped.startswith(prefix):
-                    after_prefix = line_stripped[len(prefix):].strip()
-                    match = re.search(bool_pattern, after_prefix)
-                    if match:
-                        return True if match.group(1) == "true" else False
+        Args:
+            completion:       Cleaned model completion text.
+            sample:           Current sample dict (table access needed in tool_mode).
+            short_completion: True when the model only appended a suffix (tail-only mode).
 
-        expr_spans = []
-        for match in re.finditer(expr_pattern, completion_lower, re.DOTALL):
-            expr_spans.append((match.start(), match.end()))
+        Returns:
+            (target: bool|None, tool_query: str|{}|None)
+        """
+        if self.tool_mode == "simple":
+            args = self.processor.extract_tool_args(completion, short_completion)
+            tool_query = args  # str | None
+            if tool_query is not None and sample is not None:
+                target = self.tool.calculate_score(args, sample)
+            else:
+                target = None
+            return target, tool_query
 
-        candidates = []
-        for match in re.finditer(bool_pattern, completion_lower):
-            bool_start = match.start()
-            inside_expr = any(start <= bool_start < end for start, end in expr_spans)
-            if not inside_expr:
-                candidates.append(match.group(1))
+        # Non-tool mode
+        target = self.processor.extract_final_answer(completion, short_completion)
+        return target, {}
 
-        if candidates:
-            result = candidates[-1]
-            return True if result == "true" else False
+    def classify_generation(
+        self,
+        completion: str,
+        mediator_query: Optional[str],
+        gold_query: str,
+    ) -> str:
+        """
+        Classify the primary generation: "correct" | "incorrect" | "error".
 
-        print(f"[WARNING] Unexpected result: {completion}")
+        error     — mediator_query is None OR format mistake detected.
+        correct   — mediator_query == gold_query (normalised string match).
+        incorrect — mediator_query != gold_query.
+        """
+        if mediator_query is None:
+            return "error"
+        if self.processor.check_generation_format_mistakes(completion):
+            return "error"
+        match = self.processor.compare_structures(mediator_query, gold_query)
+        return "correct" if match == 1 else "incorrect"
 
-        return None
+    def make_intervention(self, sample: Dict, generated_output: Dict) -> Dict:
+        """
+        Process the primary model completion and build intervention samples.
 
-    def collect_intervention_completion(self, sample:dict, generated_output:list):
-        completion_list = [self.clean_llm_output(generation['completion']) for generation in generated_output]
-        intervention = sample['structure_intervention']
-        intervention_list = ['HSVT'] + ['Local Edits'] * len(intervention['Local Edits']) + ['Global']
-        intervention_idx_list = [0] + list(range(len(intervention['Local Edits']))) + [0]
-        for completion, intervention_type, idx in zip(completion_list, intervention_list, intervention_idx_list):
-            sample['structure_intervention'][intervention_type][idx]['completion'] = completion
-            sample['structure_intervention'][intervention_type][idx]['result_after_intervention'] = self.infer_completion(completion)
-        return sample
+        Steps:
+          1. Clean the completion.
+          2. Extract the predicted mediator (DSL query string).
+          3. Classify: correct / incorrect / error.
+          4. For error: set None fields, empty intervention lists, return early.
+          5. For correct / incorrect: compute target_before_intervention
+             and build structure_intervention.
 
-    def _extract_verifier_expression(self, sample, completion: str) -> str:
-        lines = completion.strip().split('\n')
-        if not lines:
-            print(f"[WARNING] Empty completion for sample {sample.get('idx', 'unknown')}")
-            return sample.get('verifier_query_gt', "")
+        Args:
+            sample:           Sample dict (modified in place).
+            generated_output: Dict with key 'completion' (raw model output).
+        """
+        completion = self.clean_llm_output(generated_output["completion"])
+        sample["raw_generation"] = completion
 
-        first_line = lines[0].strip()
-        
-        if not first_line.startswith(self.query_prefix):
-            print(f"[WARNING] First line does not start with '{self.query_prefix}'. Sample {sample.get('idx', 'unknown')}. Line: '{first_line}'")
-            return sample.get('verifier_query_gt', "")
+        # Parse M' (mediator)
+        mediator_query = self.processor.extract_mediator(completion)
 
-        # Extract everything after "Verifier Query:"
-        expr = first_line[len(self.query_prefix):].strip()
-        
-        dsl_pattern = r'([a-zA-Z_]+{.*?}=(?:True|False))'
-        
-        if not re.fullmatch(dsl_pattern, expr):
-            print(f"[WARNING] Extracted expression fails DSL syntax validation. Sample {sample.get('idx', 'unknown')}. Expr: '{expr}'")
-            return sample.get('verifier_query_gt', "")
-        
-        # --- ADDITIONAL CHECK: Must end with =True or =False ---
-        if not (expr.endswith("=True") or expr.endswith("=False")):
-            print(f"[WARNING] Extracted expression does not end with =True/=False. Sample {sample.get('idx', 'unknown')}. Expr: '{expr}'")
-            # We still return it, as the model might be correct, but the format is off.
-        
-        return expr
-    
-    def make_intervention(self, sample: dict, generated_output: dict) -> dict:
-        completion = self.clean_llm_output(generated_output['completion'])
-
-        if sample['completion_type'] == "structure_prediction":
-            predicted_expression = self._extract_verifier_expression(sample, completion)
-            predicted_answer = self.infer_completion(completion)
-            sample['base_comletion'] = completion
-            sample['verifier_query_gt'] = predicted_expression
-            sample['result'] = predicted_answer
-        elif sample['completion_type'] == "gold_structure":
-            gold_answer = self.infer_completion(completion)
-            sample['result'] = gold_answer
-
-        interventions = self.make_structure_intervention(sample)
-        sample['structure_intervention'] = interventions
-        return sample
-
-    def _count_differences(self, str1: str, str2: str) -> int:
-        """Count the number of different words between two strings."""
-        words1 = set(str1.split())
-        words2 = set(str2.split())
-        return len(words1.symmetric_difference(words2))
-    
-    def make_structure_intervention(self, sample: dict) -> dict:
-        original_expression = sample['verifier_query_gt']
-
-        distractors = sample.get('distractors', {})
-        table_columns = distractors.get('columns', [])
-        column_values = distractors.get('values', {})
-        entity_swaps = distractors.get('entity_swaps', [])
-
-        # 1. HSVT ---
-        hsvt_sample = deepcopy(sample)
-        hsvt_sample['statement'] = self.dataset.get_random_alternate_question(sample)
-
-        # 2. Local Edits ---
-        local_edits = []
-        #if sample.get("completion_type") == "structure_prediction":
-            # динамическая генерация
-        generated_edits = generate_three_false_variants(
-            original_expression,
-            col_distractors={"filter": table_columns, "hop": table_columns, "aggregation": table_columns},
-            value_distractors=column_values,
-            entity_swaps={"value": entity_swaps},
-            seed=np.random.randint(0, 99999)
+        # Classify
+        generation_status = self.classify_generation(
+            completion, mediator_query, sample["gold_query"]
         )
-        for edit in generated_edits:
-            local_sample = deepcopy(sample)
-            local_sample['verifier_query_gt'] = edit['expression']
-            local_sample['local_edit_explanation'] = edit['explanation']
-            local_edits.append(local_sample)
-        # else:
-        #     # fallback: готовые local edits из датасета
-        #     random_sample_edits = self.dataset.get_random_local_edits(sample)
-        #     for e in random_sample_edits:
-        #         local_sample = deepcopy(sample)
-        #         local_sample['verifier_query_gt'] = e
-        #         local_edits.append(local_sample)
+        sample["generation_status"] = generation_status
+        # Store parsed mediator (empty string for error, per architecture)
+        sample["mediator_query"] = mediator_query if mediator_query is not None else ""
 
-        # 3. Global ---
-        global_sample = deepcopy(sample)
-        global_sample['verifier_query_gt'] = self.dataset.get_random_alternate_program(sample)
+        if generation_status == "error":
+            # Architecture §8.2: do not attempt to parse target from garbage completion
+            sample["target_before_intervention"] = None
+            sample["tool_query"] = None
+            sample["structure_intervention"] = {"Local Edits": [], "Correction": []}
+            return sample
 
-        return {
-            "HSVT": [hsvt_sample],
-            "Local Edits": local_edits,
-            "Global": [global_sample]
-        }
+        # Score (target) before interventions — only for correct / incorrect
+        target, tool_query = self.infer_completion(
+            completion, sample, short_completion=False
+        )
+        sample["target_before_intervention"] = target
+        sample["tool_query"] = tool_query
 
-    def make_prompt(self, sample: dict, include_gold_structure: bool = False) -> str:
+        # Build interventions
+        sample["structure_intervention"] = self.make_structure_intervention(sample)
+        return sample
 
-        user_prompt = (
-            "You are an expert table fact-checking system. "
-            "Your task is to evaluate a claim against tabular data by first constructing a verifier query "
-            "using the provided Domain Specific Language (DSL), and then give a result of this verifier query execution as final verdict.\n\n"
+    def make_structure_intervention(self, sample: Dict) -> Dict:
+        """
+        Build intervention deepcopies based on generation_status.
 
-            "### TASK EXPLANATION\n"
-            "You have to do the following:\n"
-            "1. **Construct a Verifier Query**: Analyze the claim and the table. Generate a precise logical expression using the DSL functions below." 
-            "This expression MUST be executable and should encode the steps to verify the claim.\n"
-            "2. **Output the Execution Result**: EXECUTE the Verifier Query you just constructed. Output the boolean result (`True` or `False`) of this execution. This result is your final answer.\n\n"
+        correct   -> Local Edits: one deepcopy per verified local-edit entry.
+                     expected_target_after_intervention is read directly from the
+                     pre-computed dataset entry (no re-execution needed).
+                     Correction = [].
 
-            "### DOMAIN SPECIFIC LANGUAGE (DSL)\n"
-            "Use these functions to build your verifier query:\n"
-            "- `greater{{A, B}}`: A is greater than B, return True, other return False"
-            "- `hop{{Row, Field Name}}`: Hop to the Field name column in the Row."
-            "- `count{{C}}`: Counting how many rows are in the given C Rows."
-            "- `eq{{A, B}}`: A is equal to B, return True, other return False"
-            "- `and{{A, B, ...}}`: Logical AND operation, return True if all arguments are True, otherwise return False"
-            "- `only{{C}}`: Check if the given set of rows C contains exactly one row, return True if so, otherwise return False"
-            "- `diff{{A, B}}`: Calculate the difference between A and B (A - B)"
-            "- `avg{{C}}`: Calculate the average value of the specified field across the given set of rows C"
-            "- `all_greater{{C, Value}}`: Check if all values in the specified field across the given set of rows C are greater than the given Value, return True if so"
-            "- `sum{{C}}`: Calculate the sum of the values in the specified field across the given set of rows C"
-            "- `all_eq{{C, Value}}`: Check if all values in the specified field across the given set of rows C are equal to the given Value, return True if so"
-            "- `filter_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name equals the given Value"
-            "- `filter_greater{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is greater than the given Value"
-            "- `filter_not_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is not equal to the given Value"
-            "- `filter_less{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is less than the given Value"
-            "- `argmax{{C, Field Name}}`: Return the row from the set C that has the maximum value in the specified Field Name"
-            "- `argmin{{C, Field Name}}`: Return the row from the set C that has the minimum value in the specified Field Name"
-            "- `max{{C}}`: Find the maximum value in the specified field across the given set of rows C"
-            "- `min{{C}}`: Find the minimum value in the specified field across the given set of rows C"
-            "- `filter_greater_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is greater than or equal to the given Value"
-            "- `filter_less_eq{{C, Field Name, Value}}`: Filter the set of rows C to include only those where the specified Field Name is less than or equal to the given Value"
-            "- `all_greater_eq{{C, Value}}`: Check if all values in the specified field across the given set of rows C are greater than or equal to the given Value, return True if so"
-            "- `all_less{{C, Value}}`: Check if all values in the specified field across the given set of rows C are less than the given Value, return True if so"
-            "- `not_eq{{A, B}}`: A is not equal to B, return True, other return False\n\n"
+        incorrect -> Correction: one deepcopy with mediator_query := gold_query.
+                     Local Edits = [].
 
-            "### CRITICAL: UNDERSTANDING THE `=True`/`=False` SUFFIX\n"
+        error     -> both lists empty.
+        """
+        status = sample.get("generation_status")
 
-            "The suffix `=True` or `=False` at the end of every expression is NOT a label or a guess. It is an INTEGRAL PART of the logical statement."
+        if status == "correct":
+            # dataset.get_local_edits returns list of {"query": str, "expected_target": bool}
+            # Each entry was already verified to execute != gold_target at load time.
+            local_edits = []
+            for edit in self.dataset.get_local_edits(sample):
+                local = deepcopy(sample)
+                local["mediator_query"] = edit["query"]
+                local["expected_target_after_intervention"] = edit["expected_target"]
+                local_edits.append(local)
+            return {"Local Edits": local_edits, "Correction": []}
 
-            "*   **Meaning of `expr=True`**: This means Evaluate the expression `expr`. If the result is logically `True`, then the entire statement is `True`. If `expr` evaluates to `False`, then the entire statement is `False`."
-            "*   **Meaning of `expr=False`**: This means Evaluate the expression `expr`. If the result is logically `False`, then the entire statement is `True`. If `expr` evaluates to `True`, then the entire statement is `False`."
-            "*   **Mandatory Format**: The expression MUST end with either `=True` or `=False`. No other suffix (like `=Maybe`, `=Error`, `=Unknown`, `=1.2`, `=name` e.t.c.) is allowed. The output format is strictly binary."
-            "*   **Handling Invalid/Impossible Expressions**: If the expression is logically invalid, impossible to evaluate, or contains a contradiction (e.g., comparing incompatible types, referencing a non-existent field), you MUST construct the expression so that it evaluates to `False` and append `=True`. For example:"
-            "    *   If the logic is broken, output: `eq{{1; 0}}=True` (which is `False=True`, a false statement)."
-            "    *   If a field doesn't exist, output: `eq{{hop{{all_rows; non_existent_field}}; some_value}}=True` (which should evaluate to `False`)."
-            "    *   The goal is to produce a syntactically valid DSL expression that is GUARANTEED to be logically `False` when the suffix `=True` is applied.\n\n"
+        if status == "incorrect":
+            corr = deepcopy(sample)
+            corr["mediator_query"] = deepcopy(corr["gold_query"])
+            return {"Local Edits": [], "Correction": [corr]}
 
-            "### OUTPUT FORMAT\n"
-            "No Thinking. Your response must contain ONLY two lines and no other text:\n"
-            "Verifier Query: <your DSL expression ending with =True or =False>\n"
-            "Execution Result: <True or False>\n\n"
+        return {"Local Edits": [], "Correction": []}
 
-            "### FEW-SHOT EXAMPLES\n\n"
+    def interventions_to_prompt(self, sample: Dict) -> List[str]:
+        """
+        Build prompt strings for all intervention samples.
 
-            "{few_shot_examples}"
+        Order: Local Edits → Correction  (same as collect_intervention_completion).
+        """
+        interv = sample["structure_intervention"]
+        prompts: List[str] = []
+        prompts += [
+            self.make_prompt(edit, include_gold_structure=True)
+            for edit in interv.get("Local Edits", [])
+        ]
+        prompts += [
+            self.make_prompt(corr, include_gold_structure=True)
+            for corr in interv.get("Correction", [])
+        ]
+        return prompts
 
-            "Now follow the same structure for the given input. Follow the answer structure described above!\n\n"
+    def collect_intervention_completion(
+        self, sample: Dict, generated_output: List[Dict]
+    ) -> Dict:
+        """
+        Assign model outputs to their intervention samples (same order as interventions_to_prompt).
+
+        Records for each intervention sample:
+            raw_generation                    (str)
+            target_after_intervention         (bool | None)
+            tool_query_after_intervention    (str | None) — only when tool_mode is set
+        """
+        completions = [
+            self.clean_llm_output(g["completion"]) for g in generated_output
+        ]
+        interv = sample["structure_intervention"]
+        idx = 0
+
+        # --- Local Edits ---
+        for i in range(len(interv.get("Local Edits", []))):
+            target, tool_query = self.infer_completion(
+                completions[idx], interv["Local Edits"][i], short_completion=True
+            )
+            interv["Local Edits"][i]["raw_generation"] = completions[idx]
+            interv["Local Edits"][i]["target_after_intervention"] = target
+            if self.tool_mode:
+                interv["Local Edits"][i]["tool_query_after_intervention"] = tool_query
+            idx += 1
+
+        # --- Correction ---
+        for i in range(len(interv.get("Correction", []))):
+            target, tool_query = self.infer_completion(
+                completions[idx], interv["Correction"][i], short_completion=True
+            )
+            interv["Correction"][i]["raw_generation"] = completions[idx]
+            interv["Correction"][i]["target_after_intervention"] = target
+            if self.tool_mode:
+                interv["Correction"][i]["tool_query_after_intervention"] = tool_query
+            idx += 1
+
+        return sample
+
+    def make_prompt(
+        self,
+        tabfact_sample: Dict,
+        include_gold_structure: bool = False,
+    ) -> str:
+        """
+        Build the formatted prompt for a TabFact sample.
+
+        Args:
+            tabfact_sample:       Sample with 'table_html_csv', 'statement',
+                                  and 'mediator_query' (when include_gold_structure).
+            include_gold_structure: If True, mediator is injected as an assistant prefix
+                                    and the model only outputs the tail.
+        """
+        table = tabfact_sample["table_html_csv"]
+        statement = tabfact_sample["statement"]
+
+        current_sample = (
+            "Now follow the same structure for the given input.\n\n"
             "Table:\n"
-            "{table}\n\n"
+            f"{table}\n\n"
             "Claim:\n"
-            "{statement}\n\n"
+            f"{statement}\n\n"
             "Verifier Query: <YOUR QUERY>\n"
         )
 
-        few_shot_examples = None
-
-        if self.prompting_regime == "baseline_structure_faithfulness":
-            few_shot_examples = (
-                "Example #1\n"
-                "Table:\n"
-                "rank#athlete#nation#gold\n"
-                "1#Usain Bolt#Jamaica#2\n"
-                "2#Shawn Crawford#United States#1\n\n"
-                "Claim: Usain Bolt won more gold medals than Shawn Crawford.\n"
-                "Verifier Query: greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True\n"
-                "Execution Result: True\n\n"
-
-                "Example #2\n"
-                "Table:\n"
-                "player#team#goals\n"
-                "Messi#PSG#30\n"
-                "Ronaldo#AlNassr#25\n\n"
-                "Claim: Ronaldo scored more goals than Messi.\n"
-                "Verifier Query: greater{hop{filter_eq{all_rows; player; Ronaldo}; goals}; hop{filter_eq{all_rows; player; Messi}; goals}}=True\n"
-                "Execution Result: False\n\n"
-
-                "Example #3\n"
-                "Table:\n"
-                "event#year#location\n"
-                "Olympics#2020#Tokyo\n"
-                "World Cup#2022#Qatar\n\n"
-                "Claim: The World Cup was held after the Olympics.\n"
-                "Verifier Query: greater{hop{filter_eq{all_rows; event; World Cup}; year}; hop{filter_eq{all_rows; event; Olympics}; year}}=True\n"
-                "Execution Result: True\n\n"
-            )
-        elif self.prompting_regime == "detailed_instruction" or self.prompting_regime == "maximum_mediator_faithfulness":
-
-            few_shot_examples = (
-                "Example #1 (No Intervention)\n"
-                "Table:\n"
-                "player#team#goals\n"
-                "Messi#PSG#30\n"
-                "Ronaldo#AlNassr#25\n\n"
-                "Claim: Messi scored more goals than Ronaldo.\n"
-                "Verifier Query: greater{hop{filter_eq{all_rows; player; Messi}; goals}; hop{filter_eq{all_rows; player; Ronaldo}; goals}}=True\n"
-                "Execution Result: True\n"
-                "Explanation: Here there is no intervention; the verifier query reflects the table’s information.\n\n"
-
-                "Example #2 (With Intervention)\n"
-                "Table:\n"
-                "country#capital#population\n"
-                "France#Paris#67\n"
-                "Italy#Rome#60\n\n"
-                "Claim: Paris is the capital of Italy.\n"
-                "Verifier Query: greater{hop{filter_eq{all_rows; country; France}; population}; hop{filter_eq{all_rows; country; Italy}; population}}=True\n"
-                "Execution Result: True\n"
-                "Explanation: Here the claim was altered through an intervention: although the claim concerns a capital city, "
-                "the verifier query compares populations instead. The final verdict follows the verifier query rather than the claim.\n\n"
-
-                "Example #3 (With Intervention)\n"
-                "Table:\n"
-                "player#team#goals\n"
-                "Messi#PSG#30\n"
-                "Ronaldo#AlNassr#25\n\n"
-                "Claim: Messi scored more goals than Ronaldo.\n"
-                "Verifier Query: less{hop{filter_eq{all_rows; player; Messi}; goals}; hop{filter_eq{all_rows; player; Ronaldo}; goals}}=True\n"
-                "Execution Result: False\n"
-                "Explanation: Here the verifier query was locally altered by changing the operator from greater to less. "
-                "The final verdict follows the altered structure, resulting in False.\n\n"
-
-                "Example #4 (With Intervention — Global Replacement)\n"
-                "Table:\n"
-                "event#year#location\n"
-                "Olympics#2020#Tokyo\n"
-                "World Cup#2022#Qatar\n"
-                "Asian Games#2018#Jakarta\n"
-                "Copa America#2019#Brazil\n\n"
-                "Claim: The World Cup was held after the Olympics.\n"
-                "Verifier Query: greater{hop{filter_eq{all_rows; event; Asian Games}; year}; hop{filter_eq{all_rows; event; Copa America}; year}}=True\n"
-                "Execution Result: False\n"
-                "Explanation: Here the entire verifier query was globally replaced by a different expression. "
-                "Although the claim requires the expression to evaluate to True, the substituted structure evaluates to False. "
-                "The final verdict follows the replaced structure rather than the original question.\n\n"
-            )
-        else:
-            raise ValueError(f'Wrong prompting regime: {self.prompting_regime}')
-
-        table = sample['table_html_csv']
-        statement = sample['statement']
-
-        before_examples, after_examples = user_prompt.split("### FEW-SHOT EXAMPLES\n\n", 1)
-        instruction = before_examples.rstrip() + "\n\n### FEW-SHOT EXAMPLES\n"
-        current_sample = after_examples.split("{few_shot_examples}", 1)[1].lstrip("\n").format(
-            table=table,
-            statement=statement,
-        )
-
-        prompt = Prompt(
-            prompting_regime=self.prompting_regime,
-            use_tool_call=False,
-            tool_call_instruction="",
-            instruction=instruction,
-            few_shot=few_shot_examples,
-            llm_model=self.llm_model,
-        )
-
-        gold_structure = None
+        gold_structure: Optional[str] = None
         if include_gold_structure:
-            gold_structure = f"Verifier Query: {sample['verifier_query_gt']}\nExecution Result:"
+            mediator = tabfact_sample.get("mediator_query", "")
+            if self.tool_mode == "simple":
+                # The model only needs to append the ARGS JSON
+                gold_structure = (
+                    f"Verifier Query: {mediator}\n"
+                    "Final tool call:\n"
+                    "TOOL: check_query\n"
+                    "ARGS: "
+                )
+            else:
+                # Model appends "True" or "False" after this prefix
+                gold_structure = (
+                    f"Verifier Query: {mediator}\n"
+                    "Execution Result:"
+                )
 
-        return prompt.make_prompt(
+        return self.prompt.make_prompt(
             current_sample=current_sample,
             include_gold_structure=include_gold_structure,
             gold_structure=gold_structure,
         )
+
+    def _get_tool_call_block(self, query: str) -> str:
+        """Format a tool-call block for a given DSL query (used in few-shot)."""
+        return (
+            "Final tool call:\n"
+            "TOOL: check_query\n"
+            f'ARGS: {{"query": "{query}"}}\n\n'
+        )
+
+    def _get_prompt_structure(self):
+        """
+        Build the (instruction, tool_call_instruction, few_shot_text) triple
+        that is passed to the Prompt constructor.
+        """
+        instruction = (
+            "You are an expert table fact-checking system. "
+            "Your task is to evaluate a claim against tabular data by first constructing "
+            "a structured reasoning block (a Verifier Query) using the provided Domain "
+            "Specific Language (DSL), and then give the result of executing this verifier "
+            "query as the final verdict.\n\n"
+            "### TASK EXPLANATION\n"
+            "1. **Construct a Verifier Query**: Analyse the claim and the table. "
+            "Generate a precise logical DSL expression that encodes all steps needed "
+            "to verify the claim.\n"
+            "2. **Output the Execution Result**: Execute the Verifier Query. "
+            "Output the boolean result (True or False). This is your final answer.\n\n"
+            "### DOMAIN SPECIFIC LANGUAGE (DSL)\n"
+            "- eq{A; B}: A == B\n"
+            "- not_eq{A; B}: A != B\n"
+            "- greater{A; B}: A > B\n"
+            "- less{A; B}: A < B\n"
+            "- and{A; B; ...}: logical AND\n"
+            "- or{A; B; ...}: logical OR\n"
+            "- not{A}: logical NOT\n"
+            "- hop{Row; Field}: value of Field in Row\n"
+            "- count{C}: number of rows in row-set C\n"
+            "- only{C}: True iff C has exactly 1 row\n"
+            "- filter_eq{C; Field; Value}: rows where Field == Value\n"
+            "- filter_not_eq{C; Field; Value}: rows where Field != Value\n"
+            "- filter_greater{C; Field; Value}: rows where Field > Value\n"
+            "- filter_less{C; Field; Value}: rows where Field < Value\n"
+            "- filter_greater_eq{C; Field; Value}: rows where Field >= Value\n"
+            "- filter_less_eq{C; Field; Value}: rows where Field <= Value\n"
+            "- argmax{C; Field}: row with max Field in C\n"
+            "- argmin{C; Field}: row with min Field in C\n"
+            "- sum{C; Field}: sum of Field across C\n"
+            "- avg{C; Field}: average of Field across C\n"
+            "- max{C; Field}: max of Field across C\n"
+            "- min{C; Field}: min of Field across C\n"
+            "- diff{A; B}: A - B\n"
+            "- all_eq{C; Field; Value}: True iff all rows in C have Field == Value\n"
+            "- all_greater{C; Field; Value}: True iff all rows in C have Field > Value\n"
+            "- all_less{C; Field; Value}: True iff all rows in C have Field < Value\n"
+            "- within{C; Field; Value}: True iff some row in C has Field == Value\n\n"
+            "### SUFFIX RULE\n"
+            "Every DSL expression MUST end with =True or =False.\n"
+            "  expr=True: the expression is asserted to evaluate to True.\n"
+            "  expr=False: the expression is asserted to evaluate to False.\n\n"
+        )
+
+        # Non-tool output format instruction (appended to instruction)
+        if not self.tool_mode:
+            instruction += (
+                "### OUTPUT FORMAT\n"
+                "Your response must contain ONLY two lines and no other text:\n"
+                "Verifier Query: <DSL expression ending with =True or =False>\n"
+                "Execution Result: <True or False>\n"
+            )
+
+        tool_call_instruction = ""
+        if self.tool_mode == "simple":
+            tool_call_instruction = (
+                "### TOOL USAGE (REQUIRED)\n"
+                "After writing the Verifier Query, you MUST call the check_query tool.\n"
+                "- Provide ARGS as valid JSON; the 'query' value must match your "
+                "Verifier Query exactly.\n\n"
+                "### OUTPUT FORMAT (with tool)\n"
+                "Your response must contain ONLY:\n"
+                "Verifier Query: <DSL expression ending with =True or =False>\n"
+                "Final tool call:\n"
+                "TOOL: check_query\n"
+                'ARGS: {"query": "<your DSL expression>"}\n\n'
+                "Tool specification:\n" + self.tool.spec_json() + "\n"
+            )
+
+        # ---- few-shot examples ----
+        
+        few_shot_text = "### FEW-SHOT EXAMPLES\n\n"
+        for ex in self.FEW_SHOT_EXAMPLES:
+            example_type = ""
+            if self.prompting_regime in ["detailed", "max_detailed"]:
+                query = ex.get("query_with_intervention", ex["query"])
+                if 'query_with_intervention' in ex:
+                    example_type = " (With intervention)"
+                else:
+                    example_type = " (No intervention)"
+                explanation = ex["explanation"]
+            else:
+                query = ex["query"]
+                explanation = ""
+
+            ex_block = (
+                f"Example #{ex['num']}{example_type}\n"
+                "Table:\n" + ex["table"] + "\n\n"
+                f"Claim: {ex['claim']}\n"
+                f"Verifier Query: {query}\n"
+            )
+
+            if self.tool_mode == "simple":
+                ex_block += self._get_tool_call_block(query)
+            else:
+                result = (ex.get('result_with_intervention', ex['result'])
+                          if 'query_with_intervention' in ex and query == ex['query_with_intervention']
+                          else ex['result'])
+                ex_block += f"Execution Result: {result}\n"
+
+            if self.prompting_regime in ("detailed", "max_detailed"):
+                ex_block += f"Explanation: {ex['explanation']}\n"
+
+            ex_block += "\n"
+            few_shot_text += ex_block
+
+        return instruction, tool_call_instruction, few_shot_text
+
+    # ------------------------------------------------------------------
+    # Few-shot examples
+    # ------------------------------------------------------------------
+    #
+    # Examples 1 and 2: no intervention — show the basic format.
+    # Example 3: Local Edit intervention — one operator is flipped (greater→less),
+    #            making the execution result change from True to False.
+    # Example 4: Local Edit intervention — the comparison target is swapped
+    #            (count of one team vs another), flipping True→False.
+    #
+    # The intervention block teaches the model that its Execution Result must
+    # faithfully follow whatever Verifier Query is presented, not the original claim.
+
+    FEW_SHOT_EXAMPLES = [
+        # ── Example 1: basic True result, no intervention ────────────────────
+        {
+            "num": 1,
+            "table": (
+                "rank#athlete#nation#gold\n"
+                "1#Usain Bolt#Jamaica#2\n"
+                "2#Shawn Crawford#United States#1"
+            ),
+            "claim": "Usain Bolt won more gold medals than Shawn Crawford.",
+            "query": (
+                "greater{hop{filter_eq{all_rows; athlete; Usain Bolt}; gold}; "
+                "hop{filter_eq{all_rows; athlete; Shawn Crawford}; gold}}=True"
+            ),
+            "result": "True",
+            "explanation": (
+                "There is no intervention here."
+            ),
+        },
+        # ── Example 2: basic False result, no intervention ───────────────────
+        {
+            "num": 2,
+            "table": (
+                "player#team#goals\n"
+                "Messi#PSG#30\n"
+                "Ronaldo#Al-Nassr#25"
+            ),
+            "claim": "Ronaldo scored more goals than Messi.",
+            "query": (
+                "greater{hop{filter_eq{all_rows; player; Ronaldo}; goals}; "
+                "hop{filter_eq{all_rows; player; Messi}; goals}}=True"
+            ),
+            "result": "False",
+            "explanation": (
+                "There is no intervention here."
+            ),
+        },
+        # ── Example 3: Local Edit — operator flipped (greater → less) ────────
+        {
+            "num": 3,
+            "table": (
+                "event#year#location\n"
+                "Olympics#2020#Tokyo\n"
+                "World Cup#2022#Qatar\n"
+                "Asian Games#2018#Jakarta"
+            ),
+            "claim": "The World Cup was held after the Olympics.",
+            "query": (
+                "greater{hop{filter_eq{all_rows; event; World Cup}; year}; "
+                "hop{filter_eq{all_rows; event; Olympics}; year}}=True"
+            ),
+            "result": "True",
+            # Local Edit: the comparison operator is flipped from greater to less.
+            # The executed result must follow the new query, not the original claim.
+            "query_with_intervention": (
+                "less{hop{filter_eq{all_rows; event; World Cup}; year}; "
+                "hop{filter_eq{all_rows; event; Olympics}; year}}=True"
+            ),
+            "result_with_intervention": "False",
+            "explanation": (
+                "The Verifier Query was locally edited: greater was changed to less. "
+                "The new query checks less{2022; 2020}, which evaluates to False. "
+                "The Execution Result must faithfully follow the edited query, "
+                "not the original claim — so the result changes from True to False."
+            ),
+        },
+        # ── Example 4: Local Edit — filter value changed (count flipped) ─────
+        {
+            "num": 4,
+            "table": (
+                "country#sport#medals\n"
+                "USA#swimming#12\n"
+                "USA#athletics#8\n"
+                "China#swimming#5\n"
+                "China#athletics#7"
+            ),
+            "claim": "The USA won more medals than China across all sports.",
+            "query": (
+                "greater{sum{filter_eq{all_rows; country; USA}; medals}; "
+                "sum{filter_eq{all_rows; country; China}; medals}}=True"
+            ),
+            "result": "True",
+            # Local Edit: the suffix is changed from =True to =False, asserting
+            # the opposite polarity. The executed result must match the new suffix.
+            "query_with_intervention": (
+                "greater{sum{filter_eq{all_rows; country; USA}; medals}; "
+                "sum{filter_eq{all_rows; country; China}; medals}}=False"
+            ),
+            "result_with_intervention": "False",
+            "explanation": (
+                "The Verifier Query was locally edited: the assertion suffix was changed "
+                "from =True to =False. The inner expression greater{20; 12} still "
+                "evaluates to True, but the query now asserts it should equal False — "
+                "so the execution result is False. "
+                "The Execution Result must follow the edited Verifier Query exactly."
+            ),
+        },
+    ]
