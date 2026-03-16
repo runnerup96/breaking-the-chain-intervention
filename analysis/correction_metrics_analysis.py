@@ -19,7 +19,7 @@ import os
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean as _mean, pstdev as _pstdev
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -506,6 +506,288 @@ def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_nam
     print(f"{'=' * 100}\n")
 
 
+# ──────────────────────── entropy vs token position plot ────────────────────────
+
+def find_marker_index(metrics_list: Optional[list], marker: str) -> Optional[int]:
+    """
+    Find the index of the LAST occurrence of a marker (e.g., ===SKELETON===, ===SCHEMA_LINKS===, ===SLOT_MATCHING===)
+    in the metrics list. Returns None if not found.
+    """
+    if not metrics_list:
+        return None
+    
+    # Normalize marker (remove === if present, for flexible matching)
+    marker_clean = marker.replace("===", "").upper()
+    marker_full = marker if marker.startswith("===") else f"==={marker}==="
+    
+    # Strategy 1: Try to find exact match in a single token (from end)
+    for i in range(len(metrics_list) - 1, -1, -1):
+        token_str = metrics_list[i].get("token", "")
+        if marker_full in token_str:
+            return i
+    
+    # Strategy 2: If not found, try to find it across multiple tokens (from end, up to 10 tokens)
+    for i in range(len(metrics_list) - 1, -1, -1):
+        for window_size in range(2, min(11, i + 2)):
+            start_idx = max(0, i - window_size + 1)
+            combined = "".join([metrics_list[j].get("token", "") 
+                               for j in range(start_idx, i + 1)])
+            if marker_full in combined:
+                return start_idx
+    
+    # Strategy 3: Fallback - try to find any token with marker text (case-insensitive, from end)
+    for i in range(len(metrics_list) - 1, -1, -1):
+        token_str = metrics_list[i].get("token", "").upper()
+        if marker_clean in token_str:
+            return i
+    
+    # Strategy 4: Last resort - look for "===" followed by marker text nearby (from end)
+    for i in range(len(metrics_list) - 1, 0, -1):
+        token1 = metrics_list[i].get("token", "")
+        token2 = metrics_list[i - 1].get("token", "") if i > 0 else ""
+        combined = token2 + token1
+        if "===" in token1 and marker_clean in combined.upper():
+            return i - 1 if "===" in token2 else i
+    
+    return None
+
+
+def extract_sequence_from_skeleton(metrics_list: Optional[list]) -> Tuple[List[float], Dict[str, Optional[int]], Optional[int]]:
+    """
+    Extract cross-entropy sequence starting from ===SKELETON===.
+    Returns:
+        - List of cross_entropy values (from ===SKELETON=== onwards)
+        - Dictionary with marker indices: {"skeleton": idx, "schema_links": idx, "slot_matching": idx}
+          (indices are relative to the sequence, None if not found)
+        - Index where generation starts (relative to sequence, None if no generation)
+    """
+    if not metrics_list:
+        return [], {"skeleton": None, "schema_links": None, "slot_matching": None}, None
+    
+    # Find skeleton start index
+    skeleton_idx = find_marker_index(metrics_list, "===SKELETON===")
+    if skeleton_idx is None:
+        return [], {"skeleton": None, "schema_links": None, "slot_matching": None}, None
+    
+    # Extract sequence from skeleton onwards
+    sequence_metrics = metrics_list[skeleton_idx:]
+    
+    # Find marker positions relative to sequence start
+    skeleton_rel = 0  # Always at position 0 in the sequence
+    schema_links_idx = find_marker_index(sequence_metrics, "===SCHEMA_LINKS===")
+    slot_matching_idx = find_marker_index(sequence_metrics, "===SLOT_MATCHING===")
+    
+    marker_indices = {
+        "skeleton": skeleton_rel,
+        "schema_links": schema_links_idx,
+        "slot_matching": slot_matching_idx,
+    }
+    
+    # Extract cross-entropy values
+    ce_seq = []
+    for m in sequence_metrics:
+        if "cross_entropy" in m:
+            ce_seq.append(m["cross_entropy"])
+    
+    # Generation starts after prompt (we don't have separate generation for prompt-only sequences)
+    generation_start_idx = None
+    
+    return ce_seq, marker_indices, generation_start_idx
+
+
+def extract_generation_sequence(metrics_list: Optional[list]) -> List[float]:
+    """
+    Extract cross-entropy sequence from generation metrics (token_metrics).
+    Returns list of cross_entropy values.
+    """
+    if not metrics_list:
+        return []
+    
+    ce_seq = []
+    for m in metrics_list:
+        if "cross_entropy" in m:
+            ce_seq.append(m["cross_entropy"])
+    
+    return ce_seq
+
+
+def moving_average(data: np.ndarray, window_size: int) -> np.ndarray:
+    """
+    Apply moving average to 1D array, handling NaN values.
+    Uses a centered window when possible, otherwise uses trailing window.
+    """
+    if len(data) == 0:
+        return data
+    
+    result = np.full_like(data, np.nan)
+    half_window = window_size // 2
+    
+    for i in range(len(data)):
+        # Use centered window when possible
+        start = max(0, i - half_window)
+        end = min(len(data), i + half_window + 1)
+        
+        # If we're near the beginning, use trailing window
+        if i < half_window:
+            start = 0
+            end = min(window_size, len(data))
+        
+        # If we're near the end, use leading window
+        if i >= len(data) - half_window:
+            start = max(0, len(data) - window_size)
+            end = len(data)
+        
+        window_data = data[start:end]
+        # Only compute mean if we have at least one non-NaN value
+        if not np.all(np.isnan(window_data)):
+            result[i] = np.nanmean(window_data)
+    
+    return result
+
+
+def plot_entropy_vs_token_position(
+    results: list,
+    model_name: str,
+    output_dir: str,
+    window_size: int = 12,
+):
+    """
+    Plot cross-entropy vs token position for correction scenarios.
+    Creates 2 comparison plots:
+    1. Generation: Bad Structure vs Corrected Structure (2 subplots in column)
+    2. Prompt: Bad Structure vs Corrected Structure (2 subplots in column)
+    
+    Args:
+        results: List of sample dictionaries with token metrics
+        model_name: Name of the model for title
+        output_dir: Directory to save plots
+        window_size: Size of the moving average window (default: 12 tokens)
+    """
+    # ──────────────────────── Picture 1: Generation (Bad vs Corrected, 2 subplots) ────────────────────────
+    fig1, axes1 = plt.subplots(2, 1, figsize=(14, 12))
+    
+    scenarios_gen = [
+        ("bad_structure", "Bad Structure", COLORS["Bad Structure"]),
+        ("corrected_structure", "Corrected Structure", COLORS["Corrected Structure"]),
+    ]
+    
+    for idx, (scenario_key, scenario_label, color) in enumerate(scenarios_gen):
+        ax = axes1[idx]
+        
+        # Find first sample with data
+        first_sample = None
+        ce_seq = []
+        
+        for sample in results:
+            if scenario_key == "bad_structure":
+                token_metrics = sample.get("bad_token_metrics")
+            else:  # corrected_structure
+                correction = sample.get("structure_intervention", {}).get("correction", [])
+                if correction:
+                    token_metrics = correction[0].get("corrected_token_metrics")
+                else:
+                    token_metrics = None
+            
+            if token_metrics:
+                first_sample = sample
+                ce_seq = extract_generation_sequence(token_metrics)
+                break
+        
+        if not ce_seq or len(ce_seq) == 0:
+            ax.text(0.5, 0.5, f"No data for {scenario_label} Generation", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"{scenario_label} Generation — {model_name}")
+            continue
+        
+        # Apply smoothing to single sequence
+        ce_array = np.array(ce_seq)
+        mean_ce = moving_average(ce_array, window_size)
+        positions = np.arange(len(mean_ce))
+        
+        # Plot smoothed line
+        ax.plot(positions, mean_ce, linewidth=2, color=color, 
+                label=f"{scenario_label} (smoothed)", zorder=3)
+        
+        ax.set_xlabel("Token Position (Generation)")
+        ax.set_ylabel("Cross-Entropy")
+        ax.set_title(f"{scenario_label} Generation — {model_name}")
+        ax.legend(loc="upper left")
+        ax.grid(axis="y", alpha=0.3)
+    
+    fig1.tight_layout()
+    _save(fig1, output_dir, f"{model_name}_entropy_vs_position_generation")
+    
+    # ──────────────────────── Picture 2: Prompt (Bad vs Corrected, 2 subplots) ────────────────────────
+    fig2, axes2 = plt.subplots(2, 1, figsize=(14, 12))
+    
+    scenarios_prompt = [
+        ("bad_structure", "Bad Structure", COLORS["Bad Structure"]),
+        ("corrected_structure", "Corrected Structure", COLORS["Corrected Structure"]),
+    ]
+    
+    for idx, (scenario_key, scenario_label, color) in enumerate(scenarios_prompt):
+        ax = axes2[idx]
+        
+        # Find first sample with data
+        first_sample = None
+        ce_seq = []
+        marker_indices = {}
+        
+        for sample in results:
+            if scenario_key == "bad_structure":
+                prompt_metrics = sample.get("bad_prompt_metrics")
+            else:  # corrected_structure
+                correction = sample.get("structure_intervention", {}).get("correction", [])
+                if correction:
+                    prompt_metrics = correction[0].get("corrected_prompt_metrics")
+                else:
+                    prompt_metrics = None
+            
+            if prompt_metrics:
+                first_sample = sample
+                ce_seq, marker_indices, _ = extract_sequence_from_skeleton(prompt_metrics)
+                break
+        
+        if not ce_seq or len(ce_seq) == 0:
+            ax.text(0.5, 0.5, f"No data for {scenario_label} Prompt", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"{scenario_label} Prompt (from ===SKELETON===) — {model_name}")
+            continue
+        
+        # Apply smoothing to single sequence
+        ce_array = np.array(ce_seq)
+        mean_ce = moving_average(ce_array, window_size)
+        positions = np.arange(len(mean_ce))
+        
+        # Plot smoothed line
+        ax.plot(positions, mean_ce, linewidth=2, color=color, 
+                label=f"{scenario_label} (smoothed)", zorder=3)
+        
+        # Mark section boundaries
+        skeleton_idx = marker_indices.get("skeleton")
+        schema_links_idx = marker_indices.get("schema_links")
+        slot_matching_idx = marker_indices.get("slot_matching")
+        
+        if skeleton_idx is not None:
+            ax.axvline(skeleton_idx, color="#FF8C00", linestyle="--", linewidth=1.5, 
+                      label="===SKELETON===", zorder=4)
+        if schema_links_idx is not None:
+            ax.axvline(schema_links_idx, color="#9B59B6", linestyle="--", linewidth=1.5, 
+                      label="===SCHEMA_LINKS===", zorder=4)
+        if slot_matching_idx is not None:
+            ax.axvline(slot_matching_idx, color="#E67E22", linestyle="--", linewidth=1.5, 
+                      label="===SLOT_MATCHING===", zorder=4)
+        
+        ax.set_xlabel("Token Position (Prompt from ===SKELETON===)")
+        ax.set_ylabel("Cross-Entropy")
+        ax.set_title(f"{scenario_label} Prompt (from ===SKELETON===) — {model_name}")
+        ax.legend(loc="upper left")
+        ax.grid(axis="y", alpha=0.3)
+    
+    fig2.tight_layout()
+    _save(fig2, output_dir, f"{model_name}_entropy_vs_position_prompt")
+
+
 # ──────────────────────── main ────────────────────────
 
 def main():
@@ -561,6 +843,7 @@ def main():
         plot_prompt_cross_entropy_bars(per_sample, model_name, args.output_dir)
         plot_metrics_heatmap(per_sample, model_name, args.output_dir)
         plot_prompt_vs_generation(per_sample, model_name, args.output_dir)
+        plot_entropy_vs_token_position(results, model_name, args.output_dir)
 
     print(f"\nAll figures saved to {args.output_dir}/")
 

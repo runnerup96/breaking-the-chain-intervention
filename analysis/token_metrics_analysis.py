@@ -25,6 +25,13 @@ from typing import Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+try:
+    from scipy import stats
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+    stats = None
+
 # ──────────────────────── style ────────────────────────
 plt.rcParams.update({
     "font.size": 12,
@@ -164,54 +171,148 @@ def mean_last_fraction(token_metrics_list: Optional[list], key: str, fraction: f
     return _mean(vals) if vals else None
 
 
-def mean_from_skeleton(token_metrics_list: Optional[list], key: str) -> Optional[float]:
+def mean_from_skeleton(token_metrics_list: Optional[list], key: str, search_from_start: bool = False) -> Optional[float]:
     """
     Return the mean of `key` for tokens starting from ===SKELETON===.
     This is the changed part of the prompt where interventions occur.
+    
+    Args:
+        token_metrics_list: List of token metrics
+        key: Metric key to extract (e.g., "cross_entropy")
+        search_from_start: If True, search from the beginning; if False, search from the end (default)
     """
     if not token_metrics_list:
         return None
     
-    # Find the LAST index where ===SKELETON=== appears (search from end, same logic as extract_tokenized_text_from_skeleton)
     skeleton_idx = None
     
-    # Strategy 1: Try to find exact match for ===SKELETON=== in a single token (from end)
-    for i in range(len(token_metrics_list) - 1, -1, -1):
-        token_str = token_metrics_list[i].get("token", "")
-        if "===SKELETON===" in token_str:
-            skeleton_idx = i
-            break
-    
-    # Strategy 2: If not found, try to find it across multiple tokens (from end, up to 10 tokens)
-    if skeleton_idx is None:
-        for i in range(len(token_metrics_list) - 1, -1, -1):
-            for window_size in range(2, min(11, i + 2)):
-                start_idx = max(0, i - window_size + 1)
-                combined = "".join([token_metrics_list[j].get("token", "") 
-                                   for j in range(start_idx, i + 1)])
-                if "===SKELETON===" in combined:
-                    skeleton_idx = start_idx
-                    break
-            if skeleton_idx is not None:
-                break
-    
-    # Strategy 3: Fallback - try to find any token with "SKELETON" (case-insensitive, from end)
-    if skeleton_idx is None:
-        for i in range(len(token_metrics_list) - 1, -1, -1):
-            token_str = token_metrics_list[i].get("token", "").upper()
-            if "SKELETON" in token_str:
+    if search_from_start:
+        # Search from the beginning (for base generation in predicted_structure)
+        # Strategy 1: Try to find exact match for ===SKELETON=== in a single token (from start)
+        for i in range(len(token_metrics_list)):
+            token_str = token_metrics_list[i].get("token", "")
+            if "===SKELETON===" in token_str:
                 skeleton_idx = i
                 break
-    
-    # Strategy 4: Last resort - look for "===" followed by "SKELETON" nearby (from end)
-    if skeleton_idx is None:
-        for i in range(len(token_metrics_list) - 1, 0, -1):
-            token1 = token_metrics_list[i].get("token", "")
-            token2 = token_metrics_list[i - 1].get("token", "") if i > 0 else ""
-            combined = token2 + token1
-            if "===" in token1 and "SKELETON" in combined:
-                skeleton_idx = i - 1 if "===" in token2 else i
+        
+        # Strategy 2: If not found, try to find it across multiple tokens (from start, up to 10 tokens)
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list)):
+                for window_size in range(2, min(11, len(token_metrics_list) - i + 1)):
+                    end_idx = min(len(token_metrics_list), i + window_size)
+                    combined = "".join([token_metrics_list[j].get("token", "") 
+                                       for j in range(i, end_idx)])
+                    if "===SKELETON===" in combined:
+                        skeleton_idx = i
+                        break
+                if skeleton_idx is not None:
+                    break
+        
+        # Strategy 3: Fallback - try to find any token with "SKELETON" (case-insensitive, from start)
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list)):
+                token_str = token_metrics_list[i].get("token", "").upper()
+                if "SKELETON" in token_str:
+                    skeleton_idx = i
+                    break
+        
+        # Strategy 4: If still not found from start, try searching from end as fallback
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list) - 1, -1, -1):
+                token_str = token_metrics_list[i].get("token", "")
+                if "===SKELETON===" in token_str:
+                    skeleton_idx = i
+                    break
+            
+            # Try across multiple tokens from end
+            if skeleton_idx is None:
+                for i in range(len(token_metrics_list) - 1, -1, -1):
+                    for window_size in range(2, min(11, i + 2)):
+                        start_idx = max(0, i - window_size + 1)
+                        combined = "".join([token_metrics_list[j].get("token", "") 
+                                           for j in range(start_idx, i + 1)])
+                        if "===SKELETON===" in combined:
+                            skeleton_idx = start_idx
+                            break
+                    if skeleton_idx is not None:
+                        break
+            
+            # Last fallback - any token with "SKELETON" from end
+            if skeleton_idx is None:
+                for i in range(len(token_metrics_list) - 1, -1, -1):
+                    token_str = token_metrics_list[i].get("token", "").upper()
+                    if "SKELETON" in token_str:
+                        skeleton_idx = i
+                        break
+    else:
+        # Search from the end (default, for prompts and interventions)
+        # Strategy 1: Try to find exact match for ===SKELETON=== in a single token (from end)
+        for i in range(len(token_metrics_list) - 1, -1, -1):
+            token_str = token_metrics_list[i].get("token", "")
+            if "===SKELETON===" in token_str:
+                skeleton_idx = i
                 break
+        
+        # Strategy 2: If not found, try to find it across multiple tokens (from end, up to 10 tokens)
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list) - 1, -1, -1):
+                for window_size in range(2, min(11, i + 2)):
+                    start_idx = max(0, i - window_size + 1)
+                    combined = "".join([token_metrics_list[j].get("token", "") 
+                                       for j in range(start_idx, i + 1)])
+                    if "===SKELETON===" in combined:
+                        skeleton_idx = start_idx
+                        break
+                if skeleton_idx is not None:
+                    break
+        
+        # Strategy 3: Fallback - try to find any token with "SKELETON" (case-insensitive, from end)
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list) - 1, -1, -1):
+                token_str = token_metrics_list[i].get("token", "").upper()
+                if "SKELETON" in token_str:
+                    skeleton_idx = i
+                    break
+        
+        # Strategy 4: Last resort - look for "===" followed by "SKELETON" nearby (from end)
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list) - 1, 0, -1):
+                token1 = token_metrics_list[i].get("token", "")
+                token2 = token_metrics_list[i - 1].get("token", "") if i > 0 else ""
+                combined = token2 + token1
+                if "===" in token1 and "SKELETON" in combined:
+                    skeleton_idx = i - 1 if "===" in token2 else i
+                    break
+    
+    # Last resort: search anywhere in the sequence (first occurrence)
+    if skeleton_idx is None:
+        # Try to find ===SKELETON=== anywhere
+        for i in range(len(token_metrics_list)):
+            token_str = token_metrics_list[i].get("token", "")
+            if "===SKELETON===" in token_str:
+                skeleton_idx = i
+                break
+        
+        # Try across multiple tokens anywhere
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list)):
+                for window_size in range(2, min(11, len(token_metrics_list) - i + 1)):
+                    end_idx = min(len(token_metrics_list), i + window_size)
+                    combined = "".join([token_metrics_list[j].get("token", "") 
+                                       for j in range(i, end_idx)])
+                    if "===SKELETON===" in combined:
+                        skeleton_idx = i
+                        break
+                if skeleton_idx is not None:
+                    break
+        
+        # Final fallback: any token with "SKELETON" anywhere
+        if skeleton_idx is None:
+            for i in range(len(token_metrics_list)):
+                token_str = token_metrics_list[i].get("token", "").upper()
+                if "SKELETON" in token_str:
+                    skeleton_idx = i
+                    break
     
     if skeleton_idx is None:
         return None
@@ -1273,33 +1374,52 @@ def plot_entropy_vs_token_position(
     
     for idx, intervention_type in enumerate(intervention_types):
         ax = axes1[idx]
-        all_sequences, marker_positions = _extract_sequences_for_scenario(
-            results, intervention_type, structure_type
-        )
         
-        if not all_sequences:
+        # Find first sample matching the scenario
+        first_sample = None
+        for sample in results:
+            ct = sample.get("completion_type", "")
+            suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
+            if suffix == structure_type:
+                si = sample.get("structure_intervention", {})
+                interventions = si.get(intervention_type, [])
+                if interventions and interventions[0].get("token_metrics"):
+                    first_sample = sample
+                    break
+        
+        if not first_sample:
             ax.text(0.5, 0.5, f"No data for {intervention_type}", 
                    transform=ax.transAxes, ha="center", va="center")
             ax.set_title(f"{intervention_type} — Gold Structure — {model_name}")
             continue
         
-        mean_ce, std_ce, max_len = _compute_smoothed_metrics(all_sequences, window_size)
+        # Extract sequence from first sample
+        interv = first_sample["structure_intervention"][intervention_type][0]
+        prompt_metrics = interv.get("prompt_metrics")
+        token_metrics = interv.get("token_metrics")
+        
+        ce_seq, marker_indices, gen_start = extract_combined_sequence(prompt_metrics, token_metrics)
+        if not ce_seq or len(ce_seq) == 0:
+            ax.text(0.5, 0.5, f"No sequence data for {intervention_type}", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"{intervention_type} — Gold Structure — {model_name}")
+            continue
+        
+        # Apply smoothing to single sequence
+        ce_array = np.array(ce_seq)
+        mean_ce = moving_average(ce_array, window_size)
         positions = np.arange(len(mean_ce))
         
-        # Plot smoothed mean line
+        # Plot smoothed line
         color = intervention_colors.get(intervention_type, "#999999")
         ax.plot(positions, mean_ce, linewidth=2, color=color, 
                 label=f"{intervention_type} (smoothed)", zorder=3)
         
-        # Plot std band
-        ax.fill_between(positions, mean_ce - std_ce, mean_ce + std_ce, 
-                        alpha=0.15, color=color, zorder=2)
-        
-        # Calculate average marker positions for this intervention
-        avg_skeleton = int(_mean(marker_positions["skeleton"])) if marker_positions["skeleton"] else None
-        avg_schema_links = int(_mean(marker_positions["schema_links"])) if marker_positions["schema_links"] else None
-        avg_slot_matching = int(_mean(marker_positions["slot_matching"])) if marker_positions["slot_matching"] else None
-        avg_generation = int(_mean(marker_positions["generation"])) if marker_positions["generation"] else None
+        # Get marker positions from first sample
+        avg_skeleton = marker_indices.get("skeleton")
+        avg_schema_links = marker_indices.get("schema_links")
+        avg_slot_matching = marker_indices.get("slot_matching")
+        avg_generation = gen_start
         
         # Highlight mediator region
         if avg_skeleton is not None and avg_generation is not None:
@@ -1324,7 +1444,7 @@ def plot_entropy_vs_token_position(
         ax.set_xlabel("Token Position (Prompt + Generation)")
         ax.set_ylabel("Cross-Entropy")
         ax.set_title(f"{intervention_type} — Gold Structure — {model_name}")
-        ax.legend(loc="upper right")
+        ax.legend(loc="upper left")
         ax.grid(axis="y", alpha=0.3)
     
     fig1.tight_layout()
@@ -1336,33 +1456,52 @@ def plot_entropy_vs_token_position(
     
     for idx, intervention_type in enumerate(intervention_types):
         ax = axes2[idx]
-        all_sequences, marker_positions = _extract_sequences_for_scenario(
-            results, intervention_type, structure_type
-        )
         
-        if not all_sequences:
+        # Find first sample matching the scenario
+        first_sample = None
+        for sample in results:
+            ct = sample.get("completion_type", "")
+            suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
+            if suffix == structure_type:
+                si = sample.get("structure_intervention", {})
+                interventions = si.get(intervention_type, [])
+                if interventions and interventions[0].get("token_metrics"):
+                    first_sample = sample
+                    break
+        
+        if not first_sample:
             ax.text(0.5, 0.5, f"No data for {intervention_type}", 
                    transform=ax.transAxes, ha="center", va="center")
             ax.set_title(f"{intervention_type} — Predicted Structure — {model_name}")
             continue
         
-        mean_ce, std_ce, max_len = _compute_smoothed_metrics(all_sequences, window_size)
+        # Extract sequence from first sample
+        interv = first_sample["structure_intervention"][intervention_type][0]
+        prompt_metrics = interv.get("prompt_metrics")
+        token_metrics = interv.get("token_metrics")
+        
+        ce_seq, marker_indices, gen_start = extract_combined_sequence(prompt_metrics, token_metrics)
+        if not ce_seq or len(ce_seq) == 0:
+            ax.text(0.5, 0.5, f"No sequence data for {intervention_type}", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"{intervention_type} — Predicted Structure — {model_name}")
+            continue
+        
+        # Apply smoothing to single sequence
+        ce_array = np.array(ce_seq)
+        mean_ce = moving_average(ce_array, window_size)
         positions = np.arange(len(mean_ce))
         
-        # Plot smoothed mean line
+        # Plot smoothed line
         color = intervention_colors.get(intervention_type, "#999999")
         ax.plot(positions, mean_ce, linewidth=2, color=color, 
                 label=f"{intervention_type} (smoothed)", zorder=3)
         
-        # Plot std band
-        ax.fill_between(positions, mean_ce - std_ce, mean_ce + std_ce, 
-                        alpha=0.15, color=color, zorder=2)
-        
-        # Calculate average marker positions for this intervention
-        avg_skeleton = int(_mean(marker_positions["skeleton"])) if marker_positions["skeleton"] else None
-        avg_schema_links = int(_mean(marker_positions["schema_links"])) if marker_positions["schema_links"] else None
-        avg_slot_matching = int(_mean(marker_positions["slot_matching"])) if marker_positions["slot_matching"] else None
-        avg_generation = int(_mean(marker_positions["generation"])) if marker_positions["generation"] else None
+        # Get marker positions from first sample
+        avg_skeleton = marker_indices.get("skeleton")
+        avg_schema_links = marker_indices.get("schema_links")
+        avg_slot_matching = marker_indices.get("slot_matching")
+        avg_generation = gen_start
         
         # Highlight mediator region
         if avg_skeleton is not None and avg_generation is not None:
@@ -1387,7 +1526,7 @@ def plot_entropy_vs_token_position(
         ax.set_xlabel("Token Position (Prompt + Generation)")
         ax.set_ylabel("Cross-Entropy")
         ax.set_title(f"{intervention_type} — Predicted Structure — {model_name}")
-        ax.legend(loc="upper right")
+        ax.legend(loc="upper left")
         ax.grid(axis="y", alpha=0.3)
     
     fig2.tight_layout()
@@ -1398,32 +1537,48 @@ def plot_entropy_vs_token_position(
     
     for idx, structure_type in enumerate(["gold_structure", "predicted_structure"]):
         ax = axes3[idx]
-        all_sequences, marker_positions = _extract_sequences_for_scenario(
-            results, None, structure_type
-        )
         
-        if not all_sequences:
+        # Find first sample matching the scenario
+        first_sample = None
+        for sample in results:
+            ct = sample.get("completion_type", "")
+            suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
+            if suffix == structure_type and sample.get("token_metrics"):
+                first_sample = sample
+                break
+        
+        if not first_sample:
             label = "Gold Structure" if structure_type == "gold_structure" else "Predicted Structure"
             ax.text(0.5, 0.5, f"No data for Base {label}", 
                    transform=ax.transAxes, ha="center", va="center")
             ax.set_title(f"Base {label} — {model_name}")
             continue
         
-        mean_ce, std_ce, max_len = _compute_smoothed_metrics(all_sequences, window_size)
+        # Extract sequence from first sample
+        prompt_metrics = first_sample.get("prompt_metrics")
+        token_metrics = first_sample.get("token_metrics")
+        
+        ce_seq, marker_indices, gen_start = extract_combined_sequence(prompt_metrics, token_metrics)
+        if not ce_seq or len(ce_seq) == 0:
+            label = "Gold Structure" if structure_type == "gold_structure" else "Predicted Structure"
+            ax.text(0.5, 0.5, f"No sequence data for Base {label}", 
+                   transform=ax.transAxes, ha="center", va="center")
+            ax.set_title(f"Base {label} — {model_name}")
+            continue
+        
+        # Apply smoothing to single sequence
+        ce_array = np.array(ce_seq)
+        mean_ce = moving_average(ce_array, window_size)
         positions = np.arange(len(mean_ce))
         
-        # Plot smoothed mean line
+        # Plot smoothed line
         color = base_colors.get(structure_type, "#999999")
         label = "Gold Structure" if structure_type == "gold_structure" else "Predicted Structure"
         ax.plot(positions, mean_ce, linewidth=2, color=color, 
                 label=f"Base {label} (smoothed)", zorder=3)
         
-        # Plot std band
-        ax.fill_between(positions, mean_ce - std_ce, mean_ce + std_ce, 
-                        alpha=0.15, color=color, zorder=2)
-        
         # Mark generation start if available
-        avg_generation = int(_mean(marker_positions["generation"])) if marker_positions["generation"] else None
+        avg_generation = gen_start
         
         if avg_generation is not None:
             ax.axvline(avg_generation, color="#55A868", linestyle="--", linewidth=1.5, 
@@ -1432,7 +1587,7 @@ def plot_entropy_vs_token_position(
         ax.set_xlabel("Token Position (Prompt + Generation)")
         ax.set_ylabel("Cross-Entropy")
         ax.set_title(f"Base {label} — {model_name}")
-        ax.legend(loc="upper right")
+        ax.legend(loc="upper left")
         ax.grid(axis="y", alpha=0.3)
     
     fig3.tight_layout()
@@ -1583,6 +1738,488 @@ def print_summary_table(per_sample: Dict[str, Dict[str, List[float]]], model_nam
     print(f"{'=' * 100}\n")
 
 
+# ──────────────────────── paired comparison analysis ────────────────────────
+
+def format_p_value(p_value: float) -> str:
+    """
+    Format p-value for display. Use scientific notation for very small values.
+    """
+    if p_value < 0.0001:
+        return f"{p_value:.2e}"
+    else:
+        return f"{p_value:.4f}"
+
+
+def extract_paired_metrics(results: list) -> Tuple[Dict[str, Dict[str, List[float]]], Dict[str, Dict[str, Tuple[List[float], List[float]]]]]:
+    """
+    Extract paired metrics: for each sample, compute base and intervention metrics,
+    then calculate deltas (intervention - base) per sample.
+    
+    IMPORTANT: Deltas are computed only for the mediator part (starting from ===SKELETON===),
+    not for the full prompt or generation.
+    
+    Returns:
+        - deltas: dict: intervention_type/scenario -> metric_name -> [per-sample delta values]
+        - pairs: dict: intervention_type/scenario -> metric_name -> (base_values, intervention_values)
+    
+    This allows for proper paired comparison: we compare deltas across samples,
+    rather than comparing averaged base vs averaged intervention.
+    """
+    keys = ("cross_entropy", "max_logit", "gt_logit")
+    deltas = defaultdict(lambda: defaultdict(list))
+    pairs = defaultdict(lambda: defaultdict(lambda: ([], [])))  # base_values, intervention_values
+    
+    for sample in results:
+        ct = sample.get("completion_type", "")
+        # Map completion_type to scenario suffix
+        if ct == "gold_structure":
+            suffix = "gold_structure"
+        elif ct == "structure_prediction":
+            suffix = "predicted_structure"
+        else:
+            suffix = "predicted_structure"  # fallback
+        
+        # Get base metrics
+        # For mediator (from ===SKELETON===)
+        base_prompt_ce = None
+        base_prompt_max = None
+        base_prompt_gt = None
+        if ct == "gold_structure" and sample.get("prompt_metrics"):
+            # For gold_structure: mediator is in prompt_metrics
+            base_prompt_ce = mean_from_skeleton(sample["prompt_metrics"], "cross_entropy")
+            base_prompt_max = mean_from_skeleton(sample["prompt_metrics"], "max_logit")
+            base_prompt_gt = mean_from_skeleton(sample["prompt_metrics"], "gt_logit")
+        elif ct == "structure_prediction" and sample.get("token_metrics"):
+            # For structure_prediction: mediator is in token_metrics (generation contains ===SKELETON===)
+            # Search from start because in generation, ===SKELETON=== appears at the beginning
+            base_prompt_ce = mean_from_skeleton(sample["token_metrics"], "cross_entropy", search_from_start=True)
+            base_prompt_max = mean_from_skeleton(sample["token_metrics"], "max_logit", search_from_start=True)
+            base_prompt_gt = mean_from_skeleton(sample["token_metrics"], "gt_logit", search_from_start=True)
+        
+        # For generation: available for both gold_structure and predicted_structure
+        base_gen_ce = mean_per_sample(sample.get("token_metrics"), "cross_entropy") if sample.get("token_metrics") else None
+        base_gen_max = mean_per_sample(sample.get("token_metrics"), "max_logit") if sample.get("token_metrics") else None
+        base_gen_gt = mean_per_sample(sample.get("token_metrics"), "gt_logit") if sample.get("token_metrics") else None
+        
+        # Get intervention metrics and compute deltas
+        si = sample.get("structure_intervention", {})
+        for itype in ("HSVT", "Local Edits", "Global"):
+            for interv in si.get(itype, []):
+                # Mediator deltas (from ===SKELETON===)
+                if interv.get("prompt_metrics"):
+                    interv_prompt_ce = mean_from_skeleton(interv["prompt_metrics"], "cross_entropy")
+                    interv_prompt_max = mean_from_skeleton(interv["prompt_metrics"], "max_logit")
+                    interv_prompt_gt = mean_from_skeleton(interv["prompt_metrics"], "gt_logit")
+                    
+                    # For gold_structure: compare intervention mediator with base mediator
+                    if ct == "gold_structure" and base_prompt_ce is not None:
+                        if interv_prompt_ce is not None:
+                            delta_ce = interv_prompt_ce - base_prompt_ce
+                            deltas[f"{itype}/mediator/{suffix}"]["cross_entropy"].append(delta_ce)
+                            pairs[f"{itype}/mediator/{suffix}"]["cross_entropy"][0].append(base_prompt_ce)
+                            pairs[f"{itype}/mediator/{suffix}"]["cross_entropy"][1].append(interv_prompt_ce)
+                        if interv_prompt_max is not None and base_prompt_max is not None:
+                            delta_max = interv_prompt_max - base_prompt_max
+                            deltas[f"{itype}/mediator/{suffix}"]["max_logit"].append(delta_max)
+                            pairs[f"{itype}/mediator/{suffix}"]["max_logit"][0].append(base_prompt_max)
+                            pairs[f"{itype}/mediator/{suffix}"]["max_logit"][1].append(interv_prompt_max)
+                        if interv_prompt_gt is not None and base_prompt_gt is not None:
+                            delta_gt = interv_prompt_gt - base_prompt_gt
+                            deltas[f"{itype}/mediator/{suffix}"]["gt_logit"].append(delta_gt)
+                            pairs[f"{itype}/mediator/{suffix}"]["gt_logit"][0].append(base_prompt_gt)
+                            pairs[f"{itype}/mediator/{suffix}"]["gt_logit"][1].append(interv_prompt_gt)
+                    
+                    # For structure_prediction: compare intervention mediator with base mediator (from generation)
+                    # (base mediator is in token_metrics, starting from ===SKELETON===)
+                    if ct == "structure_prediction" and base_prompt_ce is not None:
+                        if interv_prompt_ce is not None:
+                            delta_ce = interv_prompt_ce - base_prompt_ce
+                            deltas[f"{itype}/mediator/{suffix}"]["cross_entropy"].append(delta_ce)
+                            pairs[f"{itype}/mediator/{suffix}"]["cross_entropy"][0].append(base_prompt_ce)
+                            pairs[f"{itype}/mediator/{suffix}"]["cross_entropy"][1].append(interv_prompt_ce)
+                        if interv_prompt_max is not None and base_prompt_max is not None:
+                            delta_max = interv_prompt_max - base_prompt_max
+                            deltas[f"{itype}/mediator/{suffix}"]["max_logit"].append(delta_max)
+                            pairs[f"{itype}/mediator/{suffix}"]["max_logit"][0].append(base_prompt_max)
+                            pairs[f"{itype}/mediator/{suffix}"]["max_logit"][1].append(interv_prompt_max)
+                        if interv_prompt_gt is not None and base_prompt_gt is not None:
+                            delta_gt = interv_prompt_gt - base_prompt_gt
+                            deltas[f"{itype}/mediator/{suffix}"]["gt_logit"].append(delta_gt)
+                            pairs[f"{itype}/mediator/{suffix}"]["gt_logit"][0].append(base_prompt_gt)
+                            pairs[f"{itype}/mediator/{suffix}"]["gt_logit"][1].append(interv_prompt_gt)
+                
+                # Generation deltas (for both gold_structure and predicted_structure)
+                if interv.get("token_metrics") and base_gen_ce is not None:
+                    interv_gen_ce = mean_per_sample(interv["token_metrics"], "cross_entropy")
+                    interv_gen_max = mean_per_sample(interv["token_metrics"], "max_logit")
+                    interv_gen_gt = mean_per_sample(interv["token_metrics"], "gt_logit")
+                    
+                    if interv_gen_ce is not None:
+                        delta_ce = interv_gen_ce - base_gen_ce
+                        deltas[f"{itype}/generation/{suffix}"]["cross_entropy"].append(delta_ce)
+                        pairs[f"{itype}/generation/{suffix}"]["cross_entropy"][0].append(base_gen_ce)
+                        pairs[f"{itype}/generation/{suffix}"]["cross_entropy"][1].append(interv_gen_ce)
+                    if interv_gen_max is not None and base_gen_max is not None:
+                        delta_max = interv_gen_max - base_gen_max
+                        deltas[f"{itype}/generation/{suffix}"]["max_logit"].append(delta_max)
+                        pairs[f"{itype}/generation/{suffix}"]["max_logit"][0].append(base_gen_max)
+                        pairs[f"{itype}/generation/{suffix}"]["max_logit"][1].append(interv_gen_max)
+                    if interv_gen_gt is not None and base_gen_gt is not None:
+                        delta_gt = interv_gen_gt - base_gen_gt
+                        deltas[f"{itype}/generation/{suffix}"]["gt_logit"].append(delta_gt)
+                        pairs[f"{itype}/generation/{suffix}"]["gt_logit"][0].append(base_gen_gt)
+                        pairs[f"{itype}/generation/{suffix}"]["gt_logit"][1].append(interv_gen_gt)
+    
+    return deltas, pairs
+
+
+def plot_delta_distributions(
+    deltas: Dict[str, Dict[str, List[float]]],
+    pairs: Dict[str, Dict[str, Tuple[List[float], List[float]]]],
+    model_name: str,
+    output_dir: str,
+):
+    """
+    Plot distributions of deltas (intervention - base) for each intervention type.
+    Shows how consistently interventions change metrics across samples.
+    Deltas are computed only for the mediator part (from ===SKELETON===).
+    """
+    
+    intervention_types = ["HSVT", "Local Edits", "Global"]
+    scenarios = ["gold_structure", "predicted_structure"]  # Mediator deltas for both (for predicted_structure: mediator vs base generation)
+    
+    for scenario in scenarios:
+        fig, axes = plt.subplots(1, len(intervention_types), figsize=(5 * len(intervention_types), 5))
+        if len(intervention_types) == 1:
+            axes = [axes]
+        
+        for ax, itype in zip(axes, intervention_types):
+            key = f"{itype}/mediator/{scenario}"
+            delta_ce = deltas.get(key, {}).get("cross_entropy", [])
+            
+            if not delta_ce:
+                ax.text(0.5, 0.5, f"No data for {itype}", 
+                       transform=ax.transAxes, ha="center", va="center")
+                ax.set_title(f"{itype} — {scenario.replace('_', ' ').title()}")
+                continue
+            
+            # Histogram
+            ax.hist(delta_ce, bins=30, alpha=0.7, color=COLORS.get(itype, "#999999"),
+                   edgecolor="black", linewidth=0.5, density=True)
+            
+            # Vertical lines
+            ax.axvline(0, color="black", linestyle="--", linewidth=1.5, label="No change")
+            mean_delta = _mean(delta_ce)
+            ax.axvline(mean_delta, color="red", linestyle="-", linewidth=1.5, 
+                      label=f"Mean = {mean_delta:.3f}")
+            
+            # Statistical test - Paired t-test
+            if HAS_SCIPY:
+                try:
+                    # Get paired values for proper paired t-test
+                    base_vals, interv_vals = pairs.get(key, {}).get("cross_entropy", ([], []))
+                    if len(base_vals) == len(interv_vals) and len(base_vals) > 1:
+                        # Paired t-test: tests if mean difference is significantly different from 0
+                        t_stat, p_value = stats.ttest_rel(interv_vals, base_vals)
+                        significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else "ns"
+                        ax.text(0.05, 0.95, f"t={t_stat:.2f}, p={format_p_value(p_value)} {significance}",
+                               transform=ax.transAxes, va="top", ha="left",
+                               bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+                    else:
+                        # Fallback to one-sample t-test on deltas if pairs not available
+                        t_stat, p_value = stats.ttest_1samp(delta_ce, 0)
+                        significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else "ns"
+                        ax.text(0.05, 0.95, f"t={t_stat:.2f}, p={format_p_value(p_value)} {significance}",
+                               transform=ax.transAxes, va="top", ha="left",
+                               bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+                except:
+                    pass
+            
+            ax.set_xlabel("Δ Cross-Entropy (Intervention - Base)")
+            ax.set_ylabel("Density")
+            ax.set_title(f"{itype} — {scenario.replace('_', ' ').title()}")
+            ax.legend()
+            ax.grid(axis="y", alpha=0.3)
+        
+        if scenario == "gold_structure":
+            title_suffix = "Mediator Only (from ===SKELETON===)"
+        else:  # predicted_structure
+            title_suffix = "Mediator (Base from Generation, Intervention from Prompt)"
+        fig.suptitle(f"Delta Distribution — {title_suffix} ({scenario.replace('_', ' ').title()}) — {model_name}", 
+                     fontsize=14)
+        fig.tight_layout()
+        _save(fig, output_dir, f"{model_name}_delta_distributions_mediator_{scenario}")
+
+
+def plot_paired_scatter(
+    results: list,
+    model_name: str,
+    output_dir: str,
+):
+    """
+    Scatter plot: base vs intervention metrics for each sample.
+    Points above y=x line indicate intervention increased the metric.
+    Shows correlation and individual sample changes.
+    For gold_structure: compares mediator with mediator.
+    For predicted_structure: compares intervention mediator with base generation.
+    """
+    intervention_types = ["HSVT", "Local Edits", "Global"]
+    scenarios = ["gold_structure", "predicted_structure"]  # Mediator metrics for both
+    
+    for scenario in scenarios:
+        fig, axes = plt.subplots(1, len(intervention_types), figsize=(5 * len(intervention_types), 5))
+        if len(intervention_types) == 1:
+            axes = [axes]
+        
+        for ax, itype in zip(axes, intervention_types):
+            base_values = []
+            interv_values = []
+            
+            for sample in results:
+                ct = sample.get("completion_type", "")
+                suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
+                
+                if suffix != scenario:
+                    continue
+                
+                # Get base metrics
+                base_ce = None
+                if ct == "gold_structure" and sample.get("prompt_metrics"):
+                    # For gold_structure: use base mediator (from ===SKELETON===)
+                    base_ce = mean_from_skeleton(sample["prompt_metrics"], "cross_entropy")
+                elif ct == "structure_prediction" and sample.get("token_metrics"):
+                    # For structure_prediction: use base mediator from token_metrics (generation contains ===SKELETON===)
+                    # Search from start because in generation, ===SKELETON=== appears at the beginning
+                    base_ce = mean_from_skeleton(sample["token_metrics"], "cross_entropy", search_from_start=True)
+                
+                if base_ce is None:
+                    continue
+                
+                si = sample.get("structure_intervention", {})
+                for interv in si.get(itype, []):
+                    if interv.get("prompt_metrics"):
+                        # Get intervention mediator metrics (from ===SKELETON===)
+                        interv_ce = mean_from_skeleton(interv["prompt_metrics"], "cross_entropy")
+                        if interv_ce is not None:
+                            base_values.append(base_ce)
+                            interv_values.append(interv_ce)
+                            break  # Use first intervention only
+            
+            if not base_values:
+                ax.text(0.5, 0.5, f"No data for {itype}", 
+                       transform=ax.transAxes, ha="center", va="center")
+                ax.set_title(f"{itype} — {scenario.replace('_', ' ').title()}")
+                continue
+            
+            # Scatter plot
+            ax.scatter(base_values, interv_values, alpha=0.6, s=30,
+                      color=COLORS.get(itype, "#999999"), edgecolors="black", linewidth=0.5)
+            
+            # y=x reference line
+            lim_min = min(min(base_values), min(interv_values))
+            lim_max = max(max(base_values), max(interv_values))
+            ax.plot([lim_min, lim_max], [lim_min, lim_max], "k--", linewidth=1.5, alpha=0.5, label="y=x")
+            
+            # Correlation
+            if HAS_SCIPY:
+                try:
+                    from scipy.stats import pearsonr
+                    corr, p_val = pearsonr(base_values, interv_values)
+                    ax.text(0.05, 0.95, f"r={corr:.3f}, p={format_p_value(p_val)}",
+                           transform=ax.transAxes, va="top", ha="left",
+                           bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+                except:
+                    pass
+            
+            if scenario == "gold_structure":
+                xlabel = "Base Cross-Entropy (Mediator from Prompt)"
+                ylabel = "Intervention Cross-Entropy (Mediator from Prompt)"
+                title_suffix = "Mediator Only (from ===SKELETON===)"
+            else:  # predicted_structure
+                xlabel = "Base Cross-Entropy (Mediator from Generation)"
+                ylabel = "Intervention Cross-Entropy (Mediator from Prompt)"
+                title_suffix = "Mediator (Base from Generation, Intervention from Prompt)"
+            
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            ax.set_title(f"{itype} — {scenario.replace('_', ' ').title()}")
+            ax.legend()
+            ax.grid(alpha=0.3)
+            ax.set_aspect("equal", adjustable="box")
+        
+        fig.suptitle(f"Base vs Intervention — {title_suffix} ({scenario.replace('_', ' ').title()}) — {model_name}", 
+                     fontsize=14)
+        fig.tight_layout()
+        _save(fig, output_dir, f"{model_name}_paired_scatter_mediator_{scenario}")
+
+
+def plot_delta_vs_base(
+    results: list,
+    model_name: str,
+    output_dir: str,
+):
+    """
+    Plot delta (intervention - base) vs base value.
+    Shows if intervention effect depends on base value.
+    For gold_structure: compares mediator with mediator.
+    For predicted_structure: compares intervention mediator with base generation.
+    """
+    intervention_types = ["HSVT", "Local Edits", "Global"]
+    scenarios = ["gold_structure", "predicted_structure"]  # Mediator metrics for both
+    
+    for scenario in scenarios:
+        fig, axes = plt.subplots(1, len(intervention_types), figsize=(5 * len(intervention_types), 5))
+        if len(intervention_types) == 1:
+            axes = [axes]
+        
+        for ax, itype in zip(axes, intervention_types):
+            base_values = []
+            delta_values = []
+            
+            for sample in results:
+                ct = sample.get("completion_type", "")
+                suffix = "gold_structure" if ct == "gold_structure" else "predicted_structure"
+                
+                if suffix != scenario:
+                    continue
+                
+                # Get base metrics
+                base_ce = None
+                if ct == "gold_structure" and sample.get("prompt_metrics"):
+                    # For gold_structure: use base mediator (from ===SKELETON===)
+                    base_ce = mean_from_skeleton(sample["prompt_metrics"], "cross_entropy")
+                elif ct == "structure_prediction" and sample.get("token_metrics"):
+                    # For structure_prediction: use base mediator from token_metrics (generation contains ===SKELETON===)
+                    # Search from start because in generation, ===SKELETON=== appears at the beginning
+                    base_ce = mean_from_skeleton(sample["token_metrics"], "cross_entropy", search_from_start=True)
+                
+                if base_ce is None:
+                    continue
+                
+                si = sample.get("structure_intervention", {})
+                for interv in si.get(itype, []):
+                    if interv.get("prompt_metrics"):
+                        # Get intervention mediator metrics (from ===SKELETON===)
+                        interv_ce = mean_from_skeleton(interv["prompt_metrics"], "cross_entropy")
+                        if interv_ce is not None:
+                            base_values.append(base_ce)
+                            delta_values.append(interv_ce - base_ce)
+                            break
+            
+            if not base_values:
+                ax.text(0.5, 0.5, f"No data for {itype}", 
+                       transform=ax.transAxes, ha="center", va="center")
+                ax.set_title(f"{itype} — {scenario.replace('_', ' ').title()}")
+                continue
+            
+            # Scatter plot
+            ax.scatter(base_values, delta_values, alpha=0.6, s=30,
+                      color=COLORS.get(itype, "#999999"), edgecolors="black", linewidth=0.5)
+            
+            # Horizontal line at y=0
+            ax.axhline(0, color="black", linestyle="--", linewidth=1.5, label="No change")
+            
+            # Trend line
+            try:
+                z = np.polyfit(base_values, delta_values, 1)
+                p = np.poly1d(z)
+                x_trend = np.linspace(min(base_values), max(base_values), 100)
+                ax.plot(x_trend, p(x_trend), "r--", linewidth=1.5, alpha=0.7, label="Trend")
+            except:
+                pass
+            
+            if scenario == "gold_structure":
+                xlabel = "Base Cross-Entropy (Mediator from Prompt)"
+                title_suffix = "Mediator Only (from ===SKELETON===)"
+            else:  # predicted_structure
+                xlabel = "Base Cross-Entropy (Mediator from Generation)"
+                title_suffix = "Mediator (Base from Generation, Intervention from Prompt)"
+            
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("Δ Cross-Entropy (Intervention - Base)")
+            ax.set_title(f"{itype} — {scenario.replace('_', ' ').title()}")
+            ax.legend()
+            ax.grid(alpha=0.3)
+        
+        fig.suptitle(f"Delta vs Base — {title_suffix} ({scenario.replace('_', ' ').title()}) — {model_name}", 
+                     fontsize=14)
+        fig.tight_layout()
+        _save(fig, output_dir, f"{model_name}_delta_vs_base_mediator_{scenario}")
+
+
+def print_paired_statistics(
+    deltas: Dict[str, Dict[str, List[float]]],
+    pairs: Dict[str, Dict[str, Tuple[List[float], List[float]]]],
+    model_name: str,
+):
+    """
+    Print statistical summary of paired comparisons.
+    """
+    
+    print(f"\n{'=' * 100}")
+    print(f"  Paired Comparison Statistics — {model_name}")
+    print(f"{'=' * 100}")
+    
+    intervention_types = ["HSVT", "Local Edits", "Global"]
+    scenarios = ["gold_structure", "predicted_structure"]  # Mediator deltas for both (for predicted_structure: mediator vs base generation)
+    
+    header = f"{'Scenario':<50} {'Mean Δ':>12} {'Std Δ':>12} {'t-stat':>10} {'p-value':>12} {'Effect':>10}"
+    print(header)
+    print("-" * 100)
+    print("  Note: For gold_structure: mediator from prompt vs mediator from prompt. For predicted_structure: mediator from prompt vs mediator from generation.")
+    print("-" * 100)
+    
+    for scenario in scenarios:
+        if scenario == "gold_structure":
+            scenario_label = "Mediator (Prompt vs Prompt)"
+        else:  # predicted_structure
+            scenario_label = "Mediator (Prompt vs Generation)"
+        print(f"\n  {scenario.replace('_', ' ').title()} ({scenario_label}):")
+        for itype in intervention_types:
+            key = f"{itype}/mediator/{scenario}"
+            delta_ce = deltas.get(key, {}).get("cross_entropy", [])
+            
+            if not delta_ce:
+                continue
+            
+            mean_delta = _mean(delta_ce)
+            std_delta = _pstdev(delta_ce) if len(delta_ce) >= 2 else 0
+            
+            if HAS_SCIPY:
+                try:
+                    # Get paired values for proper paired t-test
+                    base_vals, interv_vals = pairs.get(key, {}).get("cross_entropy", ([], []))
+                    if len(base_vals) == len(interv_vals) and len(base_vals) > 1:
+                        # Paired t-test: tests if mean difference is significantly different from 0
+                        t_stat, p_value = stats.ttest_rel(interv_vals, base_vals)
+                        # Effect size (Cohen's d for paired samples)
+                        # d = mean_delta / std_delta, where std_delta is std of differences
+                        cohens_d = mean_delta / std_delta if std_delta > 0 else 0
+                        effect = "Large" if abs(cohens_d) > 0.8 else "Medium" if abs(cohens_d) > 0.5 else "Small"
+                    else:
+                        # Fallback to one-sample t-test on deltas if pairs not available
+                        t_stat, p_value = stats.ttest_1samp(delta_ce, 0)
+                        cohens_d = mean_delta / std_delta if std_delta > 0 else 0
+                        effect = "Large" if abs(cohens_d) > 0.8 else "Medium" if abs(cohens_d) > 0.5 else "Small"
+                except:
+                    t_stat, p_value, cohens_d, effect = 0, 1.0, 0, "N/A"
+            else:
+                t_stat, p_value, cohens_d, effect = 0, 1.0, 0, "N/A (scipy not available)"
+            
+            significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else ""
+            
+            p_value_str = format_p_value(p_value)
+            row = (
+                f"    {itype:<46} "
+                f"{mean_delta:>12.4f} {std_delta:>12.4f} "
+                f"{t_stat:>10.2f} {p_value_str:>12} {significance:<3} "
+                f"{effect:>10}"
+            )
+            print(row)
+    
+    print(f"{'=' * 100}\n")
+
+
 # ──────────────────────── main ────────────────────────
 
 def main():
@@ -1644,6 +2281,15 @@ def main():
         plot_metrics_heatmap(per_sample, model_name, args.output_dir)
         plot_prompt_vs_generation(per_sample, model_name, args.output_dir)
         plot_entropy_vs_token_position(results, model_name, args.output_dir)
+        
+        # Paired comparison analysis (delta analysis)
+        print(f"\n  Computing paired comparisons (delta analysis)...")
+        deltas, pairs = extract_paired_metrics(results)
+        if deltas:
+            print_paired_statistics(deltas, pairs, model_name)
+            plot_delta_distributions(deltas, pairs, model_name, args.output_dir)
+            plot_paired_scatter(results, model_name, args.output_dir)
+            plot_delta_vs_base(results, model_name, args.output_dir)
 
     print(f"\nAll figures saved to {args.output_dir}/")
 

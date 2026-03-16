@@ -296,6 +296,35 @@ def parse_model_response(output_str: str):
     }
 
 
+def compare_skeletons(true_skeleton: str, generated_skeleton: str) -> bool:
+    """
+    Compare two SQL skeletons semantically:
+    - case-insensitive for SQL keywords
+    - whitespace-normalized
+    """
+    if true_skeleton is None and generated_skeleton is None:
+        return True
+    if true_skeleton is None or generated_skeleton is None:
+        return False
+
+    def normalize(s: str) -> str:
+        s = re.sub(r'\s+', ' ', s.strip()).lower()
+        return s
+
+    return normalize(true_skeleton) == normalize(generated_skeleton)
+
+
+def compare_slots(true_slots: list, generated_slots: list) -> bool:
+    """
+    Compare two slot lists semantically:
+    - order-sensitive (slots are positional)
+    - case-insensitive
+    """
+    if len(true_slots) != len(generated_slots):
+        return False
+    return all(t.strip().lower() == g.strip().lower() for t, g in zip(true_slots, generated_slots))
+
+
 def compare_schema_links(true_schema_links: dict, generated_schema_links: dict) -> bool:
     true_tables = set(true_schema_links.keys())
     generated_tables = set(generated_schema_links.keys())
