@@ -18,7 +18,7 @@ class RiceChemEvaluation:
         return 1 if isclose(gold, pred, abs_tol=atol) else 0
 
     def summarize(self, lst):
-        """lst содержит числа (0/1) и None (нет данных — для compare_structures)."""
+        """lst содержит числа (0/1) и None"""
         n_total = len(lst)
         n_none  = sum(1 for x in lst if x is None)
         clean   = [x for x in lst if x is not None]

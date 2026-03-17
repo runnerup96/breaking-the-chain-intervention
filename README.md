@@ -14,7 +14,7 @@ The central script that coordinates the entire intervention pipeline:
   - Applies interventions to specific reasoning components
   - Generates new predictions under interventions
   - Saves results for analysis
-- **Supported Dataset with structured mediator**: [RiceChem](https://github.com/luffycodes/Automated-Long-Answer-Grading), [TabFact](https://github.com/wenhuchen/Table-Fact-Checking), [EntailmentBank](https://github.com/allenai/entailment_bank), [AVeriTeC](https://fever.ai/dataset/averitec.html)
+- **Supported Dataset with structured mediator**: [RiceChem](https://github.com/luffycodes/Automated-Long-Answer-Grading), [TabFact](https://github.com/wenhuchen/Table-Fact-Checking), [AVeriTeC](https://fever.ai/dataset/averitec.html)
 - **Usage**: Command-line interface with configurable model, dataset, and batch parameters
 
 ### 2. `llm_model.py` - LLM Interface
@@ -60,7 +60,7 @@ ${PROJECT_PATH}/statics/datasets/
 
 We host the redistributable files on the Hugging Face Hub in a companion dataset repository:
 
-- **HF dataset repo:** `THunderCondOR/breaking-the-chain-intervention-data`
+- **HF dataset repo:** Anon
 
 **Note (TabFact):** TabFact contains **>10,000 CSV files** in `TabFact/data/all_csv/`. Because the Hugging Face Hub enforces a **10k files per directory** limit, we store this folder as a single archive (`datasets/TabFact/data/all_csv.tar.gz`). The download helper below will automatically extract it back into `${PROJECT_PATH}/statics/datasets/TabFact/data/all_csv/` so the on-disk layout matches the original one.
 
@@ -82,7 +82,7 @@ export PROJECT_PATH=/path/to/breaking-the-chain-intervention
 
 ```bash
 python download_datasets.py \
-  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --repo_id REPO_ID \
   --all
 ```
 
@@ -102,7 +102,7 @@ Download **only TabFact**:
 
 ```bash
 python download_datasets.py \
-  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --repo_id REPO_ID \
   --only tabfact
 ```
 
@@ -110,7 +110,7 @@ Download **AVeriTeC + EntailmentBank**:
 
 ```bash
 python download_datasets.py \
-  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --repo_id REPO_ID \
   --only averitec entailmentbank
 ```
 
@@ -120,7 +120,7 @@ If you want to keep `all_csv.tar.gz` without unpacking:
 
 ```bash
 python download_datasets.py \
-  --repo_id THunderCondOR/breaking-the-chain-intervention-data \
+  --repo_id REPO_ID \
   --only tabfact \
   --no_extract
 ```

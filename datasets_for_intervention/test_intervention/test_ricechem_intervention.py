@@ -21,11 +21,6 @@ def make_ic(dataset, llm, tool_mode="none", prompting_regime="standard"):
     )
 
 
-# ---------------------------------------------------------------------------
-# Хелперы — строить completions для sample[0]
-# gold_rubric = {A:True, B:False, C:True}
-# ---------------------------------------------------------------------------
-
 def correct_completion():
     return (
         "Checklist:\n"
@@ -119,7 +114,6 @@ class TestClassifyGeneration(unittest.TestCase):
         self.assertEqual(self.ic.classify_generation("anything", None, self.gold), "error")
 
     def test_error_when_completion_has_garbage(self):
-        # mediator распарсен, но completion содержит мусор
         mediator = deepcopy(self.gold)
         self.assertEqual(
             self.ic.classify_generation(garbage_preamble_completion(), mediator, self.gold),
@@ -142,7 +136,7 @@ class TestClassifyGeneration(unittest.TestCase):
 
 
 # ===========================================================================
-# 3. make_intervention — классификация и структура интервенций
+# 3. make_intervention 
 # ===========================================================================
 
 class TestMakeIntervention(unittest.TestCase):
@@ -182,7 +176,6 @@ class TestMakeIntervention(unittest.TestCase):
     def test_mediator_empty_and_score_none_for_error(self):
         out = self.ic.make_intervention(deepcopy(self.sample), {"completion": ""})
         self.assertEqual(out["mediator_rubric"], {})
-        # Для error score и tool_rubric всегда явно None
         self.assertIsNone(out["score_before_intervention"])
         self.assertIsNone(out["tool_rubric"])
 
@@ -195,7 +188,6 @@ class TestMakeIntervention(unittest.TestCase):
     def test_correct_has_local_edits_only(self):
         out = self.ic.make_intervention(deepcopy(self.sample), {"completion": correct_completion()})
         interv = out["structure_intervention"]
-        # Нет HSVT
         self.assertNotIn("HSVT", interv)
         self.assertEqual(len(interv["Local Edits"]), len(self.sample["gold_rubric"]))
         self.assertEqual(len(interv["Correction"]), 0)
@@ -215,7 +207,7 @@ class TestMakeIntervention(unittest.TestCase):
 
 
 # ===========================================================================
-# 4. make_structure_intervention — детали содержимого
+# 4. make_structure_intervention
 # ===========================================================================
 
 class TestMakeStructureIntervention(unittest.TestCase):
@@ -253,10 +245,8 @@ class TestMakeStructureIntervention(unittest.TestCase):
             self.assertTrue(isclose(edit["expected_score_after_intervention"], expected, abs_tol=1e-9))
 
     def test_correction_uses_gold_rubric_not_bad_rubric(self):
-        """Correction подставляет gold_rubric, а не какой-то bad_rubric."""
         s = deepcopy(self.sample)
         s["generation_status"] = "incorrect"
-        # mediator_rubric намеренно отличается от gold
         s["mediator_rubric"] = {"A item": False, "B item": True, "C item": False}
         tree = self.ic.make_structure_intervention(s)
         self.assertEqual(len(tree["Correction"]), 1)
@@ -316,7 +306,6 @@ class TestInterventionsToPrompt(unittest.TestCase):
                 self.assertEqual(p, "PROMPT(gold=True)")
 
     def test_no_hsvt_prompts_generated(self):
-        """Убеждаемся, что HSVT полностью отсутствует в любом варианте."""
         for comp in [correct_completion(), incorrect_completion(), garbage_preamble_completion()]:
             s = self._intervene(comp)
             self.assertNotIn("HSVT", s["structure_intervention"])
@@ -353,13 +342,10 @@ class TestCollectInterventionCompletion(unittest.TestCase):
         self.assertEqual(out["structure_intervention"]["Correction"][0]["score_after_intervention"], 2.5)
 
     def test_local_edits_then_correction_order(self):
-        """Порядок: сначала Local Edits, потом Correction."""
-        # Используем сэмпл 0, делаем его incorrect вручную
         s = deepcopy(self.sample)
         s["generation_status"] = "incorrect"
         s["mediator_rubric"] = {"A item": False, "B item": True, "C item": False}
         s["structure_intervention"] = self.ic.make_structure_intervention(s)
-        # У incorrect: Local Edits пусты, Correction одна запись
         completions = [{"completion": "99.0"}]
         out = self.ic.collect_intervention_completion(s, completions)
         self.assertEqual(out["structure_intervention"]["Correction"][0]["score_after_intervention"], 99.0)
@@ -494,7 +480,6 @@ class TestMiscEdgeCases(unittest.TestCase):
         original = deepcopy(self.dataset[0])
         sample_copy = deepcopy(original)
         ic.make_intervention(sample_copy, {"completion": correct_completion()})
-        # оригинал в датасете не тронут
         self.assertEqual(self.dataset[0]["mediator_rubric"], original["mediator_rubric"])
 
     def test_make_prompt_returns_string(self):

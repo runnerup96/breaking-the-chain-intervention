@@ -73,7 +73,7 @@ def resolve_project_path(cli_project_path: str | None) -> Path:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo_id", required=True, help="HF dataset repo id, e.g. THunderCondOR/breaking-the-chain-intervention-data")
+    ap.add_argument("--repo_id", required=True, help="HF dataset repo id")
     ap.add_argument("--project_path", default=None, help="Overrides PROJECT_PATH env var (optional)")
 
     group = ap.add_mutually_exclusive_group()
