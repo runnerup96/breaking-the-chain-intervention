@@ -16,7 +16,7 @@ class TestPrompt(unittest.TestCase):
     def test_make_prompt_exact_output_with_gold_structure(self):
         """Test exact prompt output with all components."""
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=True,
             tool_call_instruction="TOOL CALL INSTRUCTION",
             instruction="INSTRUCTION",
@@ -34,7 +34,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_baseline_regime_string_empty(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Domain instruction",
@@ -45,7 +45,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_detailed_regime_string_not_empty(self):
         prompt = Prompt(
-            prompting_regime="detailed_instruction",
+            prompting_regime="detailed",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Domain instruction",
@@ -57,7 +57,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_detailed_regime_string_uses_new_wording(self):
         prompt = Prompt(
-            prompting_regime="detailed_instruction",
+            prompting_regime="detailed",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Domain instruction",
@@ -69,7 +69,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_maximum_regime_string_contains_priority_rules(self):
         prompt = Prompt(
-            prompting_regime="maximum_mediator_faithfulness",
+            prompting_regime="max_detailed",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Domain instruction",
@@ -95,7 +95,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_build_zeroshot_instruction_baseline_without_tool_call(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Domain instruction",
@@ -107,7 +107,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_build_zeroshot_instruction_baseline_with_tool_call(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=True,
             tool_call_instruction="Use tools for X",
             instruction="Domain instruction",
@@ -121,7 +121,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_build_zeroshot_instruction_detailed_with_tool_call(self):
         prompt = Prompt(
-            prompting_regime="detailed_instruction",
+            prompting_regime="detailed",
             use_tool_call=True,
             tool_call_instruction="Use tools for X",
             instruction="Domain instruction",
@@ -141,7 +141,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_build_zeroshot_instruction_maximum_with_tool_call(self):
         prompt = Prompt(
-            prompting_regime="maximum_mediator_faithfulness",
+            prompting_regime="max_detailed",
             use_tool_call=True,
             tool_call_instruction="Use tools for X",
             instruction="Domain instruction",
@@ -158,7 +158,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_make_prompt_without_gold_structure(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Instruction",
@@ -177,7 +177,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_make_prompt_with_gold_structure(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Instruction",
@@ -199,7 +199,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_make_prompt_with_empty_few_shot(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Instruction",
@@ -217,7 +217,7 @@ class TestPrompt(unittest.TestCase):
     def test_assertion_empty_instruction(self):
         with self.assertRaises(AssertionError):
             Prompt(
-                prompting_regime="baseline_structure_faithfulness",
+                prompting_regime="standard",
                 use_tool_call=False,
                 tool_call_instruction="",
                 instruction="",  # Empty instruction
@@ -228,7 +228,7 @@ class TestPrompt(unittest.TestCase):
     def test_assertion_tool_call_required(self):
         with self.assertRaises(AssertionError):
             Prompt(
-                prompting_regime="baseline_structure_faithfulness",
+                prompting_regime="standard",
                 use_tool_call=True,
                 tool_call_instruction="",  # Empty when required
                 instruction="Instruction",
@@ -238,7 +238,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_assertion_gold_structure_required(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Instruction",
@@ -254,7 +254,7 @@ class TestPrompt(unittest.TestCase):
 
     def test_assertion_empty_current_sample(self):
         prompt = Prompt(
-            prompting_regime="baseline_structure_faithfulness",
+            prompting_regime="standard",
             use_tool_call=False,
             tool_call_instruction="",
             instruction="Instruction",
@@ -270,7 +270,7 @@ class TestPrompt(unittest.TestCase):
     def test_ordering_anatomy(self):
         """Verify prompt anatomy: instruction -> tool_call -> regime -> few_shot -> current_sample -> gold_structure"""
         prompt = Prompt(
-            prompting_regime="detailed_instruction",
+            prompting_regime="detailed",
             use_tool_call=True,
             tool_call_instruction="TOOL",
             instruction="INSTR",
@@ -307,7 +307,7 @@ class TestPrompt(unittest.TestCase):
     def test_ordering_anatomy_maximum_regime(self):
         """Verify prompt anatomy also for maximum mediator faithfulness."""
         prompt = Prompt(
-            prompting_regime="maximum_mediator_faithfulness",
+            prompting_regime="max_detailed",
             use_tool_call=True,
             tool_call_instruction="TOOL",
             instruction="INSTR",

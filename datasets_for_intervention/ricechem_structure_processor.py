@@ -56,6 +56,8 @@ class RiceChemTool:
             return False
         if "rubric" not in args:
             return False
+        if not args['rubric']:
+            return False
 
         r = args["rubric"]
 

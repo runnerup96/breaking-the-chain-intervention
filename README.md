@@ -102,12 +102,12 @@ python download_datasets.py \
   --only tabfact
 ```
 
-Download **AVeriTeC + EntailmentBank**:
+Download **AVeriTeC + TabFact**:
 
 ```bash
 python download_datasets.py \
   --repo_id THunderCondOR/breaking-the-chain-intervention-data \
-  --only averitec entailmentbank
+  --only averitec tabfact
 ```
 
 #### Keep TabFact compressed (skip extraction)
@@ -177,7 +177,7 @@ uv pip install -r requirements.txt
 4. **Verify installation via testing**:
 
 ```bash
-python -m pytest datasets_for_intervention/test_intervention"
+python -m pytest datasets_for_intervention/test_intervention
 ```
 
 ### Alternative way
@@ -207,7 +207,7 @@ chmod +x make_intervention_script.sh
 
 - **`project_path`**: Set to your project directory path
 - **`python_path`**: Path to project interpreter
-- **`evaluation_dataset`**: Choose from `"ricechem"`, `"tabfact"`,` "entailment"`, `"averitec"`
+- **`evaluation_dataset`**: Choose from `"ricechem"`, `"tabfact"`, `"averitec"`
 - **`model_name`**: Specify the LLM model (e.g., `"Qwen/Qwen3-4B"`)
 - **`batch_size`**: Adjust based on your GPU memory (default: 32)
 - **`CUDA_DEVICE_NUMBER`**: Set your GPU device number
