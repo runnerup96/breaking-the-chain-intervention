@@ -29,8 +29,6 @@ def patterns_for_selected(averitec: bool, entailmentbank: bool, tabfact: bool, r
     pats = []
     if averitec:
         pats.append("datasets/AVeriTeC/**")
-    if entailmentbank:
-        pats.append("datasets/EntailmentBank/**")
     if tabfact:
         pats.append("datasets/TabFact/**")
     if ricechem:
@@ -78,7 +76,7 @@ def main():
 
     group = ap.add_mutually_exclusive_group()
     group.add_argument("--all", action="store_true", help="Download all datasets (default)")
-    group.add_argument("--only", nargs="+", choices=["averitec", "entailmentbank", "tabfact", "ricechem"],
+    group.add_argument("--only", nargs="+", choices=["averitec", "tabfact", "ricechem"],
                        help="Download only selected datasets")
 
     ap.add_argument("--no_extract", action="store_true", help="Do not extract TabFact all_csv.tar.gz")
@@ -89,15 +87,14 @@ def main():
     statics_dir.mkdir(parents=True, exist_ok=True)
 
     if args.all or args.only is None:
-        sel = {"averitec": True, "entailmentbank": True, "tabfact": True, "ricechem": True}
+        sel = {"averitec": True, "tabfact": True, "ricechem": True}
     else:
-        sel = {k: False for k in ["averitec", "entailmentbank", "tabfact", "ricechem"]}
+        sel = {k: False for k in ["averitec", "tabfact", "ricechem"]}
         for k in args.only:
             sel[k] = True
 
     allow_patterns = patterns_for_selected(
         averitec=sel["averitec"],
-        entailmentbank=sel["entailmentbank"],
         tabfact=sel["tabfact"],
         ricechem=sel["ricechem"],
     )

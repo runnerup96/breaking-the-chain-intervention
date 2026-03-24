@@ -20,7 +20,7 @@ python_bin="$HOME/.conda/envs/breaking-the-chain-env/bin/python"
 
 CUDA_DEVICE_NUMBER=0
 
-datasets=("averitec" "ricechem")
+datasets=("ricechem" "averitec" "ricechem")
 
 # --- Experiment configs: "prompting_regime:tool_mode" ---
 # Add or remove combinations here freely

@@ -187,10 +187,6 @@ class TabFactDatasetMock:
             ],
         }
 
-    # ------------------------------------------------------------------
-    # Public API  --  mirrors TabFactDataset
-    # ------------------------------------------------------------------
-
     def get_local_edits(self, sample: dict, n: int = None) -> list:
         """
         Return verified local-edit entries for this sample.
