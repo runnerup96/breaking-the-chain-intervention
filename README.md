@@ -1,24 +1,27 @@
 ## Breaking the Chain ⛓️‍💥: A Causal Analysis of LLM Faithfulness to Intermediate Structures
 
-
 ## Code Structure Overview
 
 This repository implements a front-door causal analysis framework for studying how interventions on intermediate reasoning steps (mediators) affect LLM predictions. The code is organized into three main components:
 
 ### 1. `make_intervention.py` - Main Orchestration Script
+
 The central script that coordinates the entire intervention pipeline:
+
 - **Purpose**: Runs causal interventions on LLM reasoning chains
-- **Functionality**: 
+- **Functionality**:
   - Loads datasets and LLM models
   - Generates initial predictions with structured reasoning
   - Applies interventions to specific reasoning components
   - Generates new predictions under interventions
   - Saves results for analysis
-- **Supported Dataset with structured mediator**: [RiceChem](https://github.com/luffycodes/Automated-Long-Answer-Grading), [TabFact](https://github.com/wenhuchen/Table-Fact-Checking), [EntailmentBank](https://github.com/allenai/entailment_bank), [AVeriTeC](https://fever.ai/dataset/averitec.html)
+- **Supported Dataset with structured mediator**: [RiceChem](https://github.com/luffycodes/Automated-Long-Answer-Grading), [TabFact](https://github.com/wenhuchen/Table-Fact-Checking), [AVeriTeC](https://fever.ai/dataset/averitec.html)
 - **Usage**: Command-line interface with configurable model, dataset, and batch parameters
 
 ### 2. `llm_model.py` - LLM Interface
+
 A unified interface for different language models:
+
 - **Purpose**: Abstracts model-specific generation logic
 - **Features**:
   - Automatic model family detection (currently supports Qwen3)
@@ -28,35 +31,29 @@ A unified interface for different language models:
 - **Supported Models**: Qwen, Gemma, Llama, Falcon with pre-trained or API functionality
 
 ### 3. `datasets_for_intervention/` - Dataset and Intervention Logic
+
 Contains dataset-specific implementations for different domains:
-- **`ricechem_dataset.py`**: Chemistry question dataset loader  
-- **`ricechem_intervention.py`**: Intervention logic for chemistry intermediate structure chains
-- **`ricechem_evaluation.py`**: Evaluation script to eval the model faithfulness and performance
-- **Other datasets**: AVeriTeC, TabFact, EntailmentBank -- implemented with the same structure;
+
+- **`*_dataset.py`**: dataset loader
+- **`*_intervention.py`**: Dataset-specific intervention logic
+- **`*_structure_processor.py`**: Dataset-specific tool and mediator parser
+- **`*_evaluation.py`**: Evaluation script to eval the model faithfulness and performance
 
 Each dataset implementation provides:
+
 - **Dataset Loading**: JSON/CSV parsing and preprocessing
 - **Prompt Construction**: Structured reasoning templates
 - **Intervention Logic**: Methods to modify specific reasoning steps
 - **Validation**: Ensuring intervention quality and consistency
 
-### Generating HSVT "Soft" Paraphrases with `openrouter_batch_api`
-
-You can generate the required "soft" HSVT paraphrases by leveraging the `openrouter_batch_api.py` to batch LLM calls via OpenRouter.
-
-`FILL HERE on available files`
-
 ## Downloading the datasets (`statics/`)
 
 This project expects the dataset artifacts to be present under:
 
-```
 ${PROJECT_PATH}/statics/datasets/
-  AVeriTeC/...
-  EntailmentBank/...
-  RiceChem/...
-  TabFact/...
-```
+AVeriTeC/...
+RiceChem/...
+TabFact/...
 
 We host the redistributable files on the Hugging Face Hub in a companion dataset repository:
 
@@ -89,7 +86,6 @@ python download_datasets.py \
 After this, you should have the same structure as the original `statics/` layout, including:
 
 - `${PROJECT_PATH}/statics/datasets/AVeriTeC/...`
-- `${PROJECT_PATH}/statics/datasets/EntailmentBank/...`
 - `${PROJECT_PATH}/statics/datasets/TabFact/data/all_csv/...`
 
 > The script downloads into a temporary folder under `statics/` and cleans it up at the end, so you should not end up with a persistent `.cache` directory in `statics/`.
@@ -106,12 +102,12 @@ python download_datasets.py \
   --only tabfact
 ```
 
-Download **AVeriTeC + EntailmentBank**:
+Download **AVeriTeC + TabFact**:
 
 ```bash
 python download_datasets.py \
   --repo_id THunderCondOR/breaking-the-chain-intervention-data \
-  --only averitec entailmentbank
+  --only averitec tabfact
 ```
 
 #### Keep TabFact compressed (skip extraction)
@@ -127,7 +123,7 @@ python download_datasets.py \
 
 ### Notes on RiceChem redistribution
 
-**RiceChem is not redistributed** in this repository due to licensing restrictions. The HF package may include an empty placeholder directory.  
+**RiceChem is not redistributed** in this repository due to licensing restrictions. The HF package may include an empty placeholder directory.
 If you want to run RiceChem experiments, download it from the original source and place the files under:
 
 ```
@@ -135,6 +131,7 @@ ${PROJECT_PATH}/statics/datasets/RiceChem/
 ```
 
 ## How It Works
+
 1. **Initial Generation**: LLM generates predictions with explicit reasoning steps
 2. **Intervention**: Specific reasoning components are systematically modified
 3. **Re-generation**: New predictions are generated under interventions
@@ -144,30 +141,31 @@ This framework enables researchers to study how different reasoning patterns inf
 
 ## Generated Figures
 
-The `analysis/` folder contains visualization scripts and generated figures from the paper that illustrate the results of the intervention experiments and overall model performance. 
-
+The `analysis/` folder contains visualization scripts and generated figures from the paper that illustrate the results of the intervention experiments and overall model performance.
 
 ## Environment Setup
 
 ### Prerequisites
+
 - Python 3.8 or higher
 - CUDA-compatible GPU (recommended for faster inference)
 
 ### Installation Steps
 
-
 1. **Create a virtual environment**:
+
 ```bash
 # Using venv
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Or using conda
-conda create -n intervention_analysis python=3.9
-conda activate intervention_analysis
+conda create -n breaking-the-chain-env python=3.12
+conda activate breaking-the-chain-env
 ```
 
 3. **Install dependencies**:
+
 ```bash
 # Install using pip
 pip install -r requirements.txt
@@ -177,14 +175,24 @@ uv pip install -r requirements.txt
 ```
 
 4. **Verify installation via testing**:
+
 ```bash
-python -m pytest datasets_for_intervention/test_intervention"
+python -m pytest datasets_for_intervention/test_intervention
 ```
 
+### Alternative way
+
+You can create conda env from `environment.yaml`
+
+```bash
+conda env create -f environment.yaml
+conda activate breaking-the-chain-env
+```
 
 ## How to Run
 
 ### Using the Shell Script (Recommended)
+
 The easiest way to run interventions is using the provided shell script:
 
 ```bash
@@ -196,14 +204,13 @@ chmod +x make_intervention_script.sh
 ```
 
 **Before running, modify the script to match your setup:**
+
 - **`project_path`**: Set to your project directory path
 - **`python_path`**: Path to project interpreter
-- **`evaluation_dataset`**: Choose from `"ricechem"`, `"tabfact"`,` "entailment"`, `"averitec"`
+- **`evaluation_dataset`**: Choose from `"ricechem"`, `"tabfact"`, `"averitec"`
 - **`model_name`**: Specify the LLM model (e.g., `"Qwen/Qwen3-4B"`)
 - **`batch_size`**: Adjust based on your GPU memory (default: 32)
 - **`CUDA_DEVICE_NUMBER`**: Set your GPU device number
-
-
 
 ```bash
 export PROJECT_PATH="/path/to/your/project"
@@ -216,14 +223,14 @@ python make_intervention.py \
 ```
 
 Results are saved to:
+
 ```
-intervention_analysis/intervention_predictions/{dataset_name}/{model_name}_{timestamp}.json
+intervention_analysis/intervention_predictions/{dataset_name}/{prompting_regime}/{model_name}_{timestamp}.json
 ```
 
 The output contains:
+
 - Original model predictions with reasoning steps
 - Intervention results for each reasoning component
 - Final predictions under each intervention
 - Validation status and any failed interventions
-
-

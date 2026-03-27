@@ -38,10 +38,6 @@ import pandas as pd
 from datasets_for_intervention.tabfact_dsl_engine import Call, Literal, TabFactEngine
 
 
-# ============================================================
-# TabFactTool
-# ============================================================
-
 class TabFactTool:
     """
     Deterministic table-query executor for TabFact.
@@ -126,10 +122,6 @@ class TabFactTool:
         return result.final if result.executable else None
 
 
-# ============================================================
-# TabFactStructureProcessor
-# ============================================================
-
 class TabFactStructureProcessor:
     """
     Handles parsing, validation, and comparison of TabFact DSL mediators.
@@ -167,10 +159,6 @@ class TabFactStructureProcessor:
 
     def __init__(self, engine: TabFactEngine) -> None:
         self.engine = engine
-
-    # ------------------------------------------------------------------
-    # Core parsing methods (required by Intervention / Evaluation)
-    # ------------------------------------------------------------------
 
     def extract_mediator(self, completion_text: str) -> Optional[str]:
         """
@@ -283,10 +271,6 @@ class TabFactStructureProcessor:
 
         return False
 
-    # ------------------------------------------------------------------
-    # Jaccard / column-value extraction (for evaluation metrics)
-    # ------------------------------------------------------------------
-
     def extract_columns_values(
         self, query: str
     ) -> Tuple[Set[str], Set[str]]:
@@ -339,10 +323,6 @@ class TabFactStructureProcessor:
 
         return 1 if set_a == set_b else 0
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _is_valid_query(self, query: str) -> bool:
         """Return True iff query is a syntactically valid DSL program."""
         if not query:
@@ -355,10 +335,6 @@ class TabFactStructureProcessor:
         except Exception:
             return False
 
-
-# ============================================================
-# Module-level helpers
-# ============================================================
 
 def _parse_table_csv(table_content: str) -> Optional[pd.DataFrame]:
     """

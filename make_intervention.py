@@ -14,7 +14,6 @@ import llm_model
 
 from datasets_for_intervention import (
     ricechem_intervention, ricechem_dataset, ricechem_evaluation, ricechem_structure_processor,
-    entailment_intervention, entailment_dataset, entailment_evaluation,
     averitec_intervention, averitec_dataset, averitec_evaluation, averitec_structure_processor,
     tabfact_intervention, tabfact_dataset, tabfact_evaluation, tabfact_dsl_engine, tabfact_structure_processor
 )
@@ -53,10 +52,6 @@ GEN_MAX_NEW_TOKENS = {
         "pred": {"none": 512, "simple": 512, "structured": 512},
         "interv": {"none": 10, "simple": 200, "structured": 200},
     },
-    "entailment": {
-        "pred": {"none": 768, "simple": 768, "structured": 768},
-        "interv": {"none": 16, "simple": 256, "structured": 256},
-    },
     "tabfact": {
         "pred": {"none": 512, "simple": 512, "structured": 512},
         "interv": {"none": 10, "simple": 200, "structured": 200},
@@ -64,61 +59,11 @@ GEN_MAX_NEW_TOKENS = {
 }
 
 
-def get_few_shot_examples(train_dataset_path: str, prompting_regime: str, n_few_shot_examples: int):
-    train_dataset = entailment_dataset.EntailmentDataset(train_dataset_path)
-    if prompting_regime == "standard":
-        stride = max(1, len(train_dataset) // (n_few_shot_examples * 2))
-        examples = [deepcopy(train_dataset[idx]) for idx in range(0, len(train_dataset), stride)]
-        examples = examples[:n_few_shot_examples]
-    elif prompting_regime == "detailed" or prompting_regime == "max_detailed":
-        if len(train_dataset) == 0:
-            raise ValueError("The train dataset is empty, cannot build few-shot examples.")
-
-        def stable_seed(sample_id: str, mode: str) -> int:
-            digest = hashlib.sha256(f"{sample_id}::{mode}".encode("utf-8")).digest()
-            return int.from_bytes(digest[:4], "big")
-
-        intervention_modes = ["rewire", "global", "delete", "replace"]
-        mode_idx = 0
-        examples = []
-        n_pairs = (n_few_shot_examples + 1) // 2
-        stride = max(1, len(train_dataset) // max(1, n_pairs))
-
-        for idx in range(0, len(train_dataset), stride):
-            if len(examples) >= n_few_shot_examples:
-                break
-
-            original_sample = deepcopy(train_dataset[idx])
-            original_id = original_sample["id"]
-            original_sample["id"] = f"{original_id}::orig"
-            examples.append(original_sample)
-            if len(examples) >= n_few_shot_examples:
-                break
-
-            intervened_sample = deepcopy(train_dataset[idx])
-            mode = intervention_modes[mode_idx % len(intervention_modes)]
-            mode_idx += 1
-            intervened_sample["id"] = f"{original_id}::{mode}"
-            intervened_sample["proof"] = entailment_intervention.intervene_step_proof(
-                step_proof=intervened_sample["proof"],
-                hypothesis_id=intervened_sample["hypothesis_id"],
-                distractors=intervened_sample["distractors"],
-                mode=mode,
-                seed=stable_seed(original_id, mode),
-                verbose=False
-            )
-            intervened_sample["score"] = not intervened_sample["score"]
-            examples.append(intervened_sample)
-    else:
-        raise ValueError(f"Invalid prompting regime: {prompting_regime}")
-    assert len(examples) == n_few_shot_examples
-    return examples
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--evaluation_dataset", type=str, required=True,
-                        choices=["ricechem", "entailment", "averitec", "tabfact"])
+                        choices=["ricechem", "averitec", "tabfact"])
 
     parser.add_argument("--prompting_regime", type=str, choices=["standard", "detailed", "max_detailed"], default="standard")
     parser.add_argument("--tool_mode", type=str, choices=["none", "simple", "structured"], default="none")
@@ -153,20 +98,6 @@ if __name__ == "__main__":
             tool_mode=args.tool_mode
         )
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, processor, args.tool_mode)
-
-    elif args.evaluation_dataset == "entailment":  # WARNING! Not updated yet
-        train_dataset_path = os.path.join(project_path, "statics/datasets/EntailmentBank/data/train.jsonl")
-        few_shot_examples = get_few_shot_examples(
-            train_dataset_path=train_dataset_path,
-            prompting_regime=args.prompting_regime,
-            n_few_shot_examples=5,
-        )
-        dataset_path = os.path.join(project_path, "statics/datasets/EntailmentBank/data/test.jsonl")
-        paraphrases_path = os.path.join(project_path, "statics/datasets/EntailmentBank/aligned_test_question_paraphases.json")
-        dataset = entailment_dataset.EntailmentDataset(dataset_path, paraphrases_path)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=lambda batch: batch, shuffle=False)
-        intervention_logic = entailment_intervention.EntailmentIntervention(dataset, llm_model, few_shot_examples=few_shot_examples, hsvt_mode="paraphrase", prompting_regime=args.prompting_regime)
-        evaluator = entailment_evaluation.EntailmentEvaluation(dataset, intervention_logic)
     elif args.evaluation_dataset == "averitec":
         dataset_path = os.path.join(project_path, "statics/datasets/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)

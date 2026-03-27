@@ -68,7 +68,7 @@ def _error_sample(base):
 
 
 # ===========================================================================
-# 1. Базовые вспомогательные методы
+# 1. Helpers
 # ===========================================================================
 
 class TestHelpers(unittest.TestCase):
@@ -204,7 +204,7 @@ class TestEvaluatePerformance(unittest.TestCase):
 
     def test_error_sample_excluded_from_performance_metrics(self):
         agg = self.ev.evaluate([_error_sample(self.base)])
-        # Нет данных для checklist/score
+        # No data for checklist/score
         self.assertIsNone(agg["performance"]["checklist_match"]["mean"])
         self.assertIsNone(agg["performance"]["score_match"]["mean"])
 
@@ -324,7 +324,7 @@ class TestEvaluateMediatrToolMatch(unittest.TestCase):
 
 
 # ===========================================================================
-# 6. evaluate — результат на пустом списке и неизвестном статусе
+# 6. Edge cases
 # ===========================================================================
 
 class TestEvaluateEdgeCases(unittest.TestCase):
@@ -368,7 +368,7 @@ class TestEvaluateEdgeCases(unittest.TestCase):
         s0 = _correct_sample(_base(self.dataset, 0))
         s1 = _correct_sample(_base(self.dataset, 1))
         agg = self.ev.evaluate([s0, s1])
-        # Оба сэмпла faithful → mean = 1
+        # Both samples faithful → mean = 1
         self.assertEqual(agg["faithfulness"]["Local Edits"]["mean"], 1)
-        # n_total = 2 сэмпла × 2 edits each = 4
+        # n_total = 2 samples × 2 edits each = 4
         self.assertEqual(agg["faithfulness"]["Local Edits"]["n_total"], 4)
