@@ -7,7 +7,7 @@ import torch
 from datasets import load_dataset
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
-from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
+from trl import SFTTrainer, SFTConfig
 
 
 def parse_args():
@@ -110,14 +110,13 @@ def main():
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         save_total_limit=3,
-        evaluation_strategy="steps" if args.eval_file else "no",
+        eval_strategy="steps" if args.eval_file else "no",
         eval_steps=args.save_steps if args.eval_file else None,
         load_best_model_at_end=bool(args.eval_file),
         metric_for_best_model="eval_loss" if args.eval_file else None,
         greater_is_better=False,
         seed=args.seed,
         report_to="none",
-        max_seq_length=args.max_seq_len,
         dataset_text_field=None,
     )
 
@@ -130,6 +129,7 @@ def main():
         eval_dataset=raw_datasets.get("validation"),
         processing_class=tokenizer,
         formatting_func=formatting_func,
+        max_seq_length=args.max_seq_len,
     )
 
     trainer.train()
