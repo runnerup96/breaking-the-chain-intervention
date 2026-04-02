@@ -184,12 +184,12 @@ class LLMModel:
             generated_ids = generation_output.sequences
             scores = generation_output.scores
         else:
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
             scores = None
 
         prompt_logits = None
@@ -241,12 +241,12 @@ class LLMModel:
             generated_ids = generation_output.sequences
             scores = generation_output.scores
         else:
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
             scores = None
 
         prompt_logits = None
@@ -301,12 +301,12 @@ class LLMModel:
             generated_ids = generation_output.sequences
             scores = generation_output.scores
         else:
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
             scores = None
 
         prompt_logits = None
@@ -361,12 +361,12 @@ class LLMModel:
             generated_ids = generation_output.sequences
             scores = generation_output.scores
         else:
-        generated_ids = self.model.generate(
-            **model_inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            num_beams=1
-        )
+            generated_ids = self.model.generate(
+                **model_inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                num_beams=1
+            )
             scores = None
 
         prompt_logits = None

@@ -1,8 +1,8 @@
 if __name__ == "__main__":
-    from utils import validate_generated_sql, extract_schema_links, parse_sql
+    from utils import validate_generated_sql, extract_schema_links, parse_sql, extract_skeleton_and_slots, compare_skeletons, compare_slots
     from pauq_dataset import PAUQDataset
 else:
-    from .utils import validate_generated_sql, extract_schema_links, parse_sql
+    from .utils import validate_generated_sql, extract_schema_links, parse_sql, extract_skeleton_and_slots, compare_skeletons, compare_slots
 from statistics import mean, pstdev
 
 
@@ -64,12 +64,21 @@ class PAUQEvaluation:
         generated_tables = set(generated_schema_links.keys())
         if true_tables != generated_tables:
             return False
-        
+
         for table_name in generated_schema_links:
             if set(true_schema_links[table_name]) != set(generated_schema_links[table_name]):
                 return False
-            
+
         return True
+
+    def _faithfulness_id(self, mediator_schema_links, mediator_skeleton, mediator_slots, generated_sql, db_schema) -> bool:
+        gen_schema_links = extract_schema_links(parse_sql(generated_sql, db_schema))
+        gen_skeleton, gen_slots = extract_skeleton_and_slots(generated_sql, db_schema)
+        return (
+            self.compare_schema_links(mediator_schema_links, gen_schema_links)
+            and compare_skeletons(mediator_skeleton, gen_skeleton)
+            and compare_slots(mediator_slots, gen_slots)
+        )
 
     def summarize_nested_lists(self, tree):
         if isinstance(tree, dict):
@@ -103,7 +112,11 @@ class PAUQEvaluation:
                 "with_predicted_structure": {
                     "HSVT": [],
                     "Local Edits": [],
-                    "Global": []
+                    "Global": [],
+                    "faithfulness_id": [],
+                    "faithfulness_strong_HSVT": [],
+                    "faithfulness_strong_Local Edits": [],
+                    "faithfulness_strong_Global": [],
                 }
             },
             # "local_edit_influence": {
@@ -200,7 +213,50 @@ class PAUQEvaluation:
                 evaluation_metrics["faithfullness"]["with_predicted_structure"]["Global"].append(
                     global_intervention_score)
 
+            # faithfulness_id and faithfulness_strong (only for structure_prediction)
+            if completion_type == "structure_prediction":
+                f_id = self._faithfulness_id(
+                    predicted_schema_links, sample["skeleton"], sample["slots"],
+                    predicted_sql, sample["db_schema"]
+                )
+                evaluation_metrics["faithfullness"]["with_predicted_structure"]["faithfulness_id"].append(int(f_id))
+
+                f_hsvt = self._faithfulness_id(
+                    hsvt_intervention["schema_links"], hsvt_intervention["skeleton"], hsvt_intervention["slots"],
+                    hsvt_intervention["generated_sql"], sample["db_schema"]
+                )
+                evaluation_metrics["faithfullness"]["with_predicted_structure"]["faithfulness_strong_HSVT"].append(
+                    int(f_id and f_hsvt)
+                )
+
+                for local_edit_intervention in local_edits_intervention:
+                    f_local = self._faithfulness_id(
+                        local_edit_intervention["schema_links"], local_edit_intervention["skeleton"], local_edit_intervention["slots"],
+                        local_edit_intervention["generated_sql"], local_edit_intervention["db_schema"]
+                    )
+                    evaluation_metrics["faithfullness"]["with_predicted_structure"]["faithfulness_strong_Local Edits"].append(
+                        int(f_id and f_local)
+                    )
+
+                f_global = self._faithfulness_id(
+                    global_intervention["schema_links"], global_intervention["skeleton"], global_intervention["slots"],
+                    global_intervention["generated_sql"], global_intervention["db_schema"]
+                )
+                evaluation_metrics["faithfullness"]["with_predicted_structure"]["faithfulness_strong_Global"].append(
+                    int(f_id and f_global)
+                )
+
         aggregated_evaluation_metrics = self.summarize_nested_lists(evaluation_metrics)
+
+        pred = aggregated_evaluation_metrics["faithfullness"]["with_predicted_structure"]
+        f_id_mean = pred["faithfulness_id"]["mean"]
+        for itype in ["HSVT", "Local Edits", "Global"]:
+            f_strong_mean = pred[f"faithfulness_strong_{itype}"]["mean"]
+            if f_id_mean is not None and f_strong_mean is not None:
+                pred[f"faithfulness_gap_{itype}"] = round(f_id_mean - f_strong_mean, 3)
+            else:
+                pred[f"faithfulness_gap_{itype}"] = None
+
         self.print_evaluation_metrics(aggregated_evaluation_metrics)
 
         return aggregated_evaluation_metrics
@@ -221,13 +277,16 @@ class PAUQEvaluation:
         
         print("\nFaithfulness Metrics:")
         print("--------------------")
+        gap_keys = {"faithfulness_gap_HSVT", "faithfulness_gap_Local Edits", "faithfulness_gap_Global"}
         for structure_type, metrics in evaluation_metrics["faithfullness"].items():
             print(f"\n{structure_type}:")
-            for intervention_type, value in metrics.items():
-                if None not in value.values():
-                    print(f"  {intervention_type}: mean = {value['mean']}, std = {value['std']}")
+            for key, value in metrics.items():
+                if key in gap_keys:
+                    print(f"  {key}: {value}")
+                elif None not in value.values():
+                    print(f"  {key}: mean = {value['mean']}, std = {value['std']}")
                 else:
-                    print(f"  {intervention_type}: mean = No , std = No ")
+                    print(f"  {key}: mean = No , std = No ")
                 
         print("\nLocal Edit Influence:")
         print("--------------------") 
