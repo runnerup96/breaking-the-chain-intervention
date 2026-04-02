@@ -119,16 +119,6 @@ class PAUQEvaluation:
                     "faithfulness_strong_Global": [],
                 }
             },
-            # "local_edit_influence": {
-            #     "with_gold_structure": {task_idx: {intervention_idx: []
-            #                                        for intervention_idx in
-            #                                        range(len(self.dataset.task2rubric_weights[task_idx]))}
-            #                             for task_idx in self.dataset.task2rubric_weights},
-            #     "with_predicted_structure": {task_idx: {intervention_idx: []
-            #                                             for intervention_idx in
-            #                                             range(len(self.dataset.task2rubric_weights[task_idx]))}
-            #                                  for task_idx in self.dataset.task2rubric_weights}
-            # }
         }
         for sample in processed_samples_list:
             sample_idx = sample['index']
@@ -181,18 +171,12 @@ class PAUQEvaluation:
                                                                          local_edit_intervention["db_schema"])
 
                 if completion_type == "gold_structure":
-
                     evaluation_metrics["faithfullness"]["with_gold_structure"]["Local Edits"].append(
                         local_edit_intervention_match)
-                    # evaluation_metrics["local_edit_influence"]["with_gold_structure"][task_idx][
-                    #     intervention_idx].append(local_edit_intervention_match)
 
                 elif completion_type == "structure_prediction":
-
                     evaluation_metrics["faithfullness"]["with_predicted_structure"]["Local Edits"].append(
                         local_edit_intervention_match)
-                    # evaluation_metrics["local_edit_influence"]["with_predicted_structure"][task_idx][
-                    #     intervention_idx].append(local_edit_intervention_match)
 
             # Global intervention
             global_intervention = structure_intervention['Global'][0]
@@ -290,15 +274,6 @@ class PAUQEvaluation:
                 
         print("\nLocal Edit Influence:")
         print("--------------------") 
-        # for structure_type, task_metrics in evaluation_metrics["local_edit_influence"].items():
-        #     print(f"\n{structure_type}:")
-        #     for task_id, scores in task_metrics.items():
-        #         print(f"  Task {task_id}:")
-        #         for edit_id, value in scores.items():
-        #             if None not in value.values():
-        #                 print(f"    Edit {edit_id}: mean = {value['mean']}, std = {value['std']}")
-        #             else:
-        #                 print(f"    Edit {edit_id}: mean = No, std = No")
 
 
 class PAUQCorrectionEvaluation:
@@ -344,6 +319,15 @@ class PAUQCorrectionEvaluation:
 
         return self.compare_schema_links(schema_links_before, schema_links_after)
 
+    def _faithfulness_id(self, mediator_schema_links, mediator_skeleton, mediator_slots, generated_sql, db_schema) -> bool:
+        gen_schema_links = extract_schema_links(parse_sql(generated_sql, db_schema))
+        gen_skeleton, gen_slots = extract_skeleton_and_slots(generated_sql, db_schema)
+        return (
+            self.compare_schema_links(mediator_schema_links, gen_schema_links)
+            and compare_skeletons(mediator_skeleton, gen_skeleton)
+            and compare_slots(mediator_slots, gen_slots)
+        )
+
     def summarize_nested_lists(self, tree):
         if isinstance(tree, dict):
             return {k: self.summarize_nested_lists(v) for k, v in tree.items()}
@@ -360,7 +344,6 @@ class PAUQCorrectionEvaluation:
         evaluation_metrics = {
             "performance": {
                 "with_bad_structure": {
-                    # "checklist_match": [],
                     "sql_match": [],
                 },
                 "with_corrected_structure": {
@@ -368,7 +351,9 @@ class PAUQCorrectionEvaluation:
                 },
             },
             "faithfulness": {
-                "correction": [],  # identical to score_match after correction (expected = golden_score)
+                "correction": [],
+                "faithfulness_id": [],
+                "faithfulness_strong_correction": [],
             },
         }
 
@@ -387,16 +372,7 @@ class PAUQCorrectionEvaluation:
             bad_slots = self.idx2bad_slots[idx]
 
             bad_sql_pred = sample.get("generated_sql_before_intervention")
-            
-            # evaluation_metrics["performance"]["with_bad_structure"]["checklist_match"].append(
-            #     self.compare_checklists(gold_rubric, bad_rubric)
-            #     self.compare_structures({
-            #         "gold_schema_links": gold_schema_links,
-            #         "bad_schema_links": bad_schema_links,
-            #         "gold_skeleton": gold_skeleton,
-            #         "bad_skeleton": bad_skeleton,
-            #     })
-            # )
+ 
             evaluation_metrics["performance"]["with_bad_structure"]["sql_match"].append(
                 self.compare_sql_queries(gold_sql, bad_sql_pred, db_schema)
             )
@@ -407,7 +383,22 @@ class PAUQCorrectionEvaluation:
             evaluation_metrics["performance"]["with_corrected_structure"]["sql_match"].append(after)
             evaluation_metrics["faithfulness"]["correction"].append(after)
 
+            f_id = self._faithfulness_id(bad_schema_links, bad_skeleton, bad_slots, bad_sql_pred, db_schema)
+            evaluation_metrics["faithfulness"]["faithfulness_id"].append(int(f_id))
+
+            f_correction = self._faithfulness_id(gold_schema_links, gold_skeleton, gold_slots, corrected_sql_pred, db_schema)
+            evaluation_metrics["faithfulness"]["faithfulness_strong_correction"].append(int(f_id and f_correction))
+
         aggregated = self.summarize_nested_lists(evaluation_metrics)
+
+        faith = aggregated["faithfulness"]
+        f_id_mean = faith["faithfulness_id"]["mean"]
+        f_strong_mean = faith["faithfulness_strong_correction"]["mean"]
+        if f_id_mean is not None and f_strong_mean is not None:
+            faith["faithfulness_gap_correction"] = round(f_id_mean - f_strong_mean, 3)
+        else:
+            faith["faithfulness_gap_correction"] = None
+
         self.print_evaluation_metrics(aggregated)
         return aggregated
 
@@ -425,27 +416,11 @@ class PAUQCorrectionEvaluation:
                     print(f"  {metric_name}: mean = No, std = No")
 
         print("\nFaithfulness:")
+        gap_keys = {"faithfulness_gap_correction"}
         for metric_name, value in evaluation_metrics["faithfulness"].items():
-            if None not in value.values():
+            if metric_name in gap_keys:
+                print(f"  {metric_name}: {value}")
+            elif None not in value.values():
                 print(f"  {metric_name}: mean = {value['mean']}, std = {value['std']}")
             else:
                 print(f"  {metric_name}: mean = No, std = No")
-
-                
-if __name__ == "__main__":
-    sql_before = "SELECT full_name FROM students WHERE age > 20;"
-    sql_after = "SELECT ages FROM new_students WHERE age > 20;"
-    interventions = [
-        {"type": "column", "before": "full_name", "after": "ages"},
-        {"type": "table", "before": "students", "after": "new_students"}
-    ]
-
-    # info_before = extract_tables_and_columns(sql_before)
-    # info_after = extract_tables_and_columns(sql_after)
-
-    # print("Before:", info_before)
-    # print("After:", info_after)
-
-    dataset = PAUQDataset("./pauq")
-    eval = PAUQEvaluation(dataset)
-    print(eval.compare_sql_queries(sql_before, sql_after, interventions, {"students": ["name", "full_name", "age"], "new_students": ["new_name", "full_name_new", "ages", "age"]}))
