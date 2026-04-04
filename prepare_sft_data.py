@@ -1,6 +1,9 @@
 import argparse
+import copy
 import json
 import os
+import random
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -136,6 +139,123 @@ def build_user_prompt(question: str, db: dict) -> str:
     )
 
 
+def reconstruct_sql_from_skeleton(skeleton: str, slots: list) -> str:
+    """Replace each SLOT_i in skeleton with slots[i-1] to produce executable SQL."""
+    result = skeleton
+    for i, slot_value in enumerate(slots, start=1):
+        result = result.replace(f"SLOT_{i}", slot_value)
+    return result
+
+
+def update_slots(slots: list, name: str, new_name: str):
+    """Replace first occurrence of name in slots with new_name (in-place)."""
+    if name in slots:
+        idx = slots.index(name)
+        slots[idx] = new_name
+
+
+def make_local_column_intervention(sample: dict, dataset: PAUQDataset):
+    """Swap one column in schema_links/slots with another column from the same table.
+    Returns modified sample copy or None if intervention is impossible."""
+    s = copy.deepcopy(sample)
+    schema_links = s["true_schema_links"]
+    slots = s["true_slots"]
+
+    table_name = random.choice(list(schema_links.keys()))
+    columns = schema_links[table_name]
+    if not columns:
+        return None
+
+    column_idx = random.randint(0, len(columns) - 1)
+    column_name = columns[column_idx]
+
+    table_columns = dataset.get_table_columns(s["db"], table_name)
+    try:
+        table_columns.remove(column_name)
+    except ValueError:
+        pass
+    if not table_columns:
+        return None
+
+    other_column = random.choice(table_columns)
+    columns[column_idx] = other_column
+    update_slots(slots, column_name, other_column)
+
+    s["true_schema_links"] = schema_links
+    s["true_slots"] = slots
+    s["query"] = reconstruct_sql_from_skeleton(s["true_skeleton"], slots)
+    return s
+
+
+def make_local_table_intervention(sample: dict, dataset: PAUQDataset):
+    """Swap one table name in schema_links/slots with another table from the DB.
+    Returns modified sample copy or None if intervention is impossible."""
+    s = copy.deepcopy(sample)
+    schema_links = s["true_schema_links"]
+    slots = s["true_slots"]
+
+    table_name = random.choice(list(schema_links.keys()))
+    table_names = list(s["db"]["table_names_original"])
+    try:
+        table_names.remove(table_name)
+    except ValueError:
+        pass
+    if not table_names:
+        return None
+
+    other_table_name = random.choice(table_names)
+    columns = schema_links[table_name]
+    del schema_links[table_name]
+    schema_links[other_table_name] = columns
+    update_slots(slots, table_name, other_table_name)
+
+    s["true_schema_links"] = schema_links
+    s["true_slots"] = slots
+    s["query"] = reconstruct_sql_from_skeleton(s["true_skeleton"], slots)
+    return s
+
+
+def make_global_intervention(sample: dict, dataset: PAUQDataset):
+    """Replace all tables/columns with dummy equivalents.
+    Returns modified sample copy or None if intervention is impossible."""
+    s = copy.deepcopy(sample)
+    schema_links = s["true_schema_links"]
+    slots = s["true_slots"]
+    dummy_tables = dataset.dummy_tables
+
+    num_tables = len(schema_links)
+    if num_tables > len(dummy_tables):
+        return None
+
+    random_tables = random.sample(list(dummy_tables.keys()), num_tables)
+    new_schema_links = {}
+
+    for random_table, table_name in zip(random_tables, list(schema_links.keys())):
+        num_columns = len(schema_links[table_name])
+        available_columns = dummy_tables[random_table]
+        if num_columns > len(available_columns):
+            return None
+
+        random_columns = random.sample(available_columns, num_columns)
+        new_schema_links[random_table] = random_columns
+
+        for old_column, new_column in zip(schema_links[table_name], random_columns):
+            update_slots(slots, old_column, new_column)
+        update_slots(slots, table_name, random_table)
+
+    s["true_schema_links"] = new_schema_links
+    s["true_slots"] = slots
+    s["query"] = reconstruct_sql_from_skeleton(s["true_skeleton"], slots)
+    return s
+
+
+INTERVENTION_FUNCS = {
+    "local_column": make_local_column_intervention,
+    "local_table": make_local_table_intervention,
+    "global": make_global_intervention,
+}
+
+
 def build_assistant_response(sample: dict) -> str:
     lines = ["===SKELETON===", sample["true_skeleton"], "===SCHEMA_LINKS==="]
     for table_name, columns in sample["true_schema_links"].items():
@@ -148,12 +268,32 @@ def build_assistant_response(sample: dict) -> str:
     return "\n".join(lines)
 
 
+def make_record(sample, tokenizer=None):
+    user_content = build_user_prompt(sample["question"], sample["db"])
+    assistant_content = build_assistant_response(sample)
+    messages = [
+        {"role": "user", "content": user_content},
+        {"role": "assistant", "content": assistant_content},
+    ]
+    record = {"messages": messages}
+    if tokenizer is not None:
+        record["text"] = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=False
+        )
+    return record
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prepare SFT data from PAUQ dataset")
     parser.add_argument("--data-path", required=True, help="Path to pauq/ folder")
     parser.add_argument("--output", required=True, help="Output .jsonl file path")
     parser.add_argument("--split", choices=["train", "dev"], default="train")
     parser.add_argument("--tokenizer", default=None, help="HuggingFace tokenizer name/path for 'text' field")
+    parser.add_argument("--include-interventions", action="store_true",
+                        help="Add intervened samples to increase faithfulness")
+    parser.add_argument("--intervention-types", default="local_column,local_table,global",
+                        help="Comma-separated intervention types (default: local_column,local_table,global)")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for interventions")
     args = parser.parse_args()
 
     tokenizer = None
@@ -165,24 +305,38 @@ def main():
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
 
+    intervention_types = []
+    if args.include_interventions:
+        random.seed(args.seed)
+        intervention_types = [t.strip() for t in args.intervention_types.split(",")]
+        for t in intervention_types:
+            if t not in INTERVENTION_FUNCS:
+                parser.error(f"Unknown intervention type: {t}. Choose from: {list(INTERVENTION_FUNCS.keys())}")
+
+    total_original = 0
+    total_intervened = 0
+
     with open(args.output, "w", encoding="utf-8") as f:
         for sample in dataset:
-            user_content = build_user_prompt(sample["question"], sample["db"])
-            assistant_content = build_assistant_response(sample)
-            messages = [
-                {"role": "user", "content": user_content},
-                {"role": "assistant", "content": assistant_content},
-            ]
-            record = {"messages": messages}
-            if tokenizer is not None:
-                record["text"] = tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=False
-                )
+            # Original gold sample
+            record = make_record(sample, tokenizer)
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            total_original += 1
 
-    print(f"Split:   {args.split}")
-    print(f"Samples: {len(dataset)}")
-    print(f"Output:  {args.output}")
+            # Intervened samples
+            for itype in intervention_types:
+                intervened = INTERVENTION_FUNCS[itype](sample, dataset)
+                if intervened is None:
+                    continue
+                record = make_record(intervened, tokenizer)
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                total_intervened += 1
+
+    print(f"Split:      {args.split}")
+    print(f"Original:   {total_original}")
+    print(f"Intervened: {total_intervened}")
+    print(f"Total:      {total_original + total_intervened}")
+    print(f"Output:     {args.output}")
 
 
 if __name__ == "__main__":

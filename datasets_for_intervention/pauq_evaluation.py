@@ -6,6 +6,44 @@ else:
 from statistics import mean, pstdev
 
 
+def _normalize_schema_links(schema_links: dict) -> dict:
+    normalized = {}
+    for table, cols in schema_links.items():
+        table_lc = table.lower()
+        cols_lc = [c.lower() for c in cols]
+        normalized[table_lc] = sorted(set(cols_lc))
+    return normalized
+
+
+def _compare_schema_links_normalized(true_schema_links: dict, generated_schema_links: dict) -> bool:
+    true_schema_links = _normalize_schema_links(true_schema_links)
+    generated_schema_links = _normalize_schema_links(generated_schema_links)
+
+    true_tables = set(true_schema_links.keys())
+    generated_tables = set(generated_schema_links.keys())
+    if true_tables != generated_tables:
+        return False
+
+    for table_name in generated_schema_links:
+        if set(true_schema_links[table_name]) != set(generated_schema_links[table_name]):
+            return False
+
+    return True
+
+
+def faithfulness_id(mediator_schema_links, mediator_skeleton, mediator_slots, generated_sql, db_schema) -> bool:
+    try:
+        gen_schema_links = extract_schema_links(parse_sql(generated_sql, db_schema))
+        gen_skeleton, gen_slots = extract_skeleton_and_slots(generated_sql, db_schema)
+    except Exception:
+        return False
+    return (
+        _compare_schema_links_normalized(mediator_schema_links, gen_schema_links)
+        and compare_skeletons(mediator_skeleton, gen_skeleton)
+        and compare_slots(mediator_slots, gen_slots)
+    )
+
+
 class PAUQEvaluation:
     def __init__(self, dataset):
         self.dataset = dataset
@@ -13,24 +51,15 @@ class PAUQEvaluation:
         self.idx2gold_schema_links = {sample['index']: sample['true_schema_links'] for sample in dataset}
         self.idx2gold_sql = {sample['index']: sample['query'] for sample in dataset}
 
-    @staticmethod
-    def _normalize_schema_links(schema_links: dict) -> dict:
-        normalized = {}
-        for table, cols in schema_links.items():
-            table_lc = table.lower()
-            cols_lc = [c.lower() for c in cols]
-            normalized[table_lc] = sorted(set(cols_lc))
-        return normalized
-
     def compare_sql_queries(self, query_before: str, query_after: str, intervention_list: dict[str, str], db_schema: dict) -> bool:
         schema_links_before = extract_schema_links(parse_sql(query_before, db_schema))
         schema_links_after = extract_schema_links(parse_sql(query_after, db_schema))
-        
+
         for intervention in intervention_list:
             intervention_type = intervention["type"]
             before = intervention["before"]
             after = intervention["after"]
-    
+
             if intervention_type == "column":
                 found = False
                 for table_name in schema_links_after:
@@ -41,7 +70,7 @@ class PAUQEvaluation:
                         found = True
                 if not found:
                     return False
-                    
+
             elif intervention_type == "table":
                 if after not in schema_links_after:
                     return False
@@ -51,34 +80,10 @@ class PAUQEvaluation:
             else:
                 raise NotImplementedError
 
-        return self.compare_schema_links(schema_links_before, schema_links_after)
-    
+        return _compare_schema_links_normalized(schema_links_before, schema_links_after)
+
     def validate_generated_sql(self, true_sql: str, generated_sql: str, db_schema: dict) -> bool:
         return validate_generated_sql(true_sql, generated_sql, db_schema)
-    
-    def compare_schema_links(self, true_schema_links: dict, generated_schema_links: dict) -> bool:
-        true_schema_links = self._normalize_schema_links(true_schema_links)
-        generated_schema_links = self._normalize_schema_links(generated_schema_links)
-
-        true_tables = set(true_schema_links.keys())
-        generated_tables = set(generated_schema_links.keys())
-        if true_tables != generated_tables:
-            return False
-
-        for table_name in generated_schema_links:
-            if set(true_schema_links[table_name]) != set(generated_schema_links[table_name]):
-                return False
-
-        return True
-
-    def _faithfulness_id(self, mediator_schema_links, mediator_skeleton, mediator_slots, generated_sql, db_schema) -> bool:
-        gen_schema_links = extract_schema_links(parse_sql(generated_sql, db_schema))
-        gen_skeleton, gen_slots = extract_skeleton_and_slots(generated_sql, db_schema)
-        return (
-            self.compare_schema_links(mediator_schema_links, gen_schema_links)
-            and compare_skeletons(mediator_skeleton, gen_skeleton)
-            and compare_slots(mediator_slots, gen_slots)
-        )
 
     def summarize_nested_lists(self, tree):
         if isinstance(tree, dict):
@@ -133,7 +138,7 @@ class PAUQEvaluation:
             else:
                 predicted_sql += ";"
 
-            schema_links_match = self.compare_schema_links(gold_schema_links, predicted_schema_links)
+            schema_links_match = _compare_schema_links_normalized(gold_schema_links, predicted_schema_links)
             sql_match = self.validate_generated_sql(gold_sql, predicted_sql, sample["db_schema"])
                 
             if completion_type == "gold_structure":
@@ -199,13 +204,13 @@ class PAUQEvaluation:
 
             # faithfulness_id and faithfulness_strong (only for structure_prediction)
             if completion_type == "structure_prediction":
-                f_id = self._faithfulness_id(
+                f_id = faithfulness_id(
                     predicted_schema_links, sample["skeleton"], sample["slots"],
                     predicted_sql, sample["db_schema"]
                 )
                 evaluation_metrics["faithfullness"]["with_predicted_structure"]["faithfulness_id"].append(int(f_id))
 
-                f_hsvt = self._faithfulness_id(
+                f_hsvt = faithfulness_id(
                     hsvt_intervention["schema_links"], hsvt_intervention["skeleton"], hsvt_intervention["slots"],
                     hsvt_intervention["generated_sql"], sample["db_schema"]
                 )
@@ -214,7 +219,7 @@ class PAUQEvaluation:
                 )
 
                 for local_edit_intervention in local_edits_intervention:
-                    f_local = self._faithfulness_id(
+                    f_local = faithfulness_id(
                         local_edit_intervention["schema_links"], local_edit_intervention["skeleton"], local_edit_intervention["slots"],
                         local_edit_intervention["generated_sql"], local_edit_intervention["db_schema"]
                     )
@@ -222,7 +227,7 @@ class PAUQEvaluation:
                         int(f_id and f_local)
                     )
 
-                f_global = self._faithfulness_id(
+                f_global = faithfulness_id(
                     global_intervention["schema_links"], global_intervention["skeleton"], global_intervention["slots"],
                     global_intervention["generated_sql"], global_intervention["db_schema"]
                 )
@@ -289,44 +294,11 @@ class PAUQCorrectionEvaluation:
         self.idx2bad_slots = {s["idx"]: s["bad_slots"] for s in dataset}
         self.idx2db_schema = {s["idx"]: s["db_schema"] for s in dataset}
 
-    @staticmethod
-    def _normalize_schema_links(schema_links: dict) -> dict:
-        normalized = {}
-        for table, cols in schema_links.items():
-            table_lc = table.lower()
-            cols_lc = [c.lower() for c in cols]
-            normalized[table_lc] = sorted(set(cols_lc))
-        return normalized
-
-    def compare_schema_links(self, true_schema_links: dict, generated_schema_links: dict) -> bool:
-        true_schema_links = self._normalize_schema_links(true_schema_links)
-        generated_schema_links = self._normalize_schema_links(generated_schema_links)
-
-        true_tables = set(true_schema_links.keys())
-        generated_tables = set(generated_schema_links.keys())
-        if true_tables != generated_tables:
-            return False
-        
-        for table_name in generated_schema_links:
-            if set(true_schema_links[table_name]) != set(generated_schema_links[table_name]):
-                return False
-            
-        return True
-        
     def compare_sql_queries(self, query_before: str, query_after: str, db_schema: dict) -> bool:
         schema_links_before = extract_schema_links(parse_sql(query_before, db_schema))
         schema_links_after = extract_schema_links(parse_sql(query_after, db_schema))
 
-        return self.compare_schema_links(schema_links_before, schema_links_after)
-
-    def _faithfulness_id(self, mediator_schema_links, mediator_skeleton, mediator_slots, generated_sql, db_schema) -> bool:
-        gen_schema_links = extract_schema_links(parse_sql(generated_sql, db_schema))
-        gen_skeleton, gen_slots = extract_skeleton_and_slots(generated_sql, db_schema)
-        return (
-            self.compare_schema_links(mediator_schema_links, gen_schema_links)
-            and compare_skeletons(mediator_skeleton, gen_skeleton)
-            and compare_slots(mediator_slots, gen_slots)
-        )
+        return _compare_schema_links_normalized(schema_links_before, schema_links_after)
 
     def summarize_nested_lists(self, tree):
         if isinstance(tree, dict):
@@ -383,10 +355,10 @@ class PAUQCorrectionEvaluation:
             evaluation_metrics["performance"]["with_corrected_structure"]["sql_match"].append(after)
             evaluation_metrics["faithfulness"]["correction"].append(after)
 
-            f_id = self._faithfulness_id(bad_schema_links, bad_skeleton, bad_slots, bad_sql_pred, db_schema)
+            f_id = faithfulness_id(bad_schema_links, bad_skeleton, bad_slots, bad_sql_pred, db_schema)
             evaluation_metrics["faithfulness"]["faithfulness_id"].append(int(f_id))
 
-            f_correction = self._faithfulness_id(gold_schema_links, gold_skeleton, gold_slots, corrected_sql_pred, db_schema)
+            f_correction = faithfulness_id(gold_schema_links, gold_skeleton, gold_slots, corrected_sql_pred, db_schema)
             evaluation_metrics["faithfulness"]["faithfulness_strong_correction"].append(int(f_id and f_correction))
 
         aggregated = self.summarize_nested_lists(evaluation_metrics)
