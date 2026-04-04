@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from datasets import load_dataset
 from peft import LoraConfig, TaskType, get_peft_model
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
 
 
@@ -44,9 +44,12 @@ def fix_seed(seed: int):
 
 def build_model_and_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+
     tokenizer.padding_side = "right"
+    tokenizer.model_max_length = args.max_seq_len
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
@@ -61,8 +64,13 @@ def build_model_and_tokenizer(args):
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
             target_modules=[
-                "q_proj", "k_proj", "v_proj", "o_proj",
-                "gate_proj", "up_proj", "down_proj",
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
             ],
             bias="none",
         )
@@ -72,17 +80,34 @@ def build_model_and_tokenizer(args):
     return model, tokenizer
 
 
-def make_formatting_func(tokenizer):
-    def formatting_func(examples):
-        texts = []
-        for messages in examples["messages"]:
-            text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=False,
+def validate_example(example):
+    if "messages" not in example:
+        raise ValueError("Each dataset example must contain a 'messages' field.")
+
+    messages = example["messages"]
+    if not isinstance(messages, list):
+        raise ValueError("'messages' must be a list of chat messages.")
+
+    for i, message in enumerate(messages):
+        if not isinstance(message, dict):
+            raise ValueError(f"Message at index {i} must be a dict, got {type(message)}.")
+        if "role" not in message or "content" not in message:
+            raise ValueError(
+                f"Message at index {i} must contain 'role' and 'content' keys. "
+                f"Got keys: {list(message.keys())}"
             )
-            texts.append(text)
-        return texts
+
+
+def make_formatting_func(tokenizer):
+    def formatting_func(example):
+        validate_example(example)
+        text = tokenizer.apply_chat_template(
+            example["messages"],
+            tokenize=False,
+            add_generation_prompt=False,
+        )
+        return text
+
     return formatting_func
 
 
@@ -93,9 +118,13 @@ def main():
     data_files = {"train": args.train_file}
     if args.eval_file:
         data_files["validation"] = args.eval_file
+
     raw_datasets = load_dataset("json", data_files=data_files)
 
     model, tokenizer = build_model_and_tokenizer(args)
+    formatting_func = make_formatting_func(tokenizer)
+
+    use_eval = "validation" in raw_datasets
 
     training_args = SFTConfig(
         output_dir=args.output_dir,
@@ -110,26 +139,24 @@ def main():
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         save_total_limit=3,
-        eval_strategy="steps" if args.eval_file else "no",
-        eval_steps=args.save_steps if args.eval_file else None,
-        load_best_model_at_end=bool(args.eval_file),
-        metric_for_best_model="eval_loss" if args.eval_file else None,
-        greater_is_better=False,
+        eval_strategy="steps" if use_eval else "no",
+        eval_steps=args.save_steps if use_eval else None,
+        load_best_model_at_end=use_eval,
+        metric_for_best_model="eval_loss" if use_eval else None,
+        greater_is_better=False if use_eval else None,
         seed=args.seed,
         report_to="none",
+        max_length=args.max_seq_len,
         dataset_text_field=None,
     )
-
-    formatting_func = make_formatting_func(tokenizer)
 
     trainer = SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=raw_datasets["train"],
-        eval_dataset=raw_datasets.get("validation"),
+        eval_dataset=raw_datasets["validation"] if use_eval else None,
         processing_class=tokenizer,
         formatting_func=formatting_func,
-        max_seq_length=args.max_seq_len,
     )
 
     trainer.train()
