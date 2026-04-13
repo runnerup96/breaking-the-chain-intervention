@@ -1,8 +1,8 @@
 import json
 import os
-if __name__ == "__main__":
+try:
     from utils import extract_schema_links, parse_sql, extract_skeleton_and_slots
-else:
+except ImportError:
     from .utils import extract_schema_links, parse_sql, extract_skeleton_and_slots
 import copy
 

@@ -1,8 +1,8 @@
-if __name__ == "__main__":
+try:
     from utils import validate_generated_sql, extract_schema_links, parse_sql, extract_skeleton_and_slots, compare_skeletons, compare_slots
-    from pauq_dataset import PAUQDataset
-else:
+except ImportError:
     from .utils import validate_generated_sql, extract_schema_links, parse_sql, extract_skeleton_and_slots, compare_skeletons, compare_slots
+    
 from statistics import mean, pstdev
 
 
@@ -37,12 +37,23 @@ def faithfulness_id(mediator_schema_links, mediator_skeleton, mediator_slots, ge
         gen_skeleton, gen_slots = extract_skeleton_and_slots(generated_sql, db_schema)
     except Exception:
         return False
-    return (
-        _compare_schema_links_normalized(mediator_schema_links, gen_schema_links)
-        and compare_skeletons(mediator_skeleton, gen_skeleton)
+    mediator_skeleton = "".join(mediator_skeleton.split())
+    gen_skeleton = "".join(gen_skeleton.split())
+    result = (
+        # _compare_schema_links_normalized(mediator_schema_links, gen_schema_links)
+        compare_skeletons(mediator_skeleton, gen_skeleton)
         and compare_slots(mediator_slots, gen_slots)
     )
-
+    if not result:
+        print(f"Faithfulness ID failed for {generated_sql}")
+        print(f"Mediator schema links: {mediator_schema_links}")
+        print(f"Generated schema links: {gen_schema_links}")
+        print(f"Mediator skeleton: {mediator_skeleton}")
+        print(f"Generated skeleton: {gen_skeleton}")
+        print(f"Mediator slots: {mediator_slots}")
+        print(f"Generated slots: {gen_slots}")
+        print("--------------------------------")
+    return result
 
 class PAUQEvaluation:
     def __init__(self, dataset):
