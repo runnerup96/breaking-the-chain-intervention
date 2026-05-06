@@ -29,13 +29,17 @@ model_name2simple = {
     "Qwen/Qwen3-1.7B": "qwen3-1.7B",
     "Qwen/Qwen3-4B": "qwen3-4B",
     "Qwen/Qwen3-8B": "qwen3-8B",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507": "qwen3-235B-a22B",
     "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
     "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
     "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
     "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
     "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
     "google/gemma-2-2b-it": "gemma2-2B",
-    "Meta-llama/Llama-3.1-70B-Instruct": "llama-70B",
+    "Openai/Gpt-oss-120b": "gpt-oss-120b",
+    "unsloth/Meta-Llama-3.1-70B-Instruct-bnb-4bit": "llama31-70B",
+    "unsloth/Qwen3-32B-bnb-4bit": "qwen3-32B",
+    "unsloth/Qwen3-14B-bnb-4bit": "qwen3-14B"
 }
 
 
@@ -71,7 +75,7 @@ if __name__ == "__main__":
     parser.add_argument("--try_one_batch", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use_api", action="store_true")
-    parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
+    parser.add_argument("--api_base_url", type=str, default=None)
     parser.add_argument("--tokenizer_name", type=str, default=None)
 
     args = parser.parse_args()

@@ -54,6 +54,9 @@ class TabFactIntervention:
             f"prompting_regime must be one of: standard, detailed, max_detailed. "
             f"Got: {prompting_regime}"
         )
+        if tool_mode != 'none':
+            tool_mode = 'simple'
+    
         assert tool_mode in ("none", "simple"), (
             f"tool_mode for TabFact must be 'none' or 'simple'. Got: {tool_mode}"
         )

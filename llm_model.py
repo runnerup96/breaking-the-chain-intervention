@@ -1,5 +1,5 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from typing import Dict, List, Union
 import re
 import os
@@ -92,7 +92,7 @@ class LLMModel:
 
         if (hasattr(self.model.config, 'architectures') and 
                          self.model.config.architectures and 
-                         self.model.config.architectures[0] == "Qwen3ForCausalLM"):
+                         (self.model.config.architectures[0] == "Qwen3ForCausalLM" or self.model.config.architectures[0] == "Qwen3MoeForCausalLM")):
             return QWEN3_MODEL_FAMILY
         elif (hasattr(self.model.config, 'architectures') and
               self.model.config.architectures and
