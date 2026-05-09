@@ -25,7 +25,7 @@ def safe_extract_tar(tar_path: Path, dest_dir: Path) -> None:
                 raise RuntimeError(f"Unsafe tar member path: {m.name}")
         tf.extractall(dest_dir)
 
-def patterns_for_selected(averitec: bool, entailmentbank: bool, tabfact: bool, ricechem: bool):
+def patterns_for_selected(averitec: bool, tabfact: bool, ricechem: bool):
     pats = []
     if averitec:
         pats.append("datasets/AVeriTeC/**")
