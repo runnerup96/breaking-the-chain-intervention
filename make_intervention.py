@@ -73,6 +73,13 @@ if __name__ == "__main__":
     parser.add_argument("--use_api", action="store_true")
     parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
     parser.add_argument("--tokenizer_name", type=str, default=None)
+    parser.add_argument("--data_path", type=str, default=None,
+                        help="Optional override for the dataset directory. Same convention "
+                             "as prepare_dpo_data_intervention.py / split_datasets.py: "
+                             "ricechem -> dir with the CSV pairs; "
+                             "averitec -> dir with onlyboolean_samples.json; "
+                             "tabfact -> dir with bootstrap_full.json and data/all_csv/. "
+                             "If omitted, falls back to the legacy hard-coded path under $PROJECT_PATH.")
 
     args = parser.parse_args()
     fix_seed(args.seed)
@@ -84,8 +91,9 @@ if __name__ == "__main__":
     evaluator = None
 
     if args.evaluation_dataset == "ricechem":
+        data_path = args.data_path or os.path.join(project_path, "statics/datasets/RiceChem/data")
         dataset = ricechem_dataset.RiceChemDataset(
-            data_path=os.path.join(project_path, "statics/datasets/RiceChem/data"),
+            data_path=data_path,
         )
         tool = ricechem_structure_processor.RiceChemTool(dataset, args.tool_mode)
         processor = ricechem_structure_processor.RiceChemStructureProcessor(dataset, args.tool_mode)
@@ -99,7 +107,7 @@ if __name__ == "__main__":
         )
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, processor, args.tool_mode)
     elif args.evaluation_dataset == "averitec":
-        dataset_path = os.path.join(project_path, "statics/datasets/AVeriTeC/data")
+        dataset_path = args.data_path or os.path.join(project_path, "statics/datasets/AVeriTeC/data")
         dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
         tool = averitec_structure_processor.AVeriTeCTool(dataset, args.tool_mode)
         processor = averitec_structure_processor.AVeriTeCStructureProcessor(dataset, args.tool_mode)
@@ -113,7 +121,7 @@ if __name__ == "__main__":
         )
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, processor, args.tool_mode)
     elif args.evaluation_dataset == "tabfact":
-        dataset_path = os.path.join(project_path, "statics/datasets/TabFact")
+        dataset_path = args.data_path or os.path.join(project_path, "statics/datasets/TabFact")
         dataset = tabfact_dataset.TabFactDataset(
             queries_json_path=os.path.join(dataset_path, "bootstrap_full.json"),
             tables_dir=os.path.join(dataset_path, "data/all_csv"),
