@@ -5,7 +5,8 @@ import random
 import numpy as np
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, TaskType, get_peft_model
+import gc
+from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import DPOConfig, DPOTrainer
 
@@ -163,6 +164,25 @@ def main():
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
     print(f"Model saved to {args.output_dir}")
+
+    if not args.no_lora:
+        del trainer
+        del model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        merged_dir = os.path.join(args.output_dir, "merged")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            args.model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+        )
+        peft_model = PeftModel.from_pretrained(base_model, args.output_dir)
+        merged_model = peft_model.merge_and_unload()
+        merged_model.save_pretrained(merged_dir)
+        AutoTokenizer.from_pretrained(args.model_name).save_pretrained(merged_dir)
+        print(f"Merged model saved to {merged_dir}")
 
 
 if __name__ == "__main__":
