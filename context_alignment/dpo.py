@@ -1,6 +1,7 @@
 import argparse
 import os
 import random
+import sys
 
 import numpy as np
 import torch
@@ -9,6 +10,8 @@ import gc
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import DPOConfig, DPOTrainer
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def parse_args():
@@ -38,6 +41,19 @@ def parse_args():
     parser.add_argument("--save-steps", type=int, default=200)
     parser.add_argument("--logging-steps", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
+
+    parser.add_argument("--faithfulness-dataset", choices=["ricechem", "averitec", "tabfact"], default=None,
+                        help="If set together with --faithfulness-data-path, run a faithfulness eval "
+                             "(make_intervention pipeline + evaluator) on every checkpoint save.")
+    parser.add_argument("--faithfulness-data-path", default=None,
+                        help="Path to the source val split for faithfulness eval "
+                             "(same layout convention as make_intervention.py --data_path).")
+    parser.add_argument("--faithfulness-prompting-regime",
+                        choices=["standard", "detailed", "max_detailed"], default="standard")
+    parser.add_argument("--faithfulness-tool-mode",
+                        choices=["none", "simple", "structured"], default="none")
+    parser.add_argument("--faithfulness-eval-batch-size", type=int, default=None,
+                        help="Batch size for faithfulness eval generation (defaults to --batch-size).")
     return parser.parse_args()
 
 
@@ -159,6 +175,24 @@ def main():
         eval_dataset=raw_datasets["validation"] if use_eval else None,
         processing_class=tokenizer,
     )
+
+    if args.faithfulness_dataset and args.faithfulness_data_path:
+        from faithfulness_eval_callback import FaithfulnessEvalCallback
+
+        faithfulness_callback = FaithfulnessEvalCallback(
+            dataset_type=args.faithfulness_dataset,
+            data_path=args.faithfulness_data_path,
+            model_name=args.model_name,
+            batch_size=args.faithfulness_eval_batch_size or args.batch_size,
+            prompting_regime=args.faithfulness_prompting_regime,
+            tool_mode=args.faithfulness_tool_mode,
+        )
+        faithfulness_callback.attach(trainer)
+        trainer.add_callback(faithfulness_callback)
+    elif args.faithfulness_dataset or args.faithfulness_data_path:
+        raise ValueError(
+            "--faithfulness-dataset and --faithfulness-data-path must be provided together."
+        )
 
     trainer.train()
     trainer.save_model(args.output_dir)
