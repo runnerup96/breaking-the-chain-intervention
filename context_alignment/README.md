@@ -39,6 +39,11 @@ python prepare_dpo_data_intervention.py \
 
 ## 3. Дообучение модели с помощью DPO
 
+Перед обучением нужно проверить, что установлены следующие библиотеки:
+```
+pip install torch transformers trl peft datasets accelerate numpy
+```
+
 Чтобы дообучить модель, нужно запустить скрипт run_dpo.sh, указав в нем следующие параметры:
 - train-file - файл с dpo данными с предыдущего шага
 - output-dir - директрия, в которую будут сохраняться чекпоинты
