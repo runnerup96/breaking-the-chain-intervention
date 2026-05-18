@@ -27,8 +27,8 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--warmup-ratio", type=float, default=0.1)
     parser.add_argument("--beta", type=float, default=0.1, help="DPO beta (KL strength)")
-    parser.add_argument("--max-length", type=int, default=2048)
-    parser.add_argument("--max-prompt-length", type=int, default=1792)
+    parser.add_argument("--max-length", type=int, default=4096)
+    parser.add_argument("--max-prompt-length", type=int, default=2048)
 
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
@@ -164,7 +164,7 @@ def main():
         metric_for_best_model="eval_loss" if use_eval else None,
         greater_is_better=False if use_eval else None,
         seed=args.seed,
-        report_to="none",
+        report_to="tensorboard",
     )
 
     trainer = DPOTrainer(
