@@ -15,7 +15,7 @@ The central script that coordinates the entire intervention pipeline:
   - Applies interventions to specific reasoning components
   - Generates new predictions under interventions
   - Saves results for analysis
-- **Supported Dataset with structured mediator**: [RiceChem](https://github.com/luffycodes/Automated-Long-Answer-Grading), [TabFact](https://github.com/wenhuchen/Table-Fact-Checking), [AVeriTeC](https://fever.ai/dataset/averitec.html)
+- **Supported Dataset with structured mediator**: [RiceChem](https://github.com/luffycodes/Automated-Long-Answer-Grading), [TabFact](https://github.com/wenhuchen/Table-Fact-Checking), [AVeriTeC](https://fever.ai/dataset/averitec.html), [CRUXEval](https://github.com/facebookresearch/cruxeval)
 - **Usage**: Command-line interface with configurable model, dataset, and batch parameters
 
 ### 2. `llm_model.py` - LLM Interface
@@ -121,6 +121,32 @@ python download_datasets.py \
   --no_extract
 ```
 
+### Notes on CRUXEval
+
+CRUXEval is loaded automatically from HuggingFace
+([`cruxeval-org/cruxeval`](https://huggingface.co/datasets/cruxeval-org/cruxeval))
+on first run and cached to
+`${PROJECT_PATH}/statics/datasets/CRUXEval/test.jsonl`.
+
+The mediator for CRUXEval is the **execution trace** of the function
+(line-by-line locals). The Local Edit interventions correspond to the 6
+deterministic perturbation levels described in the analysis notebook:
+
+| Level | Name                  | Effect on M                                     |
+| ----- | --------------------- | ----------------------------------------------- |
+| 1     | SingleValueMutation   | One variable's value mutated, same type         |
+| 2     | DoubleValueMutation   | Two variables mutated                           |
+| 3     | TypeCoercion          | One variable coerced to a different type        |
+| 4     | StepDrop              | One step removed from the trace                 |
+| 5     | StepDuplicate         | One mid-trace step duplicated                   |
+| 6     | StepReorder           | Two adjacent steps swapped                      |
+
+For each Local Edit, `expected_target_after_intervention` is computed
+deterministically by evaluating the function's `return` expression against
+the locals of the **perturbed** last step (`simulate_from_trace`). The model
+is faithful to the mediator iff its answer matches this expected value.
+The evaluator reports additional per-level faithfulness (`S(k)`). 
+
 ### Notes on RiceChem redistribution
 
 **RiceChem is not redistributed** in this repository due to licensing restrictions. The HF package may include an empty placeholder directory.
@@ -207,7 +233,7 @@ chmod +x make_intervention_script.sh
 
 - **`project_path`**: Set to your project directory path
 - **`python_path`**: Path to project interpreter
-- **`evaluation_dataset`**: Choose from `"ricechem"`, `"tabfact"`, `"averitec"`
+- **`evaluation_dataset`**: Choose from `"ricechem"`, `"tabfact"`, `"averitec"`, `"cruxeval"`
 - **`model_name`**: Specify the LLM model (e.g., `"Qwen/Qwen3-4B"`)
 - **`batch_size`**: Adjust based on your GPU memory (default: 32)
 - **`CUDA_DEVICE_NUMBER`**: Set your GPU device number
