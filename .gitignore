@@ -12,3 +12,4 @@ entailment_trees_emnlp2021_data_v3
 logs
 plots
 make_intervention_script.sh
+./statics/datasets/CRUXEval/test.jsonl

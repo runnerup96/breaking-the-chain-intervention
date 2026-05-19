@@ -15,7 +15,8 @@ import llm_model
 from datasets_for_intervention import (
     ricechem_intervention, ricechem_dataset, ricechem_evaluation, ricechem_structure_processor,
     averitec_intervention, averitec_dataset, averitec_evaluation, averitec_structure_processor,
-    tabfact_intervention, tabfact_dataset, tabfact_evaluation, tabfact_dsl_engine, tabfact_structure_processor
+    tabfact_intervention, tabfact_dataset, tabfact_evaluation, tabfact_dsl_engine, tabfact_structure_processor,
+    cruxeval_intervention, cruxeval_dataset, cruxeval_evaluation, cruxeval_structure_processor,
 )
 
 def fix_seed(seed=42):
@@ -60,6 +61,13 @@ GEN_MAX_NEW_TOKENS = {
         "pred": {"none": 512, "simple": 512, "structured": 512},
         "interv": {"none": 10, "simple": 200, "structured": 200},
     },
+    "cruxeval": {
+        # CRUXEval prediction requires emitting the full trace -> larger budget.
+        "pred":   {"none": 1024, "simple": 1024, "structured": 1024},
+        # Intervention: assistant prefix already contains the trace; only the
+        # final answer (or ARGS) remains to be generated.
+        "interv": {"none": 32, "simple": 256, "structured": 256},
+    },
 }
 
 
@@ -67,7 +75,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--evaluation_dataset", type=str, required=True,
-                        choices=["ricechem", "averitec", "tabfact"])
+                        choices=["ricechem", "averitec", "tabfact", "cruxeval"])
 
     parser.add_argument("--prompting_regime", type=str, choices=["standard", "detailed", "max_detailed"], default="standard")
     parser.add_argument("--tool_mode", type=str, choices=["none", "simple", "structured"], default="none")
@@ -80,6 +88,18 @@ if __name__ == "__main__":
     parser.add_argument("--use_api", action="store_true")
     parser.add_argument("--api_base_url", type=str, default='https://inference.airi.net:46783/v1')
     parser.add_argument("--tokenizer_name", type=str, default=None)
+
+    # CRUXEval-only: which perturbation levels to consider as Local Edits, and
+    # whether to emit one Local Edit per applicable level ("all") or exactly
+    # one randomly-chosen Local Edit per sample ("one").
+    parser.add_argument(
+        "--cruxeval_levels", type=str, default="1,2,3,4,5,6",
+        help="Comma-separated subset of {1..6} (CRUXEval only)."
+    )
+    parser.add_argument(
+        "--cruxeval_sampling", type=str, choices=["all", "one"], default="all",
+        help='CRUXEval Local Edit sampling: "all" or "one" per sample.'
+    )
 
     args = parser.parse_args()
     fix_seed(args.seed)
@@ -147,9 +167,31 @@ if __name__ == "__main__":
             tool=tool,
             tool_mode=args.tool_mode,
         )
+    elif args.evaluation_dataset == "cruxeval":
+        dataset_path = os.path.join(project_path, "statics/datasets/CRUXEval")
+        dataset = cruxeval_dataset.CRUXEvalDataset(data_path=dataset_path)
+        tool = cruxeval_structure_processor.CRUXEvalTool(dataset, args.tool_mode)
+        processor = cruxeval_structure_processor.CRUXEvalStructureProcessor(dataset, args.tool_mode)
+        cruxeval_levels = [int(x) for x in args.cruxeval_levels.split(",") if x.strip()]
+        intervention_logic = cruxeval_intervention.CRUXEvalIntervention(
+            dataset=dataset,
+            llm_model=llm,
+            tool=tool,
+            processor=processor,
+            prompting_regime=args.prompting_regime,
+            tool_mode=args.tool_mode,
+            intervention_levels=cruxeval_levels,
+            local_edit_sampling=args.cruxeval_sampling,
+        )
+        evaluator = cruxeval_evaluation.CRUXEvalEvaluation(
+            dataset=dataset,
+            processor=processor,
+            tool=tool,
+            tool_mode=args.tool_mode,
+        )
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, entailment, averitec, tabfact]")
+                                  f"Currently -- [ricechem, averitec, tabfact, cruxeval]")
 
     print(f"Loaded {args.evaluation_dataset} | prompting_regime={args.prompting_regime}")
 
