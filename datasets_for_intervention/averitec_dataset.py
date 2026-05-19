@@ -34,13 +34,17 @@ class AVeriTeCDataset:
         "the United States or buy American-made products.",
     ]
 
-    def __init__(self, data_path: str):
+    def __init__(self, data_path: str, include_explanations: bool = True):
         """
         Args:
-            data_path: path to the folder containing dataset files.
-                       Expects "onlyboolean_samples.json" to be present.
+            data_path:            path to the folder containing dataset files.
+                                  Expects "onlyboolean_samples.json" to be present.
+            include_explanations: if False, the "explanations" field in every sample
+                                  is set to an empty dict {}.  Use this for the
+                                  no-explanations ablation experiment.
         """
         self.data_path = data_path
+        self.include_explanations = include_explanations
         self.data = []
 
         raw_samples = json.load(
@@ -102,7 +106,10 @@ class AVeriTeCDataset:
             sample = {
                 "idx": str(idx),               # string idx (architecture invariant)
                 "claim": claim,                # claim text (X)
-                "explanations": explanations,  # Q/A explanations (X)
+                # explanations are included only when include_explanations=True;
+                # set to {} for the no-explanations ablation so the prompt builder
+                # sees an empty dict and produces no "Explanations:" block.
+                "explanations": explanations if self.include_explanations else {},
                 "gold_rubric": gold_rubric,    # gold mediator (M_gold)
                 "gold_target": gold_target,    # gold verdict  (Y_gold)
                 # mediator_rubric: starting copy of gold_rubric;

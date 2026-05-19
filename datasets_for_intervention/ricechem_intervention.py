@@ -29,11 +29,11 @@ class RiceChemIntervention:
 
     def clean_llm_output(self, text):
         tokens_to_remove = [
-            '<|im_end|>', '<|endoftext|>', '<|im_start|>', '<|eot_id|>',
-            '<|end_of_text|>', '<|pad|>',
-            '<end_of_turn>',
-            '</s>',
-            '\u00ad', '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff',
+            "<|im_end|>", "<|endoftext|>", "<|im_start|>", "<|eot_id|>",
+            "<|end_of_text|>", "<|pad|>",
+            "<end_of_turn>", "<|vision_pad|>", "<|eom_id|>", "<|finetune_right_pad_id|>",
+            "</s>",
+            "\u00ad", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff",
         ]
         for token in tokens_to_remove:
             text = text.replace(token, '')
@@ -98,9 +98,18 @@ class RiceChemIntervention:
             return sample
 
         # Score before interventions (only for correct / incorrect)
-        sample['score_before_intervention'], tool_rubric = self.infer_completion(
+        score, tool_rubric = self.infer_completion(
             completion, sample, short_completion=False
         )
+
+        if score is None:
+            sample['generation_status'] = 'error'
+            sample['score_before_intervention'] = None
+            sample['tool_rubric'] = tool_rubric
+            sample['structure_intervention'] = {'Local Edits': [], 'Correction': []}
+            return sample
+        
+        sample['score_before_intervention'] = score
         sample['tool_rubric'] = tool_rubric
 
         # Build interventions

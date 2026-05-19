@@ -54,6 +54,9 @@ class TabFactEvaluation:
         self.processor = processor
         self.tool = tool
 
+        if tool_mode != 'none':
+            tool_mode = 'simple'
+
         assert tool_mode in ("none", "simple"), (
             f"tool_mode must be 'none' or 'simple'. Got: {tool_mode}"
         )
