@@ -166,6 +166,36 @@ def split_averitec(data_path: str, ratios, seed: int):
     print(f"  source raw size: {len(raw_samples)}")
 
 
+def split_cruxeval(data_path: str, ratios, seed: int):
+    src_path = os.path.join(data_path, "test.jsonl")
+    if not os.path.exists(src_path):
+        sys.exit(
+            f"Error: {src_path} not found. Run download_datasets.py --only cruxeval first."
+        )
+
+    rows = []
+    with open(src_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+
+    rng = random.Random(seed)
+    per_split = _split_list(rows, ratios, rng)
+
+    for s in SPLIT_NAMES:
+        split_dir = os.path.join(data_path, s)
+        out_path = os.path.join(split_dir, "test.jsonl")
+        with open(out_path, "w", encoding="utf-8") as f:
+            for row in per_split[s]:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    print("== cruxeval splits ==")
+    for s in SPLIT_NAMES:
+        print(f"  {s}: samples={len(per_split[s])}")
+    print(f"  source: samples={len(rows)}")
+
+
 def split_tabfact(data_path: str, ratios, seed: int):
     src_path = os.path.join(data_path, "bootstrap_full.json")
     with open(src_path, "r", encoding="utf-8") as f:
@@ -211,7 +241,7 @@ def main():
                     "Each split mirrors the source layout so prepare_dpo_data_intervention.py "
                     "can consume it via --data-path <source>/{train,val,test}."
     )
-    parser.add_argument("--dataset", required=True, choices=["ricechem", "averitec", "tabfact"])
+    parser.add_argument("--dataset", required=True, choices=["ricechem", "averitec", "tabfact", "cruxeval"])
     parser.add_argument("--data-path", required=True,
                         help="Source dataset path (same convention as prep script).")
     parser.add_argument("--ratios", type=parse_ratios, default="0.7,0.15,0.15",
@@ -230,8 +260,10 @@ def main():
         split_ricechem(args.data_path, args.ratios, args.seed)
     elif args.dataset == "averitec":
         split_averitec(args.data_path, args.ratios, args.seed)
-    else:
+    elif args.dataset == "tabfact":
         split_tabfact(args.data_path, args.ratios, args.seed)
+    else:
+        split_cruxeval(args.data_path, args.ratios, args.seed)
 
     print(f"Splits written under: {args.data_path}/{{train,val,test}}")
 

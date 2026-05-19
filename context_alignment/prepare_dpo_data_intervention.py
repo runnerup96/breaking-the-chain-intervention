@@ -11,6 +11,9 @@ from datasets_for_intervention import (
     averitec_dataset,
     averitec_intervention,
     averitec_structure_processor,
+    cruxeval_dataset,
+    cruxeval_intervention,
+    cruxeval_structure_processor,
     ricechem_dataset,
     ricechem_intervention,
     ricechem_structure_processor,
@@ -19,6 +22,7 @@ from datasets_for_intervention import (
     tabfact_intervention,
     tabfact_structure_processor,
 )
+from datasets_for_intervention.cruxeval_trace import trace_to_text
 
 
 class _NoOpLLM:
@@ -96,18 +100,35 @@ def build_response_tabfact(local: dict, target: bool) -> str:
     return f"Verifier Query: {local['mediator_query']}\nExecution Result: {target}"
 
 
+def build_current_sample_cruxeval(sample: dict) -> str:
+    return (
+        "Now follow the same structure for the given code and call.\n\n"
+        "Code:\n"
+        f"```python\n{sample['code']}```\n"
+        f"Call: f({sample['input_str']})\n"
+        "Trace: <YOUR TRACE>\n"
+        "Final Answer: <YOUR ANSWER>\n"
+    )
+
+
+def build_response_cruxeval(local: dict, target: str) -> str:
+    trace_text = trace_to_text(local["mediator_trace"])
+    return f"Trace:\n{trace_text}\nFinal Answer: {target}"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Prepare DPO data using the dataset/intervention classes "
                     "for ricechem, averitec, or tabfact."
     )
     parser.add_argument("--dataset", required=True,
-                        choices=["ricechem", "averitec", "tabfact"])
+                        choices=["ricechem", "averitec", "tabfact", "cruxeval"])
     parser.add_argument("--data-path", required=True,
                         help="Per-dataset path (matches the convention of make_intervention.py): "
                              "ricechem -> directory with the four CSV pairs; "
                              "averitec -> directory with onlyboolean_samples.json; "
-                             "tabfact  -> directory containing bootstrap_full.json and data/all_csv/.")
+                             "tabfact  -> directory containing bootstrap_full.json and data/all_csv/; "
+                             "cruxeval -> directory containing test.jsonl.")
     parser.add_argument("--output", required=True, help="Output .jsonl path")
     parser.add_argument("--prompting-regime", default="standard",
                         choices=["standard", "detailed", "max_detailed"])
@@ -141,7 +162,7 @@ def main():
         build_current = build_current_sample_averitec
         gold_mediator_field = "gold_rubric"
         mediator_field = "mediator_rubric"
-    else:
+    elif args.dataset == "tabfact":
         queries_json_path = os.path.join(args.data_path, "bootstrap_full.json")
         tables_dir = os.path.join(args.data_path, "data", "all_csv")
         dataset = tabfact_dataset.TabFactDataset(
@@ -157,6 +178,17 @@ def main():
         build_current = build_current_sample_tabfact
         gold_mediator_field = "gold_query"
         mediator_field = "mediator_query"
+    else:  # cruxeval
+        dataset = cruxeval_dataset.CRUXEvalDataset(data_path=args.data_path)
+        tool = cruxeval_structure_processor.CRUXEvalTool(dataset, "none")
+        processor = cruxeval_structure_processor.CRUXEvalStructureProcessor(dataset, "none")
+        intervention = cruxeval_intervention.CRUXEvalIntervention(
+            dataset=dataset, llm_model=llm, tool=tool, processor=processor,
+            prompting_regime=args.prompting_regime, tool_mode="none",
+        )
+        build_current = build_current_sample_cruxeval
+        gold_mediator_field = "gold_trace"
+        mediator_field = "mediator_trace"
 
     instruction = intervention.prompt.build_zeroshot_instruction()
     few_shot = intervention.prompt.few_shot
@@ -206,13 +238,20 @@ def main():
                         continue
                     chosen = build_response_averitec(local, expected)
                     rejected = build_response_averitec(local, local["gold_target"])
-                else:  # tabfact
+                elif args.dataset == "tabfact":
                     expected = local["expected_target_after_intervention"]
                     if expected is None:
                         skipped_degenerate += 1
                         continue
                     chosen = build_response_tabfact(local, expected)
                     rejected = build_response_tabfact(local, local["gold_target"])
+                else:  # cruxeval
+                    expected = local["expected_target_after_intervention"]
+                    if expected is None:
+                        skipped_degenerate += 1
+                        continue
+                    chosen = build_response_cruxeval(local, expected)
+                    rejected = build_response_cruxeval(local, local["gold_target"])
 
                 if chosen == rejected:
                     skipped_degenerate += 1
