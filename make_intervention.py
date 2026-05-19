@@ -15,7 +15,8 @@ import llm_model
 from datasets_for_intervention import (
     ricechem_intervention, ricechem_dataset, ricechem_evaluation, ricechem_structure_processor,
     averitec_intervention, averitec_dataset, averitec_evaluation, averitec_structure_processor,
-    tabfact_intervention, tabfact_dataset, tabfact_evaluation, tabfact_dsl_engine, tabfact_structure_processor
+    tabfact_intervention, tabfact_dataset, tabfact_evaluation, tabfact_dsl_engine, tabfact_structure_processor,
+    cruxeval_intervention, cruxeval_dataset, cruxeval_evaluation, cruxeval_structure_processor,
 )
 
 def fix_seed(seed=42):
@@ -29,13 +30,17 @@ model_name2simple = {
     "Qwen/Qwen3-1.7B": "qwen3-1.7B",
     "Qwen/Qwen3-4B": "qwen3-4B",
     "Qwen/Qwen3-8B": "qwen3-8B",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507": "qwen3-235B-a22B",
     "tiiuae/Falcon3-3B-Instruct": "falcon3-3B",
     "tiiuae/Falcon3-7B-Instruct": "falcon3-7B",
     "alpindale/Llama-3.2-1B-Instruct": "llama32-1B",
     "alpindale/Llama-3.2-3B-Instruct": "llama32-3B",
     "unsloth/Meta-Llama-3.1-8B-Instruct": "llama31-8B",
     "google/gemma-2-2b-it": "gemma2-2B",
-    "Meta-llama/Llama-3.1-70B-Instruct": "llama-70B",
+    "Openai/Gpt-oss-120b": "gpt-oss-120b",
+    "unsloth/Meta-Llama-3.1-70B-Instruct-bnb-4bit": "llama31-70B",
+    "unsloth/Qwen3-32B-bnb-4bit": "qwen3-32B",
+    "unsloth/Qwen3-14B-bnb-4bit": "qwen3-14B"
 }
 
 
@@ -56,6 +61,13 @@ GEN_MAX_NEW_TOKENS = {
         "pred": {"none": 512, "simple": 512, "structured": 512},
         "interv": {"none": 10, "simple": 200, "structured": 200},
     },
+    "cruxeval": {
+        # CRUXEval prediction requires emitting the full trace -> larger budget.
+        "pred":   {"none": 1024, "simple": 1024, "structured": 1024},
+        # Intervention: assistant prefix already contains the trace; only the
+        # final answer (or ARGS) remains to be generated.
+        "interv": {"none": 32, "simple": 256, "structured": 256},
+    },
 }
 
 
@@ -63,10 +75,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--evaluation_dataset", type=str, required=True,
-                        choices=["ricechem", "averitec", "tabfact"])
+                        choices=["ricechem", "averitec", "tabfact", "cruxeval"])
 
     parser.add_argument("--prompting_regime", type=str, choices=["standard", "detailed", "max_detailed"], default="standard")
     parser.add_argument("--tool_mode", type=str, choices=["none", "simple", "structured"], default="none")
+    parser.add_argument("--no_explanations", action="store_true",
+                        help="AVeriTeC ablation: strip explanations from X. "
+                             "Ignored for other datasets.")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--try_one_batch", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
@@ -80,6 +95,18 @@ if __name__ == "__main__":
                              "averitec -> dir with onlyboolean_samples.json; "
                              "tabfact -> dir with bootstrap_full.json and data/all_csv/. "
                              "If omitted, falls back to the legacy hard-coded path under $PROJECT_PATH.")
+
+    # CRUXEval-only: which perturbation levels to consider as Local Edits, and
+    # whether to emit one Local Edit per applicable level ("all") or exactly
+    # one randomly-chosen Local Edit per sample ("one").
+    parser.add_argument(
+        "--cruxeval_levels", type=str, default="1,2,3,4,5,6",
+        help="Comma-separated subset of {1..6} (CRUXEval only)."
+    )
+    parser.add_argument(
+        "--cruxeval_sampling", type=str, choices=["all", "one"], default="all",
+        help='CRUXEval Local Edit sampling: "all" or "one" per sample.'
+    )
 
     args = parser.parse_args()
     fix_seed(args.seed)
@@ -107,8 +134,12 @@ if __name__ == "__main__":
         )
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, processor, args.tool_mode)
     elif args.evaluation_dataset == "averitec":
-        dataset_path = args.data_path or os.path.join(project_path, "statics/datasets/AVeriTeC/data")
-        dataset = averitec_dataset.AVeriTeCDataset(dataset_path)
+        dataset_path = os.path.join(project_path, "statics/datasets/AVeriTeC/data")
+        include_explanations = not args.no_explanations
+        dataset = averitec_dataset.AVeriTeCDataset(
+            dataset_path,
+            include_explanations=include_explanations,
+        )
         tool = averitec_structure_processor.AVeriTeCTool(dataset, args.tool_mode)
         processor = averitec_structure_processor.AVeriTeCStructureProcessor(dataset, args.tool_mode)
         intervention_logic = averitec_intervention.AVeriTeCIntervention(
@@ -118,6 +149,7 @@ if __name__ == "__main__":
             processor=processor,
             prompting_regime=args.prompting_regime,
             tool_mode=args.tool_mode,
+            include_explanations=include_explanations,
         )
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, processor, args.tool_mode)
     elif args.evaluation_dataset == "tabfact":
@@ -143,9 +175,31 @@ if __name__ == "__main__":
             tool=tool,
             tool_mode=args.tool_mode,
         )
+    elif args.evaluation_dataset == "cruxeval":
+        dataset_path = os.path.join(project_path, "statics/datasets/CRUXEval")
+        dataset = cruxeval_dataset.CRUXEvalDataset(data_path=dataset_path)
+        tool = cruxeval_structure_processor.CRUXEvalTool(dataset, args.tool_mode)
+        processor = cruxeval_structure_processor.CRUXEvalStructureProcessor(dataset, args.tool_mode)
+        cruxeval_levels = [int(x) for x in args.cruxeval_levels.split(",") if x.strip()]
+        intervention_logic = cruxeval_intervention.CRUXEvalIntervention(
+            dataset=dataset,
+            llm_model=llm,
+            tool=tool,
+            processor=processor,
+            prompting_regime=args.prompting_regime,
+            tool_mode=args.tool_mode,
+            intervention_levels=cruxeval_levels,
+            local_edit_sampling=args.cruxeval_sampling,
+        )
+        evaluator = cruxeval_evaluation.CRUXEvalEvaluation(
+            dataset=dataset,
+            processor=processor,
+            tool=tool,
+            tool_mode=args.tool_mode,
+        )
     else:
         raise NotImplementedError(f"No implementation for {args.evaluation_dataset} dataset"
-                                  f"Currently -- [ricechem, entailment, averitec, tabfact]")
+                                  f"Currently -- [ricechem, averitec, tabfact, cruxeval]")
 
     print(f"Loaded {args.evaluation_dataset} | prompting_regime={args.prompting_regime}")
 
@@ -197,7 +251,10 @@ if __name__ == "__main__":
         evaluation_metrics = {"note": "No evaluator configured for this dataset"}
         print("No evaluator for this dataset")
 
-    subdir = args.prompting_regime if args.tool_mode == 'none' else 'tool'
+    if args.evaluation_dataset == "averitec" and args.no_explanations:
+        subdir = f"{args.prompting_regime}_no_expl" if args.tool_mode == "none" else "tool_no_expl"
+    else:
+        subdir = args.prompting_regime if args.tool_mode == "none" else "tool"
     save_dir = os.path.join(project_path, "intervention_analysis", "intervention_predictions", args.evaluation_dataset, subdir)
     os.makedirs(save_dir, exist_ok=True)
 
@@ -217,9 +274,10 @@ if __name__ == "__main__":
             "api_base_url":   args.api_base_url if args.use_api else None,
             "tokenizer_name": args.tokenizer_name,
 
-            "dataset":          args.evaluation_dataset,
-            "prompting_regime": args.prompting_regime,
-            "tool_mode":        args.tool_mode,
+            "dataset":            args.evaluation_dataset,
+            "prompting_regime":   args.prompting_regime,
+            "tool_mode":          args.tool_mode,
+            "include_explanations": not args.no_explanations,
 
             "batch_size":    args.batch_size,
             "seed":          args.seed,

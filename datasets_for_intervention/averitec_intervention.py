@@ -22,20 +22,25 @@ class AVeriTeCIntervention:
                                     OR len(mediator_rubric) == 1.
     """
 
-    def __init__(self, dataset, llm_model, tool, processor, prompting_regime: str = "standard", tool_mode: str = "none"):
+    def __init__(self, dataset, llm_model, tool, processor, prompting_regime: str = "standard", tool_mode: str = "none", include_explanations: bool = True):
         """
         Args:
-            dataset:           AVeriTeCDataset
-            llm_model:         LLMModel (used for apply_chat_template)
-            tool:              AVeriTeCTool
-            processor:         AVeriTeCStructureProcessor
-            prompting_regime:  "standard" | "detailed" | "max_detailed"
-            tool_mode:         "none" | "simple" | "structured"
+            dataset:              AVeriTeCDataset
+            llm_model:            LLMModel (used for apply_chat_template)
+            tool:                 AVeriTeCTool
+            processor:            AVeriTeCStructureProcessor
+            prompting_regime:     "standard" | "detailed" | "max_detailed"
+            tool_mode:            "none" | "simple" | "structured"
+            include_explanations: if False, explanations are stripped from every
+                                  prompt (few-shot and current sample).
+                                  Pass False together with AVeriTeCDataset(include_explanations=False)
+                                  for the no-explanations ablation experiment.
         """
         self.dataset = dataset
         self.llm_model = llm_model
         self.tool = tool
         self.processor = processor
+        self.include_explanations = include_explanations
 
         assert prompting_regime in ["standard", "detailed", "max_detailed"], (
             "prompting_regime must be one of: standard, detailed, max_detailed"
@@ -60,11 +65,11 @@ class AVeriTeCIntervention:
 
     def clean_llm_output(self, text):
         tokens_to_remove = [
-            '<|im_end|>', '<|endoftext|>', '<|im_start|>', '<|eot_id|>',
-            '<|end_of_text|>', '<|pad|>',
-            '<end_of_turn>',
-            '</s>',
-            '\u00ad', '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff',
+            "<|im_end|>", "<|endoftext|>", "<|im_start|>", "<|eot_id|>",
+            "<|end_of_text|>", "<|pad|>",
+            "<end_of_turn>", "<|vision_pad|>", "<|eom_id|>", "<|finetune_right_pad_id|>",
+            "</s>",
+            "\u00ad", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff",
         ]
         for token in tokens_to_remove:
             text = text.replace(token, '')
@@ -141,9 +146,18 @@ class AVeriTeCIntervention:
             return sample
 
         # Verdict before interventions (correct / incorrect only)
-        sample["target_before_intervention"], tool_rubric = self.infer_completion(
+        target, tool_rubric = self.infer_completion(
             completion, sample, short_completion=False
         )
+
+        if target is None:
+            sample["generation_status"] = 'error'
+            sample["target_before_intervention"] = None
+            sample["tool_rubric"] = tool_rubric
+            sample["structure_intervention"] = {"Local Edits": [], "Correction": []}
+            return sample
+
+        sample["target_before_intervention"] = target
         sample["tool_rubric"] = tool_rubric
 
         # Build interventions
@@ -470,17 +484,20 @@ class AVeriTeCIntervention:
             # Checklist block
             checklist_str = self._checklist_dict_to_string(checklist)
 
-            explanations_str = "".join(
-                f"- Q: {q} E: {e}\n"
-                for q, e in ex["explanations"].items()
-            )
+            if self.include_explanations:
+                explanations_str = "".join(
+                    f"- Q: {q} E: {e}\n"
+                    for q, e in ex["explanations"].items()
+                )
+                explanations_block = f"Explanations:\n{explanations_str}\n"
+            else:
+                explanations_block = ""
 
             ex_block = (
                 f"Example #{ex_num}{example_type}\n"
                 "Claim:\n"
                 f"{ex['claim']}\n"
-                "Explanations:\n"
-                f"{explanations_str}\n"
+                f"{explanations_block}"
                 "Checklist:\n"
                 f"{checklist_str}\n"
             )
@@ -518,24 +535,29 @@ class AVeriTeCIntervention:
             Intervention prompt -- mediator_rubric is provided as an assistant prefix;
             the model appends only "Final Verdict: X" (or ARGS in tool mode).
         """
-        # Explanations block (part of X)
-        explanations_str = "".join(
-            f"- Q: {q} E: {e}\n"
-            for q, e in averitec_sample["explanations"].items()
-        )
-
         # Checklist template with <True/False> placeholders
         checklist_template = "".join(
             f"- Q: {q} (True/False): <True/False>\n"
             for q in averitec_sample["gold_rubric"]
         )
 
+        # Explanations block — omitted in the no-explanations ablation.
+        # sample["explanations"] is already {} when AVeriTeCDataset(include_explanations=False),
+        # but we also check self.include_explanations for safety.
+        if self.include_explanations and averitec_sample.get("explanations"):
+            explanations_str = "".join(
+                f"- Q: {q} E: {e}\n"
+                for q, e in averitec_sample["explanations"].items()
+            )
+            explanations_block = f"Explanations:\n{explanations_str}\n"
+        else:
+            explanations_block = ""
+
         current_sample = (
             "Now follow the same structure for the given claim.\n\n"
             "Claim:\n"
             f"{averitec_sample['claim']}\n\n"
-            "Explanations:\n"
-            f"{explanations_str}\n"
+            f"{explanations_block}"
             "Checklist:\n"
             f"{checklist_template}"
         )

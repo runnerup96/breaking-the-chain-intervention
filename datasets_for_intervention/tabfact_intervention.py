@@ -54,6 +54,9 @@ class TabFactIntervention:
             f"prompting_regime must be one of: standard, detailed, max_detailed. "
             f"Got: {prompting_regime}"
         )
+        if tool_mode != 'none':
+            tool_mode = 'simple'
+    
         assert tool_mode in ("none", "simple"), (
             f"tool_mode for TabFact must be 'none' or 'simple'. Got: {tool_mode}"
         )
@@ -78,7 +81,7 @@ class TabFactIntervention:
         tokens_to_remove = [
             "<|im_end|>", "<|endoftext|>", "<|im_start|>", "<|eot_id|>",
             "<|end_of_text|>", "<|pad|>",
-            "<end_of_turn>",
+            "<end_of_turn>", "<|vision_pad|>", "<|eom_id|>", "<|finetune_right_pad_id|>",
             "</s>",
             "\u00ad", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff",
         ]
@@ -176,7 +179,7 @@ class TabFactIntervention:
         sample["mediator_query"] = mediator_query if mediator_query is not None else ""
 
         if generation_status == "error":
-            # Architecture §8.2: do not attempt to parse target from garbage completion
+            # do not attempt to parse target from garbage completion
             sample["target_before_intervention"] = None
             sample["tool_query"] = None
             sample["structure_intervention"] = {"Local Edits": [], "Correction": []}
@@ -186,6 +189,14 @@ class TabFactIntervention:
         target, tool_query = self.infer_completion(
             completion, sample, short_completion=False
         )
+
+        if target is None:
+            sample["generation_status"] = "error"
+            sample["target_before_intervention"] = None
+            sample["tool_query"] = tool_query
+            sample["structure_intervention"] = {"Local Edits": [], "Correction": []}
+            return sample
+        
         sample["target_before_intervention"] = target
         sample["tool_query"] = tool_query
 
