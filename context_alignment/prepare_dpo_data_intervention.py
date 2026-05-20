@@ -52,18 +52,27 @@ def build_current_sample_ricechem(sample: dict) -> str:
 
 
 def build_current_sample_averitec(sample: dict) -> str:
-    explanations_str = "".join(
-        f"- Q: {q} E: {e}\n" for q, e in sample["explanations"].items()
-    )
     checklist_template = "".join(
         f"- Q: {q} (True/False): <True/False>\n" for q in sample["gold_rubric"]
     )
+    explanations = sample.get("explanations") or {}
+    if explanations:
+        explanations_str = "".join(
+            f"- Q: {q} E: {e}\n" for q, e in explanations.items()
+        )
+        return (
+            "Now follow the same structure for the given claim.\n\n"
+            "Claim:\n"
+            f"{sample['claim']}\n\n"
+            "Explanations:\n"
+            f"{explanations_str}\n"
+            "Checklist:\n"
+            f"{checklist_template}"
+        )
     return (
         "Now follow the same structure for the given claim.\n\n"
         "Claim:\n"
         f"{sample['claim']}\n\n"
-        "Explanations:\n"
-        f"{explanations_str}\n"
         "Checklist:\n"
         f"{checklist_template}"
     )
@@ -134,6 +143,9 @@ def main():
                         choices=["standard", "detailed", "max_detailed"])
     parser.add_argument("--max-edits-per-sample", type=int, default=None,
                         help="If set, randomly subsample this many local edits per gold sample.")
+    parser.add_argument("--no-explanations", action="store_true",
+                        help="AVeriTeC ablation: strip explanations from X. "
+                             "Ignored for other datasets.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -152,12 +164,16 @@ def main():
         gold_mediator_field = "gold_rubric"
         mediator_field = "mediator_rubric"
     elif args.dataset == "averitec":
-        dataset = averitec_dataset.AVeriTeCDataset(data_path=args.data_path)
+        include_explanations = not args.no_explanations
+        dataset = averitec_dataset.AVeriTeCDataset(
+            data_path=args.data_path, include_explanations=include_explanations,
+        )
         tool = averitec_structure_processor.AVeriTeCTool(dataset, "none")
         processor = averitec_structure_processor.AVeriTeCStructureProcessor(dataset, "none")
         intervention = averitec_intervention.AVeriTeCIntervention(
             dataset=dataset, llm_model=llm, tool=tool, processor=processor,
             prompting_regime=args.prompting_regime, tool_mode="none",
+            include_explanations=include_explanations,
         )
         build_current = build_current_sample_averitec
         gold_mediator_field = "gold_rubric"
