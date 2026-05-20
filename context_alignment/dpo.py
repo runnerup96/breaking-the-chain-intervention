@@ -54,6 +54,9 @@ def parse_args():
                         choices=["none", "simple", "structured"], default="none")
     parser.add_argument("--faithfulness-eval-batch-size", type=int, default=None,
                         help="Batch size for faithfulness eval generation (defaults to --batch-size).")
+    parser.add_argument("--faithfulness-no-explanations", action="store_true",
+                        help="AVeriTeC ablation for faithfulness eval: strip explanations from X. "
+                             "Ignored for other faithfulness datasets.")
     return parser.parse_args()
 
 
@@ -186,6 +189,7 @@ def main():
             batch_size=args.faithfulness_eval_batch_size or args.batch_size,
             prompting_regime=args.faithfulness_prompting_regime,
             tool_mode=args.faithfulness_tool_mode,
+            no_explanations=args.faithfulness_no_explanations,
         )
         faithfulness_callback.attach(trainer)
         trainer.add_callback(faithfulness_callback)

@@ -42,7 +42,7 @@ class EvalLLMAdapter(LLMModel):
             self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
 
 
-def _build_pipeline(dataset_type, data_path, prompting_regime, tool_mode, llm):
+def _build_pipeline(dataset_type, data_path, prompting_regime, tool_mode, llm, no_explanations=False):
     if dataset_type == "ricechem":
         dataset = ricechem_dataset.RiceChemDataset(data_path=data_path)
         tool = ricechem_structure_processor.RiceChemTool(dataset, tool_mode)
@@ -57,7 +57,8 @@ def _build_pipeline(dataset_type, data_path, prompting_regime, tool_mode, llm):
         )
         evaluator = ricechem_evaluation.RiceChemEvaluation(dataset, processor, tool_mode)
     elif dataset_type == "averitec":
-        dataset = averitec_dataset.AVeriTeCDataset(data_path)
+        include_explanations = not no_explanations
+        dataset = averitec_dataset.AVeriTeCDataset(data_path, include_explanations=include_explanations)
         tool = averitec_structure_processor.AVeriTeCTool(dataset, tool_mode)
         processor = averitec_structure_processor.AVeriTeCStructureProcessor(dataset, tool_mode)
         intervention_logic = averitec_intervention.AVeriTeCIntervention(
@@ -67,6 +68,7 @@ def _build_pipeline(dataset_type, data_path, prompting_regime, tool_mode, llm):
             processor=processor,
             prompting_regime=prompting_regime,
             tool_mode=tool_mode,
+            include_explanations=include_explanations,
         )
         evaluator = averitec_evaluation.AVeriTeCEvaluation(dataset, processor, tool_mode)
     elif dataset_type == "tabfact":
@@ -126,6 +128,7 @@ class FaithfulnessEvalCallback(TrainerCallback):
         batch_size,
         prompting_regime="standard",
         tool_mode="none",
+        no_explanations=False,
     ):
         self.dataset_type = dataset_type
         self.data_path = data_path
@@ -133,6 +136,7 @@ class FaithfulnessEvalCallback(TrainerCallback):
         self.batch_size = batch_size
         self.prompting_regime = prompting_regime
         self.tool_mode = tool_mode
+        self.no_explanations = no_explanations
         self._gen_budget = GEN_MAX_NEW_TOKENS.get(dataset_type, GEN_MAX_NEW_TOKENS["default"])
         self._trainer = None
         self._dataset = None
@@ -150,6 +154,7 @@ class FaithfulnessEvalCallback(TrainerCallback):
                 self.prompting_regime,
                 self.tool_mode,
                 llm,
+                no_explanations=self.no_explanations,
             )
         else:
             self._intervention_logic.llm_model = llm
