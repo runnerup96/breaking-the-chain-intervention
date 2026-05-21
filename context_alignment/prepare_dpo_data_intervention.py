@@ -214,6 +214,8 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
 
     total = 0
+    n_edit_pairs = 0
+    n_gold_pairs = 0
     no_edits = 0
     skipped_degenerate = 0
 
@@ -242,47 +244,59 @@ def main():
             for local in local_edits:
                 if args.dataset == "ricechem":
                     expected = local["expected_score_after_intervention"]
-                    if expected is None:
-                        skipped_degenerate += 1
-                        continue
-                    chosen = build_response_ricechem(local, expected)
-                    rejected = build_response_ricechem(local, local["gold_score"])
+                    gold_target = local["gold_score"]
+                    build_fn = build_response_ricechem
                 elif args.dataset == "averitec":
                     expected = local["expected_target_after_intervention"]
-                    if expected is None:
-                        skipped_degenerate += 1
-                        continue
-                    chosen = build_response_averitec(local, expected)
-                    rejected = build_response_averitec(local, local["gold_target"])
+                    gold_target = local["gold_target"]
+                    build_fn = build_response_averitec
                 elif args.dataset == "tabfact":
                     expected = local["expected_target_after_intervention"]
-                    if expected is None:
-                        skipped_degenerate += 1
-                        continue
-                    chosen = build_response_tabfact(local, expected)
-                    rejected = build_response_tabfact(local, local["gold_target"])
+                    gold_target = local["gold_target"]
+                    build_fn = build_response_tabfact
                 else:  # cruxeval
                     expected = local["expected_target_after_intervention"]
-                    if expected is None:
-                        skipped_degenerate += 1
-                        continue
-                    chosen = build_response_cruxeval(local, expected)
-                    rejected = build_response_cruxeval(local, local["gold_target"])
+                    gold_target = local["gold_target"]
+                    build_fn = build_response_cruxeval
 
-                if chosen == rejected:
+                if expected is None:
                     skipped_degenerate += 1
                     continue
 
-                f.write(json.dumps({
-                    "prompt": prompt_text,
-                    "chosen": chosen,
-                    "rejected": rejected,
-                }, ensure_ascii=False) + "\n")
-                total += 1
+                # Two DPO pairs per local edit, kept 1:1 balanced:
+                #   edit direction -- faithful answer for the EDITED mediator is `expected`
+                #   gold direction -- faithful answer for the GOLD mediator is `gold_target`
+                # Without the gold direction the faithful answer is 100% correlated
+                # with `expected`, and DPO collapses onto a constant shortcut.
+                gold_local = dict(local)
+                gold_local[mediator_field] = s[gold_mediator_field]
+
+                pairs = (
+                    (build_fn(local, expected), build_fn(local, gold_target), "edit"),
+                    (build_fn(gold_local, gold_target), build_fn(gold_local, expected), "gold"),
+                )
+
+                for chosen, rejected, direction in pairs:
+                    if chosen == rejected:
+                        skipped_degenerate += 1
+                        continue
+
+                    f.write(json.dumps({
+                        "prompt": prompt_text,
+                        "chosen": chosen,
+                        "rejected": rejected,
+                    }, ensure_ascii=False) + "\n")
+                    total += 1
+                    if direction == "edit":
+                        n_edit_pairs += 1
+                    else:
+                        n_gold_pairs += 1
 
     print(f"Dataset:                      {args.dataset}")
     print(f"Prompting regime:             {args.prompting_regime}")
     print(f"Total written:                {total}")
+    print(f"  edit-direction pairs:       {n_edit_pairs}")
+    print(f"  gold-direction pairs:       {n_gold_pairs}")
     print(f"Samples without local edits:  {no_edits}")
     print(f"Skipped (chosen==rejected):   {skipped_degenerate}")
     print(f"Output:                       {args.output}")
