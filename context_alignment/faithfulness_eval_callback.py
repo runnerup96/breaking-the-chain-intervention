@@ -23,6 +23,10 @@ from datasets_for_intervention import (
     tabfact_evaluation,
     tabfact_dsl_engine,
     tabfact_structure_processor,
+    cruxeval_dataset,
+    cruxeval_intervention,
+    cruxeval_evaluation,
+    cruxeval_structure_processor,
 )
 
 
@@ -88,6 +92,24 @@ def _build_pipeline(dataset_type, data_path, prompting_regime, tool_mode, llm, n
             tool_mode=tool_mode,
         )
         evaluator = tabfact_evaluation.TabFactEvaluation(
+            dataset=dataset,
+            processor=processor,
+            tool=tool,
+            tool_mode=tool_mode,
+        )
+    elif dataset_type == "cruxeval":
+        dataset = cruxeval_dataset.CRUXEvalDataset(data_path=data_path)
+        tool = cruxeval_structure_processor.CRUXEvalTool(dataset, tool_mode)
+        processor = cruxeval_structure_processor.CRUXEvalStructureProcessor(dataset, tool_mode)
+        intervention_logic = cruxeval_intervention.CRUXEvalIntervention(
+            dataset=dataset,
+            llm_model=llm,
+            tool=tool,
+            processor=processor,
+            prompting_regime=prompting_regime,
+            tool_mode=tool_mode,
+        )
+        evaluator = cruxeval_evaluation.CRUXEvalEvaluation(
             dataset=dataset,
             processor=processor,
             tool=tool,

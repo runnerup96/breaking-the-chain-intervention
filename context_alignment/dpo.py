@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument("--logging-steps", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
 
-    parser.add_argument("--faithfulness-dataset", choices=["ricechem", "averitec", "tabfact"], default=None,
+    parser.add_argument("--faithfulness-dataset", choices=["ricechem", "averitec", "tabfact", "cruxeval"], default=None,
                         help="If set together with --faithfulness-data-path, run a faithfulness eval "
                              "(make_intervention pipeline + evaluator) on every checkpoint save.")
     parser.add_argument("--faithfulness-data-path", default=None,
