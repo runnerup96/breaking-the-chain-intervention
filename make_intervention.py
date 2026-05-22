@@ -259,7 +259,16 @@ if __name__ == "__main__":
     os.makedirs(save_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-    filename = f"{model_name2simple[args.model_name]}_{args.prompting_regime}_{timestamp}.json"
+
+    if args.model_name in model_name2simple:
+        model_simple = model_name2simple[args.model_name]
+    else:
+        # Local checkpoint path (.../<run_name>/merged) or unknown id:
+        # build a filesystem-safe slug from the path.
+        _parts = args.model_name.rstrip("/").split("/")
+        model_simple = _parts[-2] if _parts[-1] == "merged" and len(_parts) > 1 else _parts[-1]
+
+    filename = f"{model_simple}_{args.prompting_regime}_{timestamp}.json"
 
     n_total     = len(processed_samples_list)
     n_correct   = sum(1 for s in processed_samples_list if s.get("generation_status") == "correct")
@@ -269,7 +278,7 @@ if __name__ == "__main__":
     final_dict = {
         "meta": {
             "model":          args.model_name,
-            "model_simple":   model_name2simple.get(args.model_name, args.model_name),
+            "model_simple":   model_simple,
             "use_api":        args.use_api,
             "api_base_url":   args.api_base_url if args.use_api else None,
             "tokenizer_name": args.tokenizer_name,
