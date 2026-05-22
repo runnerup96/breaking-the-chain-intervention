@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -146,7 +147,10 @@ def split_averitec(data_path: str, ratios, seed: int):
     rng = random.Random(seed)
     per_split = {s: [] for s in SPLIT_NAMES}
     for label, samples in sorted(groups.items()):
-        split_map = _split_list(samples, ratios, random.Random(seed + hash(label) % (2**31)))
+        # Stable hash: builtin hash() of a str is randomised per process
+        # (PYTHONHASHSEED), which would make the split non-reproducible.
+        label_hash = int(hashlib.md5(label.encode("utf-8")).hexdigest(), 16)
+        split_map = _split_list(samples, ratios, random.Random(seed + label_hash % (2**31)))
         for s in SPLIT_NAMES:
             per_split[s].extend(split_map[s])
 
