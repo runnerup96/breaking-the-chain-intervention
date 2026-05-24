@@ -116,10 +116,11 @@ class CRUXEvalIntervention:
 
     def clean_llm_output(self, text):
         tokens_to_remove = [
-            '<|im_end|>', '<|endoftext|>', '<|im_start|>', '<|eot_id|>',
-            '<|end_of_text|>', '<|pad|>',
-            '<end_of_turn>', '</s>',
-            '\u00ad', '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff',
+            "<|im_end|>", "<|endoftext|>", "<|im_start|>", "<|eot_id|>",
+            "<|end_of_text|>", "<|pad|>",
+            "<end_of_turn>", "<|vision_pad|>", "<|eom_id|>", "<|finetune_right_pad_id|>",
+            "</s>",
+            "\u00ad", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff",
         ]
         for t in tokens_to_remove:
             text = text.replace(t, '')
@@ -147,6 +148,8 @@ class CRUXEvalIntervention:
         if self.processor.check_generation_format_mistakes(completion):
             return "error"
         if mediator_trace is None:
+            return "error"
+        if answer is None: 
             return "error"
         match = self.processor.compare_answers(gold_target, answer)
         if match is None:

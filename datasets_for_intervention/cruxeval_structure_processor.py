@@ -150,7 +150,14 @@ class CRUXEvalTool:
                         locs[k] = v
                 else:
                     locs[k] = v
-            entry = {"line": int(step["line"]), "locals": locs}
+            # Model can emit a non-integer "line" (e.g. a stray string token);
+            # treat that as a malformed step and skip the whole tool call rather
+            # than crashing the entire batch.
+            try:
+                line_no = int(step["line"])
+            except (ValueError, TypeError, KeyError):
+                return None
+            entry = {"line": line_no, "locals": locs}
             if step.get("nl_comment"):
                 entry["nl_comment"] = step["nl_comment"]
             canonical_trace.append(entry)
@@ -175,9 +182,25 @@ class CRUXEvalStructureProcessor:
 
     TOOL_ARGS_BLOCK_RE = re.compile(r"(?is)\bARGS\s*:\s*(?P<block>.*)$")
 
-    def __init__(self, dataset, tool_mode: str = "none"):
+    def __init__(self, dataset, tool_mode: str = "none", lenient_format: bool = False):
         self.dataset = dataset
         self.tool_mode = tool_mode if tool_mode != "none" else None
+        # sic! `lenient_format` is a per-model carve-out for
+        # `unsloth/Meta-Llama-3.1-8B-Instruct`, which under short prompts
+        # (`standard` / `tool:structured`) wraps its output in a
+        # ```python ... ``` markdown block and echoes the function definition
+        # *before* emitting the actual `Trace:` block. The strict gate in
+        # `check_generation_format_mistakes` (re.match at offset 0) rejected
+        # 788/788 such completions as "error" even though the mediator-trace
+        # parser, the final-answer parser, and the ARGS parser all tolerate
+        # that preamble (verified: ~785/788 mediator_trace populated,
+        # ~395/788 ARGS:{trace:...} populated). Setting this flag relaxes
+        # the gate from `re.match` to `re.search` so a `Trace:` token
+        # appearing anywhere in the completion suffices. The flag is opt-in
+        # at the CLI level (`--strip_md_wrap`) and saved JSON files produced
+        # under it get a `_stripmd` suffix so they are not confused with
+        # strict-mode dumps.
+        self.lenient_format = lenient_format
 
     # ---- mediator (trace) ----
 
@@ -301,6 +324,14 @@ class CRUXEvalStructureProcessor:
         s = (completion or "").strip()
         if not s:
             return True
+        if self.lenient_format:
+            # sic! Relaxed Llama-3.1-8B carve-out: accept `Trace:` anywhere in
+            # the completion (not just at offset 0) so a leading
+            # ```python ... ``` markdown wrap + echoed function source does
+            # not auto-classify the sample as `error`. See __init__ comment.
+            if not re.search(r"(?i)\btrace\s*:", s):
+                return True
+            return False
         if not re.match(r"(?i)trace\s*:", s):
             return True
         return False

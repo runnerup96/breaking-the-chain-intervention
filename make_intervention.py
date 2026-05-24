@@ -12,6 +12,102 @@ import hashlib
 
 import llm_model
 
+
+def _safe_json_default(o):
+    """Last-resort encoder for json.dump: any value that isn't natively
+    JSON-serializable degrades to a `repr()` string (or the obvious list
+    conversion for sets/ranges/ndarrays) instead of crashing the save.
+    """
+    if isinstance(o, (bytes, bytearray)):
+        return repr(o)
+    if isinstance(o, (set, frozenset)):
+        return list(o)
+    if isinstance(o, complex):
+        return repr(o)
+    if isinstance(o, range):
+        return list(o)
+    if isinstance(o, np.generic):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return repr(o)
+
+
+def _coerce_json_keys(obj):
+    """Walk obj and coerce dict keys that JSON cannot represent (anything that
+    is not str / int / float / bool / None) into their `repr()`. Returns a
+    sanitized copy; the original object is not mutated.
+    """
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if not isinstance(k, (str, int, float, bool)) and k is not None:
+                k = repr(k)
+            out[k] = _coerce_json_keys(v)
+        return out
+    if isinstance(obj, list):
+        return [_coerce_json_keys(x) for x in obj]
+    if isinstance(obj, tuple):
+        return [_coerce_json_keys(x) for x in obj]
+    return obj
+
+
+def _stringify_cruxeval_locals(samples_list):
+    """CRUXEval-only post-processing applied just before saving the JSON.
+
+    Keeps the `list[{"line": int, "locals": {...}}]` shape of `gold_trace` /
+    `mediator_trace`, but renders every value in each `locals` dict via
+    `repr()` so the saved value matches what the LLM sees in the prompt
+    (`trace_to_text` already serializes locals via `repr(v)`).
+
+    Side effects of doing this here, after evaluation has run:
+      - `gold_trace` and `mediator_trace` end up with the same shape
+        (locals: dict[str, str]), removing the current asymmetry between
+        native-Python gold locals and parsed-string mediator locals.
+      - Bytes / sets / dicts-with-tuple-keys hiding inside Python locals no
+        longer reach the JSON encoder, so the save can't crash mid-write.
+
+    Walks the two trace fields at the top level AND inside
+    `structure_intervention.{Local Edits, Correction}[i]`. Mutates in place.
+    """
+
+    def _strify_locals(locs):
+        if not isinstance(locs, dict):
+            return locs
+        return {str(k): repr(v) for k, v in locs.items()}
+
+    def _strify_trace(t):
+        if not isinstance(t, list):
+            return t
+        out = []
+        for step in t:
+            if not isinstance(step, dict):
+                out.append(step)
+                continue
+            new_step = dict(step)
+            if "locals" in new_step:
+                new_step["locals"] = _strify_locals(new_step["locals"])
+            out.append(new_step)
+        return out
+
+    def _apply(sample):
+        if not isinstance(sample, dict):
+            return
+        if "gold_trace" in sample:
+            sample["gold_trace"] = _strify_trace(sample["gold_trace"])
+        if "mediator_trace" in sample:
+            sample["mediator_trace"] = _strify_trace(sample["mediator_trace"])
+        si = sample.get("structure_intervention")
+        if isinstance(si, dict):
+            for sub_list in si.values():
+                if isinstance(sub_list, list):
+                    for sub in sub_list:
+                        _apply(sub)
+
+    for s in samples_list:
+        _apply(s)
+
+
 from datasets_for_intervention import (
     ricechem_intervention, ricechem_dataset, ricechem_evaluation, ricechem_structure_processor,
     averitec_intervention, averitec_dataset, averitec_evaluation, averitec_structure_processor,
@@ -101,6 +197,21 @@ if __name__ == "__main__":
         help='CRUXEval Local Edit sampling: "all" or "one" per sample.'
     )
 
+    # sic! Llama-3.1-8B-Instruct under short prompts (`standard` / `tool:structured`)
+    # wraps its output in ```python ... ``` and echoes the function source before
+    # emitting `Trace:`. The default strict format gate rejects 788/788 such
+    # completions even though the trace/answer/args parsers tolerate the wrap.
+    # This opt-in flag relaxes the gate (re.match -> re.search) and tags the
+    # saved JSON with a `_stripmd` filename suffix so it can be distinguished
+    # from strict-mode dumps. CRUXEval-only.
+    parser.add_argument(
+        "--strip_md_wrap", action="store_true",
+        help=("CRUXEval-only / Llama-3.1-8B carve-out: relax the strict "
+              "'completion must start with Trace:' format gate to accept a "
+              "Trace: block anywhere in the completion. Saved file gets a "
+              "`_stripmd` suffix so it does not collide with strict-mode dumps.")
+    )
+
     args = parser.parse_args()
     fix_seed(args.seed)
 
@@ -171,7 +282,11 @@ if __name__ == "__main__":
         dataset_path = os.path.join(project_path, "statics/datasets/CRUXEval")
         dataset = cruxeval_dataset.CRUXEvalDataset(data_path=dataset_path)
         tool = cruxeval_structure_processor.CRUXEvalTool(dataset, args.tool_mode)
-        processor = cruxeval_structure_processor.CRUXEvalStructureProcessor(dataset, args.tool_mode)
+        # sic! `lenient_format` propagates `--strip_md_wrap` to the format gate;
+        # see CRUXEvalStructureProcessor.__init__ for the rationale.
+        processor = cruxeval_structure_processor.CRUXEvalStructureProcessor(
+            dataset, args.tool_mode, lenient_format=args.strip_md_wrap
+        )
         cruxeval_levels = [int(x) for x in args.cruxeval_levels.split(",") if x.strip()]
         intervention_logic = cruxeval_intervention.CRUXEvalIntervention(
             dataset=dataset,
@@ -251,7 +366,16 @@ if __name__ == "__main__":
     os.makedirs(save_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-    filename = f"{model_name2simple[args.model_name]}_{args.prompting_regime}_{timestamp}.json"
+    # sic! Lenient-format dumps get a `_stripmd` suffix so they don't shadow
+    # strict-mode files for the same (model, regime, tool_mode).
+    fname_suffix = "_stripmd" if (args.evaluation_dataset == "cruxeval" and args.strip_md_wrap) else ""
+    filename = f"{model_name2simple[args.model_name]}_{args.prompting_regime}_{timestamp}{fname_suffix}.json"
+
+    # CRUXEval: render every trace `locals` value via repr() so the saved
+    # `gold_trace` / `mediator_trace` have the same shape and match what the
+    # LLM sees in the prompt. Done AFTER evaluation, so metrics are unaffected.
+    if args.evaluation_dataset == "cruxeval":
+        _stringify_cruxeval_locals(processed_samples_list)
 
     n_total     = len(processed_samples_list)
     n_correct   = sum(1 for s in processed_samples_list if s.get("generation_status") == "correct")
@@ -275,6 +399,7 @@ if __name__ == "__main__":
             "seed":          args.seed,
             "try_one_batch": args.try_one_batch,
             "timestamp":     timestamp,
+            "strip_md_wrap": bool(args.strip_md_wrap),
 
             "total_samples":  n_total,
             "n_correct":      n_correct,
@@ -289,6 +414,12 @@ if __name__ == "__main__":
     }
 
     with open(os.path.join(save_dir, filename), "w", encoding="utf-8") as f:
-        json.dump(final_dict, f, ensure_ascii=False, indent=2)
+        json.dump(
+            _coerce_json_keys(final_dict),
+            f,
+            ensure_ascii=False,
+            indent=2,
+            default=_safe_json_default,
+        )
 
     print(f"\nSaved {len(processed_samples_list)} samples + metrics → {filename}")
