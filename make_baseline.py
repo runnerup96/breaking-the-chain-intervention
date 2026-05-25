@@ -34,6 +34,52 @@ from torch.utils.data import DataLoader
 
 import llm_model
 
+
+def _safe_json_default(o):
+    """Fallback encoder for json.dump that handles non-JSON-native values
+    (e.g. bytes/bytearray, set/frozenset, complex, range, numpy scalars).
+    Anything unknown degrades to repr() rather than crashing mid-write.
+    NOTE: json's default= only intercepts VALUES; non-string dict keys must be
+    coerced separately via _coerce_json_keys before calling json.dump.
+    """
+    if isinstance(o, (bytes, bytearray)):
+        try:
+            return o.decode("utf-8")
+        except (UnicodeDecodeError, AttributeError):
+            return repr(o)
+    if isinstance(o, (set, frozenset)):
+        return list(o)
+    if isinstance(o, complex):
+        return repr(o)
+    if isinstance(o, range):
+        return list(o)
+    if isinstance(o, np.generic):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return repr(o)
+
+
+def _coerce_json_keys(obj):
+    """Recursively walk obj and coerce dict keys that are not (str, int, float,
+    bool, None) into their repr() string. Values are walked but not mutated
+    (handled at json.dump time via _safe_json_default). Returns a sanitized
+    copy; the original object is not modified.
+    """
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if not isinstance(k, (str, int, float, bool)) and k is not None:
+                k = repr(k)
+            out[k] = _coerce_json_keys(v)
+        return out
+    if isinstance(obj, list):
+        return [_coerce_json_keys(x) for x in obj]
+    if isinstance(obj, tuple):
+        return [_coerce_json_keys(x) for x in obj]
+    return obj
+
+
 from datasets_for_intervention import (
     ricechem_dataset,
     averitec_dataset,
@@ -255,6 +301,12 @@ if __name__ == "__main__":
 
     out_path = os.path.join(save_dir, filename)
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(final_dict, f, ensure_ascii=False, indent=2)
+        json.dump(
+            _coerce_json_keys(final_dict),
+            f,
+            ensure_ascii=False,
+            indent=2,
+            default=_safe_json_default,
+        )
 
     print(f"\nSaved {n_total} samples + metrics → {out_path}")
